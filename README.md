@@ -66,10 +66,10 @@ These instructions start from a clean Windows x64 machine. Run the installation 
    ffprobe -version
    ```
 
-8. Clone the repository and enter it. Replace `<repository-url>` with this repository's HTTPS or SSH clone URL.
+8. Clone the repository and enter it.
 
    ```powershell
-   git clone <repository-url> nzyte_tv
+   git clone https://github.com/Philrichardson85/nzyte-tv.git nzyte_tv
    Set-Location nzyte_tv
    ```
 
@@ -166,7 +166,7 @@ dotnet --version
 Then clone, build, test, and run:
 
 ```bash
-git clone <repository-url> nzyte_tv
+git clone https://github.com/Philrichardson85/nzyte-tv.git nzyte_tv
 cd nzyte_tv
 dotnet restore NzyteTv.slnx
 dotnet build NzyteTv.slnx --no-restore
