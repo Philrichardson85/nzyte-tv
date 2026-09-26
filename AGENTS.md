@@ -9,9 +9,13 @@ Primary targets:
 - Windows x64
 - Linux ARM64
 - Raspberry Pi 4 Model B / 4 GB
-- Ubuntu 22.04 Linux
+- Ubuntu 24.04 ARM64 Linux
 
 Target framework: .NET 10.
+
+Linux ARM64 must remain supported. The verified deployment environment is Ubuntu Desktop 24.04.5 LTS on a Raspberry Pi 4 with FFmpeg/FFprobe `6.1.1-3ubuntu5`.
+
+Do not introduce Windows-only paths, path separators, process assumptions, or APIs into shared application code.
 
 ## Media
 
@@ -25,9 +29,23 @@ Use `ProcessStartInfo.ArgumentList` for arguments.
 
 Assume file paths can contain spaces, apostrophes, parentheses, Unicode, and other valid filesystem characters.
 
+Preserve paths with spaces and capitalization. Do not split or reconstruct media paths through shell strings.
+
+Do not assume OMX exists. The verified Ubuntu FFmpeg build includes `--disable-omx`.
+
+Do not assume that an encoder listed by FFmpeg is usable on Raspberry Pi hardware or produces compliant broadcast output. `h264_v4l2m2m` availability is confirmed, but its tested output is not yet validated for NZYTE TV because the synthetic test produced timestamp and initial-picture/keyframe problems. Keep software `libx264` as the verified normalization path unless a behavioral change is explicitly designed and tested.
+
+Media-library scanners must filter an explicit, case-insensitive allowlist of supported media-file extensions. They must not treat every file in a category directory as playable media, and must ignore filesystem metadata such as `System Volume Information`.
+
+Batch normalization must preserve source-relative category paths, reject overlapping source and destination roots, and prevent multiple sources from overwriting the same normalized destination. A per-file failure must be recorded without aborting later files; cancellation is the exception and must stop promptly.
+
+Existing batch destinations may be treated as resumable skips only after independent verification passes. Invalid existing destinations must never be silently counted as broadcast ready.
+
 ## Safety
 
-Never overwrite original media unless the user explicitly requests it. Even explicit output overwrite behavior must not permit a source file to be used as its own destination.
+Source media must never be overwritten during normalization unless the product behavior is explicitly changed, reviewed, documented, and tested. Current `--overwrite` behavior replaces only an existing destination and must never permit a source file to be used as its own destination.
+
+Normalization output must pass automatic verification before it is published or treated as broadcast ready. A successful FFmpeg exit code alone is insufficient.
 
 Never commit credentials, API keys, YouTube stream keys, passwords, or tokens. Future YouTube stream keys must never be stored in source control.
 

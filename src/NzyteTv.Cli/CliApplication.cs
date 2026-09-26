@@ -38,6 +38,15 @@ public static class CliApplication
                 CommandKind.Verify => await VerifyAsync(command.Input!, verifier, cancellationToken).ConfigureAwait(false),
                 CommandKind.Normalize => await NormalizeAsync(
                     command.Input!, command.Overwrite, tools.Ffmpeg, runner, analyzer, verifier, cancellationToken).ConfigureAwait(false),
+                CommandKind.NormalizeLibrary => await NormalizeLibraryAsync(
+                    command.Input!,
+                    command.Destination!,
+                    command.Overwrite,
+                    tools.Ffmpeg,
+                    runner,
+                    analyzer,
+                    verifier,
+                    cancellationToken).ConfigureAwait(false),
                 _ => 2,
             };
         }
@@ -150,6 +159,43 @@ public static class CliApplication
         return 0;
     }
 
+    private static async Task<int> NormalizeLibraryAsync(
+        string sourceRoot,
+        string destinationRoot,
+        bool overwrite,
+        string ffmpegPath,
+        IProcessRunner runner,
+        IMediaAnalyzer analyzer,
+        IMediaVerifier verifier,
+        CancellationToken cancellationToken)
+    {
+        string source = Path.GetFullPath(sourceRoot);
+        string destination = Path.GetFullPath(destinationRoot);
+        Console.WriteLine("NZYTE TV Library Normalization");
+        Console.WriteLine();
+        Console.WriteLine($"Source root:      {source}");
+        Console.WriteLine($"Destination root: {destination}");
+        Console.WriteLine($"Overwrite:         {(overwrite ? "yes" : "no")}");
+        Console.WriteLine();
+
+        var fileNormalizer = new MediaNormalizer(ffmpegPath, runner, analyzer, verifier);
+        var libraryNormalizer = new MediaLibraryNormalizer(
+            new MediaLibraryDiscovery(),
+            fileNormalizer,
+            verifier);
+        var progress = new InlineProgress<LibraryNormalizationProgress>(PrintLibraryProgress);
+
+        LibraryNormalizationResult result = await libraryNormalizer.NormalizeAsync(
+            source,
+            destination,
+            overwrite,
+            progress,
+            cancellationToken).ConfigureAwait(false);
+
+        PrintLibrarySummary(result);
+        return result.ExitCode;
+    }
+
     public static void PrintVerification(VerificationResult result)
     {
         Console.WriteLine("NZYTE TV Broadcast Verification");
@@ -179,6 +225,7 @@ public static class CliApplication
             Console.WriteLine("Usage:");
             Console.WriteLine("  nzytetv inspect <input>");
             Console.WriteLine("  nzytetv normalize <input> [--overwrite]");
+            Console.WriteLine("  nzytetv normalize-library <source-root> <destination-root> [--overwrite]");
             Console.WriteLine("  nzytetv verify <input>");
             Console.WriteLine();
             Console.WriteLine("Run 'nzytetv <command> --help' for command-specific help.");
@@ -195,6 +242,11 @@ public static class CliApplication
                 Console.WriteLine("Usage: nzytetv normalize <input> [--overwrite]");
                 Console.WriteLine("Create ./BroadcastReady/<original-name>.mp4 and verify it.");
                 Console.WriteLine("--overwrite  Replace an existing destination; the source is never replaced.");
+                break;
+            case CommandKind.NormalizeLibrary:
+                Console.WriteLine("Usage: nzytetv normalize-library <source-root> <destination-root> [--overwrite]");
+                Console.WriteLine("Recursively normalize supported videos while preserving relative folders.");
+                Console.WriteLine("--overwrite  Replace existing destinations; source files are never replaced.");
                 break;
             case CommandKind.Verify:
                 Console.WriteLine("Usage: nzytetv verify <input>");
@@ -221,6 +273,75 @@ public static class CliApplication
         >= 1024 => $"{bytes / 1024d:0.##} KiB",
         _ => $"{bytes} B",
     };
+
+    private static void PrintLibraryProgress(LibraryNormalizationProgress value)
+    {
+        switch (value.Stage)
+        {
+            case LibraryProgressStage.Starting:
+                Console.WriteLine($"[{value.Index}/{value.Total}] Normalizing");
+                Console.WriteLine($"Source:      {value.SourcePath}");
+                Console.WriteLine($"Destination: {value.DestinationPath}");
+                break;
+            case LibraryProgressStage.Normalizing:
+                string percentage = value.Percent.HasValue ? $" {value.Percent.Value,6:0.0}%" : string.Empty;
+                Console.Write($"\r{value.Detail ?? "Working",-12} elapsed {FormatElapsed(value.FileElapsed)}{percentage}   ");
+                break;
+            case LibraryProgressStage.VerifyingExisting:
+                Console.WriteLine("Checking existing destination verification...");
+                break;
+            case LibraryProgressStage.Complete:
+                Console.WriteLine();
+                Console.WriteLine($"Complete:     {FormatElapsed(value.FileElapsed)}");
+                Console.WriteLine("Verification: PASS");
+                Console.WriteLine();
+                break;
+            case LibraryProgressStage.Skipped:
+                Console.WriteLine($"Skipped:      {value.Detail}");
+                Console.WriteLine("Verification: PASS");
+                Console.WriteLine();
+                break;
+            case LibraryProgressStage.Failed:
+                Console.WriteLine();
+                Console.WriteLine($"Failed:       {value.Detail}");
+                Console.WriteLine();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static void PrintLibrarySummary(LibraryNormalizationResult result)
+    {
+        Console.WriteLine("NZYTE TV Library Normalization Summary");
+        Console.WriteLine();
+        Console.WriteLine($"Discovered video files: {result.DiscoveredVideoFiles,6}");
+        Console.WriteLine($"Normalized:             {result.Normalized,6}");
+        Console.WriteLine($"Skipped existing:       {result.SkippedExisting,6}");
+        Console.WriteLine($"Failed:                 {result.Failed,6}");
+        Console.WriteLine($"Verified ready:         {result.VerifiedReady,6}");
+        Console.WriteLine($"Elapsed:                {FormatElapsed(result.Elapsed),6}");
+
+        LibraryFileResult[] failures = result.Files
+            .Where(file => file.Status == LibraryFileStatus.Failed)
+            .ToArray();
+        if (failures.Length == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Failures:");
+        foreach (LibraryFileResult failure in failures)
+        {
+            Console.WriteLine($"- {failure.SourcePath}");
+            Console.WriteLine($"  Destination: {failure.DestinationPath}");
+            Console.WriteLine($"  Reason: {failure.FailureReason}");
+        }
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
 
     private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
     {

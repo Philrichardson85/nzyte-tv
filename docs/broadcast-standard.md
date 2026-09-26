@@ -1,43 +1,130 @@
 # NZYTE TV broadcast standard
 
-Every file admitted to the future NZYTE TV broadcast library must first be normalized and then pass independent verification. A successful FFmpeg exit code alone is not sufficient.
+Every file admitted to a future NZYTE TV broadcast library must first be normalized and pass verification. A successful FFmpeg process alone is not sufficient.
 
 ## Required format
 
-| Area | Requirement | Reason |
+| Area | Requirement | Normalization setting or verification rule |
 |---|---|---|
-| Container | MP4 with `+faststart` | Widely supported; moves MP4 metadata to the beginning for prompt access. |
-| Video codec | H.264/AVC, `libx264`, High profile | Hardware- and platform-friendly delivery format with a predictable encoder. |
-| Pixel format | `yuv420p` | Broad decoder and platform compatibility. |
-| Canvas | 1920x1080 | One stable output geometry for broadcast. |
-| Aspect ratio | Scale to fit, then pad | Preserves the source image without stretching or cropping. |
-| Frame rate | Constant 30 fps | Gives scheduling and keyframe cadence a deterministic time base. |
-| GOP | 60 frames | At 30 fps, 60 frames is exactly two seconds. |
-| Keyframes | `-g 60 -keyint_min 60 -sc_threshold 0` | Enforces the two-second cadence and prevents scene cuts from adding extra keyframes. |
-| Video rate | 6000 kbps target/max, 12000 kbps buffer | Provides a bounded, predictable delivery bitrate. |
-| Audio | AAC, 48 kHz, stereo, 192 kbps | Provides a uniform stream layout and standard broadcast sample rate. |
+| Container | Usable MP4 | MP4 output with `+faststart`; FFprobe must identify an MP4-compatible container |
+| Video codec | H.264/AVC | Software encoder `libx264`; verifier requires H.264 |
+| Video profile | High | `-profile:v high` |
+| Pixel format | `yuv420p` | `-pix_fmt yuv420p` |
+| Resolution | 1920x1080 | Scale to fit and pad; never stretch the source |
+| Frame rate | Constant 30 fps | `-r 30 -fps_mode cfr`; verifier tolerance is 0.01 fps |
+| GOP | 60 frames | 60 frames at 30 fps is two seconds |
+| Keyframes | Approximately every 2.000 seconds | `-g 60 -keyint_min 60 -sc_threshold 0`; actual timestamp tolerance is 0.100 seconds |
+| Video bitrate | 6000 kbps target and maximum | `-b:v 6000k -maxrate 6000k -bufsize 12000k` |
+| Audio codec | AAC | `-c:a aac` |
+| Audio sample rate | 48 kHz | `-ar 48000` |
+| Audio layout | Stereo | `-ac 2` |
+| Audio bitrate | 192 kbps target | `-b:a 192k` |
 
-Video-only sources receive a silent stereo AAC track. This keeps downstream broadcasting simple because every accepted file has one video stream and one audio stream.
+Video-only sources receive a silent 48 kHz stereo AAC track so every normalized file has a consistent video-plus-audio stream layout.
+
+## Aspect-ratio handling
+
+Normalization scales the source down or up to fit inside 1920x1080 while preserving its aspect ratio, then pads the unused area. The source is not stretched or cropped.
+
+The current media library includes `Vlog 2 episode 3.mp4` at 2628x1440. It is a useful future scale-and-pad regression case, but that specific file has not yet been recorded as a completed normalization reference.
 
 ## Why keyframes are verified from timestamps
 
-The real test that established this rule used an original H.264/AAC 1080p file on the Raspberry Pi. FFmpeg streamed that file successfully using stream copy, but YouTube reported poor stream health because its keyframes were too far apart.
+The operational test that established the keyframe requirement used an original H.264/AAC 1080p file on the Raspberry Pi. FFmpeg successfully streamed it using stream copy, but YouTube reported poor stream health because keyframes were too far apart.
 
-The file was normalized with a two-second keyframe interval. The normalized file was then streamed with FFmpeg using `-c copy`, and YouTube reported **Excellent** stream health.
+After the file was normalized to a two-second keyframe interval, it was streamed again with FFmpeg using `-c copy`, and YouTube reported **Excellent** stream health.
 
-Container or codec metadata does not prove where keyframes actually occur. NZYTE TV therefore asks FFprobe for real keyframe frames, reads their timestamps, and calculates consecutive intervals. Each interval must be approximately 2.000 seconds with a 0.100-second tolerance. A long file with no consecutive interval cannot pass. The first keyframe must also occur at the beginning within the same tolerance.
+Codec and GOP metadata do not prove where keyframes actually occur. NZYTE TV therefore asks FFprobe for actual keyframe frames, reads their timestamps, and calculates intervals between consecutive keyframes. Each interval must be within 0.100 seconds of 2.000 seconds. The first keyframe must be at the beginning within the same tolerance. A long file without enough keyframes to establish the cadence fails.
 
-This admission check is the foundation for later stream-copy broadcasting: future scheduling and broadcast components can rely on every library file already having the required cadence and stream layout.
+## Verified Raspberry Pi reference case
 
-## Verification checks
+The following real file was inspected, rejected by verification, normalized, automatically verified, and then independently verified on the Raspberry Pi 4.
 
-Independent verification requires:
+### Source
 
-- a usable MP4 container;
-- an H.264 High-profile video stream;
-- 1920x1080 `yuv420p` video;
-- a frame rate within 0.01 fps of 30;
-- actual keyframe timestamps at approximately two-second intervals;
-- an AAC audio stream at 48,000 Hz with two channels.
+```text
+Lady Lady - Nzyte (Official Music Video).mp4
+```
 
-Any failed check makes the file **NOT BROADCAST READY** and produces a non-zero process exit code.
+Before normalization:
+
+| Property | Source value | Initial verification |
+|---|---:|---|
+| Container | Usable MP4 | PASS |
+| Video stream | Present | PASS |
+| Video codec/profile | H.264 High | PASS |
+| Resolution | 2560x1440 | FAIL |
+| Frame rate | 24 fps | FAIL |
+| Pixel format | `yuv420p` | PASS |
+| Keyframe spacing | 6.25 seconds | FAIL |
+| Video bitrate | Approximately 18.6 Mbps | Informational |
+| Audio stream | Present | PASS |
+| Audio codec | AAC | PASS |
+| Audio sample rate | 44.1 kHz | FAIL |
+| Audio channels | Stereo | PASS |
+| Duration | 2:27.098 | Informational |
+| File size | Approximately 330.35 MiB | Informational |
+
+The initial result was `RESULT: NOT BROADCAST READY`.
+
+### Normalization
+
+The command was run with `/srv/nzyte-tv/work` as the current directory. It produced:
+
+```text
+/srv/nzyte-tv/work/BroadcastReady/Lady Lady - Nzyte (Official Music Video).mp4
+```
+
+Normalization plus automatic verification took 13 minutes 38 seconds on the Raspberry Pi 4. This is a measured reference, not a guaranteed duration for other media.
+
+### Normalized result
+
+| Property | Normalized value | Verification |
+|---|---:|---|
+| Container | Usable MP4 | PASS |
+| Video codec/profile | H.264 High | PASS |
+| Resolution | 1920x1080 | PASS |
+| Frame rate | 30 fps | PASS |
+| Pixel format | `yuv420p` | PASS |
+| Keyframe spacing | 2 seconds | PASS |
+| Video bitrate | Approximately 5926.9 kbps | Informational |
+| Audio codec | AAC | PASS |
+| Audio sample rate | 48 kHz | PASS |
+| Audio channels | Stereo | PASS |
+| Audio bitrate | Approximately 200.2 kbps | Informational |
+| Duration | 2:27.100 | Informational |
+| File size | Approximately 107.6 MiB | Informational |
+
+An independent `verify` command after normalization reported:
+
+```text
+RESULT: BROADCAST READY
+```
+
+All required checks passed.
+
+## Hardware encoder status
+
+The deployed Ubuntu FFmpeg build lists and can start the Raspberry Pi's `h264_v4l2m2m` hardware encoder. A synthetic 1280x720 30 fps test ran at approximately 5.06x real time using `/dev/video11` and the `bcm2835-codec-encode` device.
+
+That test also emitted `Non-monotonic DTS`, and later FFprobe output reported a missing keyframe or missing picture at the beginning. Consequently, hardware availability is confirmed, but that output path is **not validated** for NZYTE TV's broadcast standard.
+
+The current verified normalization workflow uses software `libx264`. Do not substitute a listed hardware encoder without representative normalization, timestamp, and independent verification tests.
+
+## Verification result
+
+Independent verification requires every one of these checks to pass:
+
+- usable MP4;
+- video stream present;
+- H.264 High;
+- 1920x1080;
+- 30 fps within tolerance;
+- `yuv420p`;
+- actual two-second keyframe cadence;
+- audio stream present;
+- AAC;
+- 48 kHz;
+- stereo.
+
+Any failed check produces `RESULT: NOT BROADCAST READY` and a non-zero process exit code. Only an all-pass report produces `RESULT: BROADCAST READY`.

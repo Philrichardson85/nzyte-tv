@@ -5,10 +5,16 @@ public enum CommandKind
     RootHelp,
     Inspect,
     Normalize,
+    NormalizeLibrary,
     Verify,
 }
 
-public sealed record ParsedCommand(CommandKind Kind, string? Input = null, bool Overwrite = false, bool ShowHelp = false);
+public sealed record ParsedCommand(
+    CommandKind Kind,
+    string? Input = null,
+    bool Overwrite = false,
+    bool ShowHelp = false,
+    string? Destination = null);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
 {
@@ -28,6 +34,7 @@ public static class CommandLineParser
         {
             "inspect" => CommandKind.Inspect,
             "normalize" => CommandKind.Normalize,
+            "normalize-library" => CommandKind.NormalizeLibrary,
             "verify" => CommandKind.Verify,
             _ => null,
         };
@@ -54,9 +61,9 @@ public static class CommandLineParser
             }
             else if (!optionsEnded && argument == "--overwrite")
             {
-                if (kind != CommandKind.Normalize)
+                if (kind is not (CommandKind.Normalize or CommandKind.NormalizeLibrary))
                 {
-                    return Failure("--overwrite is valid only for the normalize command.");
+                    return Failure("--overwrite is valid only for normalize and normalize-library.");
                 }
 
                 overwrite = true;
@@ -71,12 +78,20 @@ public static class CommandLineParser
             }
         }
 
-        if (inputs.Count != 1)
+        int requiredInputs = kind == CommandKind.NormalizeLibrary ? 2 : 1;
+        if (inputs.Count != requiredInputs)
         {
-            return Failure($"The {args[0]} command requires exactly one input file.");
+            string requirement = requiredInputs == 1
+                ? "exactly one input file"
+                : "a source root and a destination root";
+            return Failure($"The {args[0]} command requires {requirement}.");
         }
 
-        return Success(new ParsedCommand(kind.Value, inputs[0], overwrite));
+        return Success(new ParsedCommand(
+            kind.Value,
+            inputs[0],
+            overwrite,
+            Destination: inputs.Count > 1 ? inputs[1] : null));
     }
 
     private static bool IsHelp(string argument) => argument is "--help" or "-h";

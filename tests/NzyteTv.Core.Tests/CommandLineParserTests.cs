@@ -15,6 +15,39 @@ public sealed class CommandLineParserTests
         Assert.True(result.Command.Overwrite);
     }
 
+    [Fact]
+    public void Parse_NormalizeLibrary_ReturnsBothRootsAndOverwrite()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "normalize-library",
+            "/srv/nzyte-tv/media",
+            "/srv/nzyte-tv/work/BroadcastReady",
+            "--overwrite",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.NormalizeLibrary, result.Command!.Kind);
+        Assert.Equal("/srv/nzyte-tv/media", result.Command.Input);
+        Assert.Equal("/srv/nzyte-tv/work/BroadcastReady", result.Command.Destination);
+        Assert.True(result.Command.Overwrite);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidLibraryArguments))]
+    public void Parse_NormalizeLibraryWithWrongRootCount_ReturnsUsageError(string[] arguments)
+    {
+        CommandParseResult result = CommandLineParser.Parse(arguments);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("source root and a destination root", result.Error, StringComparison.Ordinal);
+    }
+
+    public static TheoryData<string[]> InvalidLibraryArguments => new()
+    {
+        { ["normalize-library", "source"] },
+        { ["normalize-library", "source", "destination", "extra"] },
+    };
+
     [Theory]
     [InlineData("inspect")]
     [InlineData("verify")]
