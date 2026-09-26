@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [win-x64, linux-x64, linux-arm64]
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish ${{ matrix.runtime }}
+        run: >-
+          dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj
+          --configuration Release
+          --runtime ${{ matrix.runtime }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output artifacts/${{ matrix.runtime }}
+
+      - name: Package ${{ matrix.runtime }}
+        shell: pwsh
+        run: Compress-Archive -Path "artifacts/${{ matrix.runtime }}/*" -DestinationPath "nzytetv-${{ matrix.runtime }}.zip"
+
+      - name: Upload packaged application
+        uses: actions/upload-artifact@v4
+        with:
+          name: nzytetv-${{ matrix.runtime }}
+          path: nzytetv-${{ matrix.runtime }}.zip
+          if-no-files-found: error
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nzytetv-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" ./*.zip --generate-notes --verify-tag

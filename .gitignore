@@ -1,0 +1,35 @@
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# JetBrains Rider
+*.sln.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local media and normalization output
+BroadcastReady/
+*.partial.mp4
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+secrets.json
