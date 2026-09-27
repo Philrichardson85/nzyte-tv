@@ -66,8 +66,10 @@ public sealed class PlaylistGenerator
                     asset,
                     preferredTypes.Contains(asset.Type),
                     IsExactAssetAllowed(asset, state, policy, playTime),
-                    IsContentGroupAllowed(asset, state, policy, playTime),
-                    IsVlogAllowed(asset, state, policy),
+                    IsContentGroupPreferred(asset, state, policy, playTime),
+                    IsContentGroupFloorAllowed(asset, state, policy, playTime),
+                    IsVlogPreferred(asset, state, policy),
+                    IsVlogWithinNormalLimit(asset, state, policy),
                     IsCadenceOverdue(asset.Type, state, policy, playTime),
                     state.GetLastAssetPlay(asset.AssetId)))
                 .ToArray();
@@ -89,14 +91,24 @@ public sealed class PlaylistGenerator
                 relaxation.HotPreference++;
             }
 
-            if (!selected.ContentGroupAllowed)
+            if (!selected.ContentGroupPreferred && selected.ContentGroupFloorAllowed)
             {
                 relaxation.ContentGroup++;
             }
 
-            if (!selected.VlogAllowed)
+            if (!selected.ContentGroupFloorAllowed)
+            {
+                relaxation.EmergencyContentGroupFloor++;
+            }
+
+            if (!selected.VlogPreferred)
             {
                 relaxation.ConsecutiveVlog++;
+            }
+
+            if (!selected.VlogWithinNormalLimit)
+            {
+                relaxation.EmergencyVlogRun++;
             }
 
             CountCadenceMisses(
@@ -132,7 +144,9 @@ public sealed class PlaylistGenerator
             ExactAssetCooldownRelaxations = relaxation.ExactAsset,
             NewReleasePreferenceBypasses = relaxation.HotPreference,
             ContentGroupCooldownRelaxations = relaxation.ContentGroup,
+            EmergencyContentGroupFloorViolations = relaxation.EmergencyContentGroupFloor,
             ConsecutiveVlogViolations = relaxation.ConsecutiveVlog,
+            EmergencyVlogRunViolations = relaxation.EmergencyVlogRun,
             BumperCadenceMisses = relaxation.BumperCadence,
             PromoCadenceMisses = relaxation.PromoCadence,
             InterstitialCadenceMisses = relaxation.InterstitialCadence,
@@ -182,7 +196,7 @@ public sealed class PlaylistGenerator
         DateTimeOffset playTime,
         StableRandom random)
     {
-        for (int stage = 0; stage <= 2; stage++)
+        for (int stage = 0; stage <= 4; stage++)
         {
             CandidateEvaluation[] baseCandidates = candidates.Where(candidate => stage switch
             {
@@ -191,7 +205,12 @@ public sealed class PlaylistGenerator
                 _ => true,
             }).ToArray();
             CandidateEvaluation[] available = baseCandidates
-                .Where(candidate => candidate.ContentGroupAllowed && candidate.VlogAllowed)
+                .Where(candidate => stage switch
+                {
+                    <= 2 => candidate.ContentGroupPreferred && candidate.VlogPreferred,
+                    3 => candidate.ContentGroupPreferred && candidate.VlogWithinNormalLimit,
+                    _ => candidate.ContentGroupFloorAllowed && candidate.VlogWithinNormalLimit,
+                })
                 .ToArray();
             if (available.Length == 0)
             {
@@ -199,8 +218,8 @@ public sealed class PlaylistGenerator
                 {
                     CandidateEvaluation[] overdueCadence = candidates
                         .Where(candidate => candidate.CadenceOverdue
-                            && candidate.ContentGroupAllowed
-                            && candidate.VlogAllowed)
+                            && candidate.ContentGroupPreferred
+                            && candidate.VlogPreferred)
                         .ToArray();
                     if (overdueCadence.Length > 0)
                     {
@@ -224,19 +243,29 @@ public sealed class PlaylistGenerator
             return new CandidateSelection(selected, hotPreferenceBypassed);
         }
 
-        CandidateEvaluation[] songRelaxed = candidates.Where(candidate => candidate.VlogAllowed).ToArray();
-        if (songRelaxed.Length > 0)
+        CandidateEvaluation[] emergencyVlogRun = candidates
+            .Where(candidate => candidate.ContentGroupFloorAllowed)
+            .ToArray();
+        if (emergencyVlogRun.Length > 0)
         {
             return new CandidateSelection(
-                WeightedChoice(songRelaxed, policy, playTime, random),
+                WeightedChoice(emergencyVlogRun, policy, playTime, random),
+                HotPreferenceBypassed: false);
+        }
+
+        CandidateEvaluation[] emergencyContentGroupFloor = candidates
+            .Where(candidate => candidate.VlogWithinNormalLimit)
+            .ToArray();
+        if (emergencyContentGroupFloor.Length > 0)
+        {
+            return new CandidateSelection(
+                WeightedChoice(emergencyContentGroupFloor, policy, playTime, random),
                 HotPreferenceBypassed: false);
         }
 
         if (candidates.Count > 0)
         {
-            return new CandidateSelection(
-                WeightedChoice(candidates, policy, playTime, random),
-                HotPreferenceBypassed: false);
+            return new CandidateSelection(WeightedChoice(candidates, policy, playTime, random), false);
         }
 
         throw new InvalidOperationException("Playlist scheduling made no progress because no candidates are available.");
@@ -373,7 +402,7 @@ public sealed class PlaylistGenerator
         !state.LastAssetPlay.TryGetValue(asset.AssetId, out DateTimeOffset previous)
         || playTime - previous >= policy.ExactAssetCooldown;
 
-    private static bool IsContentGroupAllowed(
+    private static bool IsContentGroupPreferred(
         PlaylistAsset asset,
         SchedulerState state,
         PlaylistPolicy policy,
@@ -382,10 +411,26 @@ public sealed class PlaylistGenerator
         || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
         || playTime - previous >= policy.ContentGroupCooldown;
 
-    private static bool IsVlogAllowed(PlaylistAsset asset, SchedulerState state, PlaylistPolicy policy) =>
+    private static bool IsContentGroupFloorAllowed(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy,
+        DateTimeOffset playTime) =>
+        string.IsNullOrWhiteSpace(asset.ContentGroupId)
+        || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
+        || playTime - previous >= policy.ContentGroupMinimumCooldown;
+
+    private static bool IsVlogPreferred(PlaylistAsset asset, SchedulerState state, PlaylistPolicy policy) =>
         !policy.AvoidConsecutiveVlogs
         || asset.Type != AssetTypes.Vlog
-        || state.PreviousType != AssetTypes.Vlog;
+        || state.ConsecutiveVlogCount == 0;
+
+    private static bool IsVlogWithinNormalLimit(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy) =>
+        asset.Type != AssetTypes.Vlog
+        || state.ConsecutiveVlogCount < policy.MaximumConsecutiveVlogs;
 
     private static bool IsCadenceEligible(
         string type,
@@ -516,8 +561,10 @@ public sealed class PlaylistGenerator
         PlaylistAsset Asset,
         bool CategoryPreferred,
         bool ExactAssetAllowed,
-        bool ContentGroupAllowed,
-        bool VlogAllowed,
+        bool ContentGroupPreferred,
+        bool ContentGroupFloorAllowed,
+        bool VlogPreferred,
+        bool VlogWithinNormalLimit,
         bool CadenceOverdue,
         DateTimeOffset? LastAssetPlayedAt);
 
@@ -535,7 +582,11 @@ public sealed class PlaylistGenerator
 
         public int ContentGroup { get; set; }
 
+        public int EmergencyContentGroupFloor { get; set; }
+
         public int ConsecutiveVlog { get; set; }
+
+        public int EmergencyVlogRun { get; set; }
 
         public int BumperCadence { get; set; }
 
@@ -563,7 +614,9 @@ public sealed class PlaylistGenerator
                 }
             }
 
-            PreviousType = prior.LastOrDefault()?.Type;
+            ConsecutiveVlogCount = prior.Reverse()
+                .TakeWhile(play => play.Type == AssetTypes.Vlog)
+                .Count();
             LastPromoAt = prior.LastOrDefault(play => play.Type == AssetTypes.Promo)?.PlayedAtUtc
                 ?? scheduleStart;
             LastInterstitialAt = prior.LastOrDefault(play => play.Type == AssetTypes.Interstitial)?.PlayedAtUtc
@@ -576,7 +629,7 @@ public sealed class PlaylistGenerator
 
         public Dictionary<string, DateTimeOffset> LastContentGroupPlay { get; } = new(StringComparer.Ordinal);
 
-        public string? PreviousType { get; private set; }
+        public int ConsecutiveVlogCount { get; private set; }
 
         public int NormalProgramsSinceBumper { get; private set; }
 
@@ -598,7 +651,7 @@ public sealed class PlaylistGenerator
             }
 
             _airtime[asset.Type] = GetAirtimeSeconds(asset.Type) + asset.DurationSeconds;
-            PreviousType = asset.Type;
+            ConsecutiveVlogCount = asset.Type == AssetTypes.Vlog ? ConsecutiveVlogCount + 1 : 0;
             if (asset.Type == AssetTypes.Bumper)
             {
                 NormalProgramsSinceBumper = 0;

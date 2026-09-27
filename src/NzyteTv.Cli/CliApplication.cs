@@ -410,8 +410,10 @@ public static class CliApplication
         Console.WriteLine($"    category target:        {summary.CategoryTargetRelaxations}");
         Console.WriteLine($"    exact asset cooldown:   {summary.ExactAssetCooldownRelaxations}");
         Console.WriteLine($"    hot-rotation bypass:    {summary.NewReleasePreferenceBypasses}");
-        Console.WriteLine($"    song cooldown:          {summary.ContentGroupCooldownRelaxations}");
+        Console.WriteLine($"    song cooldown 60-90m:   {summary.ContentGroupCooldownRelaxations}");
+        Console.WriteLine($"    emergency song <60m:    {summary.EmergencyContentGroupFloorViolations}");
         Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
+        Console.WriteLine($"    emergency vlog run:     {summary.EmergencyVlogRunViolations}");
         Console.WriteLine();
         Console.WriteLine("Cadence misses:");
         Console.WriteLine($"    bumper:                  {summary.BumperCadenceMisses}");

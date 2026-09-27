@@ -22,7 +22,11 @@ public sealed record PlaylistPolicy
 
     public TimeSpan ContentGroupCooldown { get; init; } = TimeSpan.FromMinutes(90);
 
+    public TimeSpan ContentGroupMinimumCooldown { get; init; } = TimeSpan.FromMinutes(60);
+
     public bool AvoidConsecutiveVlogs { get; init; } = true;
+
+    public int MaximumConsecutiveVlogs { get; init; } = 2;
 
     public IReadOnlyList<HotRotationBand> HotRotationBands { get; init; } =
     [
@@ -76,9 +80,21 @@ public sealed record PlaylistPolicy
             errors.Add("Target duration must be positive.");
         }
 
-        if (ExactAssetCooldown < TimeSpan.Zero || ContentGroupCooldown < TimeSpan.Zero)
+        if (ExactAssetCooldown < TimeSpan.Zero
+            || ContentGroupCooldown < TimeSpan.Zero
+            || ContentGroupMinimumCooldown < TimeSpan.Zero)
         {
             errors.Add("Cooldowns must not be negative.");
+        }
+
+        if (ContentGroupMinimumCooldown > ContentGroupCooldown)
+        {
+            errors.Add("The content-group minimum cooldown must not exceed the preferred cooldown.");
+        }
+
+        if (MaximumConsecutiveVlogs < 1)
+        {
+            errors.Add("The maximum consecutive-vlog fallback must be at least one.");
         }
 
         if (CategoryAirtimeTargets.Any(item => string.IsNullOrWhiteSpace(item.Key) || item.Value < 0))

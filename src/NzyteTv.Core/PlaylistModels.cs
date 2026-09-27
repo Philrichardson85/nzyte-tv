@@ -38,7 +38,11 @@ public sealed class PlaylistSummary
 
     public int ContentGroupCooldownRelaxations { get; init; }
 
+    public int EmergencyContentGroupFloorViolations { get; init; }
+
     public int ConsecutiveVlogViolations { get; init; }
+
+    public int EmergencyVlogRunViolations { get; init; }
 
     public int BumperCadenceMisses { get; init; }
 
