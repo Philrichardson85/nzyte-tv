@@ -433,7 +433,7 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv verify --help
 ```
 
-The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` is implemented and covered by automated tests, but a complete production library run has not yet been recorded on the Pi.
+The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` also completed a representative nine-file production acceptance run and an unchanged second-run test. A complete 39-file run has not yet been recorded.
 
 Inspect a quoted path from the mounted media library:
 
@@ -486,7 +486,7 @@ The production batch command is:
 
 It recursively finds `.mp4`, `.mov`, and `.mkv` files, preserves category folders, and verifies every output before counting it as ready. Run it inside a persistent SSH terminal multiplexer if the SSH connection may be interrupted; use of a particular multiplexer has not yet been standardized by this project.
 
-The command is resumable. Without `--overwrite`, existing destinations are verified and skipped only if valid. Invalid existing destinations are reported as failures. Individual failures do not stop later files, and any failure makes the final process exit code nonzero.
+The command is resumable. Without `--overwrite`, an existing destination is skipped only when its source-manifest fingerprint matches and independent verification passes. Changed sources, changed broadcast profiles, missing/corrupt manifests, and invalid existing destinations are normalized again. Individual normalization failures do not stop later files, and any remaining failure makes the final process exit code nonzero.
 
 Use `--overwrite` only when all existing destinations should be deliberately regenerated:
 
@@ -500,6 +500,57 @@ Use `--overwrite` only when all existing destinations should be deliberately reg
 Ctrl+C cancels the active conversion. The active temporary file is removed instead of being published as its final destination. Previously completed files remain in place and will be verified and skipped on the next run.
 
 The complete 39-file library has not yet been normalized with this command on the Raspberry Pi, so total batch runtime and long-duration thermal behavior are not yet verified.
+
+### Recorded nine-file acceptance run
+
+A representative batch of five music videos and four vlog episodes completed on the Raspberry Pi:
+
+```text
+Discovered video files: 9
+Normalized:             9
+Skipped existing:       0
+Failed:                 0
+Verified ready:         9
+Elapsed:             01:31:57
+```
+
+The unchanged second run independently re-verified and skipped every destination:
+
+```text
+Discovered video files: 9
+Normalized:             0
+Skipped existing:       9
+Failed:                 0
+Verified ready:         9
+Elapsed:             00:00:57
+```
+
+These runs predate source-manifest tracking. The first run with the manifest-aware build will safely normalize the existing nine outputs again to create trusted sidecars. Later unchanged runs can use the fingerprint-plus-verification skip path.
+
+### Recorded YouTube Live acceptance
+
+Three normalized outputs were manually streamed from this Pi to YouTube Live using FFmpeg `-c copy`, FLV, and RTMPS ingest:
+
+- `Nzyte - CASH RULES (Official Music Video).mp4`
+- `Nzyte Vlog Episode 3.mp4`
+- `Nzyte - American Dreams (Official Video).mp4`
+
+All three streamed successfully with correct audio, aspect ratio, and A/V synchronization at approximately `speed=1.00x`. YouTube reported **Excellent** stream health for each file.
+
+When manually stopping a live FLV/RTMP stream, these warnings can appear and are harmless in this context:
+
+```text
+Failed to update header with correct duration.
+Failed to update header with correct filesize.
+```
+
+A future broadcaster command may suppress them with:
+
+```text
+-flvflags no_duration_filesize
+```
+
+This is acceptance-test documentation only. NZYTE TV v0.1 does not implement streaming or retain a YouTube stream key.
 
 ## Not yet tested
 

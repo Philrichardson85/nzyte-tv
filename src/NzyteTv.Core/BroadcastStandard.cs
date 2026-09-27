@@ -2,6 +2,7 @@ namespace NzyteTv.Core;
 
 public static class BroadcastStandard
 {
+    public const string ProfileVersion = "nzytetv-1080p30-h264-high-aac-v1";
     public const int Width = 1920;
     public const int Height = 1080;
     public const double FramesPerSecond = 30d;

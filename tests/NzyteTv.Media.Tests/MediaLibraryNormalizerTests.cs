@@ -32,7 +32,9 @@ public sealed class MediaLibraryNormalizerTests
         var normalizer = new RecordingNormalizer();
         var verifier = new ConfigurableVerifier();
         verifier.SetReady(file.DestinationPath, isReady: true);
-        var service = CreateService([file], normalizer, verifier);
+        var manifestStore = new SourceManifestStore();
+        await WriteManifestAsync(fixture, file, manifestStore);
+        var service = CreateService([file], normalizer, verifier, manifestStore);
 
         LibraryNormalizationResult result = await service.NormalizeAsync(
             fixture.SourceRoot,
@@ -82,7 +84,9 @@ public sealed class MediaLibraryNormalizerTests
         normalizer.FailSources.Add(failed.SourcePath);
         var verifier = new ConfigurableVerifier();
         verifier.SetReady(skipped.DestinationPath, isReady: true);
-        var service = CreateService([failed, normalized, skipped], normalizer, verifier);
+        var manifestStore = new SourceManifestStore();
+        await WriteManifestAsync(fixture, skipped, manifestStore);
+        var service = CreateService([failed, normalized, skipped], normalizer, verifier, manifestStore);
 
         LibraryNormalizationResult result = await service.NormalizeAsync(
             fixture.SourceRoot,
@@ -104,15 +108,17 @@ public sealed class MediaLibraryNormalizerTests
     }
 
     [Fact]
-    public async Task NormalizeAsync_InvalidExistingDestination_IsFailureAndLaterFileContinues()
+    public async Task NormalizeAsync_InvalidExistingDestination_IsRenormalizedAndLaterFileContinues()
     {
         using var fixture = new LibraryFixture();
         LibraryMediaFile invalid = fixture.AddFile("Music Videos", "Invalid.mp4", destinationExists: true);
         LibraryMediaFile later = fixture.AddFile("Vlog Episodes", "Later.mp4");
         var normalizer = new RecordingNormalizer();
         var verifier = new ConfigurableVerifier();
-        verifier.SetReady(invalid.DestinationPath, isReady: false);
-        var service = CreateService([invalid, later], normalizer, verifier);
+        verifier.SetError(invalid.DestinationPath, new MediaProbeException("simulated invalid media"));
+        var manifestStore = new SourceManifestStore();
+        await WriteManifestAsync(fixture, invalid, manifestStore);
+        var service = CreateService([invalid, later], normalizer, verifier, manifestStore);
 
         LibraryNormalizationResult result = await service.NormalizeAsync(
             fixture.SourceRoot,
@@ -121,12 +127,109 @@ public sealed class MediaLibraryNormalizerTests
             progress: null,
             CancellationToken.None);
 
-        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(2, result.Normalized);
+        Assert.Equal(0, result.SkippedExisting);
+        Assert.Contains(normalizer.Calls, call => call.Source == invalid.SourcePath && call.Overwrite);
+        Assert.Equal("normalized", File.ReadAllText(invalid.DestinationPath));
+        Assert.True(File.Exists(later.DestinationPath));
+    }
+
+    [Fact]
+    public async Task NormalizeAsync_ChangedSourceWithSameName_IsRenormalized()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Music Videos", "Revised.mp4", destinationExists: true);
+        var manifestStore = new SourceManifestStore();
+        await WriteManifestAsync(fixture, file, manifestStore);
+        File.AppendAllText(file.SourcePath, " revised content");
+        var normalizer = new RecordingNormalizer();
+        var verifier = new ConfigurableVerifier();
+        var service = CreateService([file], normalizer, verifier, manifestStore);
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None);
+
         Assert.Equal(1, result.Normalized);
         Assert.Equal(0, result.SkippedExisting);
-        Assert.Contains(result.Files, item => item.SourcePath == invalid.SourcePath
-            && item.FailureReason!.Contains("failed verification", StringComparison.OrdinalIgnoreCase));
-        Assert.True(File.Exists(later.DestinationPath));
+        Assert.Single(normalizer.Calls);
+        Assert.True(normalizer.Calls[0].Overwrite);
+        Assert.Empty(verifier.Calls);
+        SourceFingerprint current = manifestStore.CreateFingerprint(fixture.SourceRoot, file.SourcePath);
+        Assert.True(manifestStore.Evaluate(file.DestinationPath, current).IsMatch);
+    }
+
+    [Fact]
+    public async Task NormalizeAsync_BroadcastProfileChange_IsRenormalized()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Music Videos", "Profile.mp4", destinationExists: true);
+        var oldManifestStore = new SourceManifestStore("old-profile");
+        await WriteManifestAsync(fixture, file, oldManifestStore);
+        var newManifestStore = new SourceManifestStore("new-profile");
+        var normalizer = new RecordingNormalizer();
+        var verifier = new ConfigurableVerifier();
+        var service = CreateService([file], normalizer, verifier, newManifestStore);
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.Normalized);
+        Assert.Empty(verifier.Calls);
+        SourceFingerprint current = newManifestStore.CreateFingerprint(fixture.SourceRoot, file.SourcePath);
+        Assert.True(newManifestStore.Evaluate(file.DestinationPath, current).IsMatch);
+    }
+
+    [Fact]
+    public async Task NormalizeAsync_CorruptManifest_IsRenormalizedAndRepaired()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Vlog Episodes", "Corrupt.mp4", destinationExists: true);
+        File.WriteAllText(SourceManifestStore.GetManifestPath(file.DestinationPath), "not-json");
+        var manifestStore = new SourceManifestStore();
+        var normalizer = new RecordingNormalizer();
+        var service = CreateService([file], normalizer, new ConfigurableVerifier(), manifestStore);
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.Normalized);
+        Assert.Single(normalizer.Calls);
+        SourceFingerprint current = manifestStore.CreateFingerprint(fixture.SourceRoot, file.SourcePath);
+        Assert.True(manifestStore.Evaluate(file.DestinationPath, current).IsMatch);
+    }
+
+    [Fact]
+    public async Task NormalizeAsync_PreManifestDestination_IsRenormalizedForSafeMigration()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Specials", "Legacy.mp4", destinationExists: true);
+        var normalizer = new RecordingNormalizer();
+        var verifier = new ConfigurableVerifier();
+        var service = CreateService([file], normalizer, verifier);
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.Normalized);
+        Assert.Empty(verifier.Calls);
+        Assert.True(File.Exists(SourceManifestStore.GetManifestPath(file.DestinationPath)));
     }
 
     [Fact]
@@ -175,7 +278,20 @@ public sealed class MediaLibraryNormalizerTests
     private static MediaLibraryNormalizer CreateService(
         IReadOnlyList<LibraryMediaFile> files,
         IMediaNormalizer normalizer,
-        IMediaVerifier verifier) => new(new StaticDiscovery(files), normalizer, verifier);
+        IMediaVerifier verifier,
+        ISourceManifestStore? manifestStore = null) => new(
+            new StaticDiscovery(files),
+            normalizer,
+            verifier,
+            manifestStore ?? new SourceManifestStore());
+
+    private static Task WriteManifestAsync(
+        LibraryFixture fixture,
+        LibraryMediaFile file,
+        SourceManifestStore manifestStore) => manifestStore.WriteAsync(
+            file.DestinationPath,
+            manifestStore.CreateFingerprint(fixture.SourceRoot, file.SourcePath),
+            CancellationToken.None);
 
     private sealed class StaticDiscovery(IReadOnlyList<LibraryMediaFile> files) : IMediaLibraryDiscovery
     {
@@ -212,15 +328,23 @@ public sealed class MediaLibraryNormalizerTests
     private sealed class ConfigurableVerifier : IMediaVerifier
     {
         private readonly Dictionary<string, bool> _results = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Exception> _errors = new(StringComparer.Ordinal);
 
         public List<string> Calls { get; } = [];
 
         public void SetReady(string path, bool isReady) => _results[path] = isReady;
 
+        public void SetError(string path, Exception exception) => _errors[path] = exception;
+
         public Task<MediaVerification> VerifyAsync(string filePath, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(filePath);
+            if (_errors.TryGetValue(filePath, out Exception? error))
+            {
+                throw error;
+            }
+
             bool isReady = _results.GetValueOrDefault(filePath, true);
             return Task.FromResult(CreateVerification(filePath, isReady));
         }

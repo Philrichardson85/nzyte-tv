@@ -18,15 +18,18 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
     private readonly IMediaLibraryDiscovery _discovery;
     private readonly IMediaNormalizer _normalizer;
     private readonly IMediaVerifier _verifier;
+    private readonly ISourceManifestStore _manifestStore;
 
     public MediaLibraryNormalizer(
         IMediaLibraryDiscovery discovery,
         IMediaNormalizer normalizer,
-        IMediaVerifier verifier)
+        IMediaVerifier verifier,
+        ISourceManifestStore manifestStore)
     {
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
         _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
+        _manifestStore = manifestStore ?? throw new ArgumentNullException(nameof(manifestStore));
     }
 
     public async Task<LibraryNormalizationResult> NormalizeAsync(
@@ -66,32 +69,71 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
 
             try
             {
+                SourceFingerprint expectedFingerprint = _manifestStore.CreateFingerprint(sourceRoot, file.SourcePath);
+                bool destinationExists = File.Exists(file.DestinationPath);
+
                 if (File.Exists(file.DestinationPath) && !overwrite)
                 {
-                    Report(progress, index, files.Count, file, LibraryProgressStage.VerifyingExisting, fileStopwatch.Elapsed);
-                    MediaVerification existing = await _verifier.VerifyAsync(
-                        file.DestinationPath,
-                        cancellationToken).ConfigureAwait(false);
-
-                    if (!existing.Result.IsBroadcastReady)
+                    ManifestMatchResult manifest = _manifestStore.Evaluate(file.DestinationPath, expectedFingerprint);
+                    if (manifest.IsMatch)
                     {
-                        string reason = "Existing destination failed verification: " + FormatFailedChecks(existing.Result);
-                        results.Add(Failed(file, fileStopwatch.Elapsed, reason));
-                        Report(progress, index, files.Count, file, LibraryProgressStage.Failed, fileStopwatch.Elapsed, detail: reason);
-                        continue;
-                    }
+                        Report(progress, index, files.Count, file, LibraryProgressStage.VerifyingExisting, fileStopwatch.Elapsed);
+                        MediaVerification? existing = null;
+                        string? verificationError = null;
+                        try
+                        {
+                            existing = await _verifier.VerifyAsync(
+                                file.DestinationPath,
+                                cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception exception) when (IsRecoverableFileFailure(exception))
+                        {
+                            verificationError = exception.Message;
+                        }
 
-                    results.Add(new LibraryFileResult(
-                        file.SourcePath,
-                        file.DestinationPath,
-                        LibraryFileStatus.SkippedExisting,
-                        fileStopwatch.Elapsed));
-                    Report(progress, index, files.Count, file, LibraryProgressStage.Skipped, fileStopwatch.Elapsed,
-                        detail: "Existing destination verification passed.");
-                    continue;
+                        if (existing?.Result.IsBroadcastReady == true)
+                        {
+                            results.Add(new LibraryFileResult(
+                                file.SourcePath,
+                                file.DestinationPath,
+                                LibraryFileStatus.SkippedExisting,
+                                fileStopwatch.Elapsed));
+                            Report(progress, index, files.Count, file, LibraryProgressStage.Skipped, fileStopwatch.Elapsed,
+                                detail: "Source fingerprint matched and destination verification passed.");
+                            continue;
+                        }
+
+                        string failureDetail = existing is null
+                            ? verificationError ?? "unknown verification error"
+                            : FormatFailedChecks(existing.Result);
+                        Report(
+                            progress,
+                            index,
+                            files.Count,
+                            file,
+                            LibraryProgressStage.RefreshingExisting,
+                            fileStopwatch.Elapsed,
+                            detail: $"Existing destination failed verification ({failureDetail}); normalizing again.");
+                    }
+                    else
+                    {
+                        Report(
+                            progress,
+                            index,
+                            files.Count,
+                            file,
+                            LibraryProgressStage.RefreshingExisting,
+                            fileStopwatch.Elapsed,
+                            detail: $"{manifest.Detail} Normalizing again.");
+                    }
                 }
 
-                MediaPathPolicy.EnsureOutputIsAllowed(file.SourcePath, file.DestinationPath, overwrite);
+                bool replaceDestination = overwrite || destinationExists;
+                MediaPathPolicy.EnsureOutputIsAllowed(file.SourcePath, file.DestinationPath, replaceDestination);
 
                 var fileProgress = new InlineProgress<NormalizationProgress>(value =>
                 {
@@ -112,8 +154,20 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
                 await _normalizer.NormalizeAsync(
                     file.SourcePath,
                     file.DestinationPath,
-                    overwrite,
+                    replaceDestination,
                     fileProgress,
+                    cancellationToken).ConfigureAwait(false);
+
+                SourceFingerprint completedFingerprint = _manifestStore.CreateFingerprint(sourceRoot, file.SourcePath);
+                if (completedFingerprint != expectedFingerprint)
+                {
+                    throw new MediaNormalizationException(
+                        "Source file changed during normalization; output was not recorded as current.");
+                }
+
+                await _manifestStore.WriteAsync(
+                    file.DestinationPath,
+                    completedFingerprint,
                     cancellationToken).ConfigureAwait(false);
 
                 results.Add(new LibraryFileResult(

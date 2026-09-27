@@ -128,3 +128,39 @@ Independent verification requires every one of these checks to pass:
 - stereo.
 
 Any failed check produces `RESULT: NOT BROADCAST READY` and a non-zero process exit code. Only an all-pass report produces `RESULT: BROADCAST READY`.
+
+## YouTube Live acceptance
+
+The broadcast standard was validated end to end on the Raspberry Pi 4 with three normalized production files:
+
+- `Nzyte - CASH RULES (Official Music Video).mp4`
+- `Nzyte Vlog Episode 3.mp4`
+- `Nzyte - American Dreams (Official Video).mp4`
+
+Each normalized MP4 was sent directly to YouTube Live with FFmpeg stream-copy (`-c copy`), FLV, and RTMPS ingest. All three displayed correctly, had correct audio and aspect ratio, maintained A/V synchronization, ran at approximately `speed=1.00x`, and received YouTube **Excellent** stream health.
+
+This confirms the acceptance path:
+
+```text
+Production source
+-> normalize-library
+-> broadcast-ready output
+-> verification PASS
+-> Raspberry Pi
+-> FFmpeg stream-copy
+-> YouTube Live
+-> Excellent stream health
+```
+
+It does not make live broadcasting part of the v0.1 application.
+
+### Expected live FLV shutdown warning
+
+Manually stopping a live FLV/RTMP stream can produce:
+
+```text
+Failed to update header with correct duration.
+Failed to update header with correct filesize.
+```
+
+These warnings are harmless for this manually stopped live output. Future broadcaster commands may use `-flvflags no_duration_filesize` to suppress them. This flag is not part of normalization and no broadcaster command is currently implemented.

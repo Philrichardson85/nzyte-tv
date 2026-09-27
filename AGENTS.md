@@ -41,6 +41,12 @@ Batch normalization must preserve source-relative category paths, reject overlap
 
 Existing batch destinations may be treated as resumable skips only after independent verification passes. Invalid existing destinations must never be silently counted as broadcast ready.
 
+The independent verification check is necessary but not sufficient for a batch skip. The destination's source manifest must also match the current source-relative path, size, last-modified UTC, manifest schema, and broadcast-profile version. Missing, corrupt, or stale manifests must fail safely by forcing normalization.
+
+Increment `BroadcastStandard.ProfileVersion` whenever a broadcast-standard change could make an existing normalized output stale. Profile-version changes must invalidate source manifests.
+
+Write source manifests atomically only after normalization and verification succeed. Never create or update a matching manifest for an unverified output.
+
 ## Safety
 
 Source media must never be overwritten during normalization unless the product behavior is explicitly changed, reviewed, documented, and tested. Current `--overwrite` behavior replaces only an existing destination and must never permit a source file to be used as its own destination.

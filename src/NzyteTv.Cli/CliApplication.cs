@@ -182,7 +182,8 @@ public static class CliApplication
         var libraryNormalizer = new MediaLibraryNormalizer(
             new MediaLibraryDiscovery(),
             fileNormalizer,
-            verifier);
+            verifier,
+            new SourceManifestStore());
         var progress = new InlineProgress<LibraryNormalizationProgress>(PrintLibraryProgress);
 
         LibraryNormalizationResult result = await libraryNormalizer.NormalizeAsync(
@@ -289,6 +290,9 @@ public static class CliApplication
                 break;
             case LibraryProgressStage.VerifyingExisting:
                 Console.WriteLine("Checking existing destination verification...");
+                break;
+            case LibraryProgressStage.RefreshingExisting:
+                Console.WriteLine($"Refresh:      {value.Detail}");
                 break;
             case LibraryProgressStage.Complete:
                 Console.WriteLine();

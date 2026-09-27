@@ -128,8 +128,9 @@ The batch workflow has these safety and resumability rules:
 - source and destination roots must be separate and non-overlapping;
 - relative category directories are preserved;
 - `.mov` and `.mkv` destination extensions become `.mp4`;
-- an existing destination is skipped only when independent verification passes;
-- an invalid existing destination is a failure unless `--overwrite` is used;
+- each successful destination receives a `<output>.mp4.nzytetv.json` source-manifest sidecar;
+- a destination is skipped only when its source fingerprint matches and independent verification passes;
+- a changed source, changed broadcast profile, missing/corrupt manifest, or invalid destination causes re-normalization;
 - failures are recorded without aborting later files;
 - colliding source names such as `name.mov` and `name.mkv` in one category fail rather than overwriting the same `name.mp4` destination;
 - Ctrl+C cancels the active file, while temporary-output handling prevents a partial final destination.
@@ -158,6 +159,22 @@ The application passes paths directly to FFmpeg and FFprobe without constructing
 7. Retain the source unchanged.
 8. Do not treat failed or partial output as library-ready media.
 
-For an unattended batch, run `normalize-library`, retain its final summary, investigate every listed failure, and rerun without `--overwrite` to resume. A full 39-file Raspberry Pi batch has not yet been timed.
+For an unattended batch, run `normalize-library`, retain its final summary, investigate every listed failure, and rerun without `--overwrite` to resume. A representative nine-file Raspberry Pi batch took 01:31:57; the unchanged second run re-verified and skipped all nine files in 00:00:57. A full 39-file batch has not yet been timed.
+
+## Source manifests and migration
+
+A source manifest records:
+
+- manifest schema version;
+- source-relative path;
+- source size;
+- source last-modified UTC;
+- broadcast-profile version.
+
+The manifest is written atomically after the output passes normalization and verification. If the source changes during normalization, the batch records a failure and does not mark that output as current.
+
+Outputs created by older versions do not have manifests. The first run after upgrading conservatively normalizes those files again and creates sidecars. The application does not adopt an existing output based only on technical validity because it cannot prove that the output came from the current source master.
+
+The nine-file acceptance run occurred before manifests were implemented. Its second-run skip result validated the earlier verify-and-skip behavior; the next run with the manifest-aware version will intentionally rebuild those nine outputs once.
 
 The required format is defined in [broadcast-standard.md](broadcast-standard.md).

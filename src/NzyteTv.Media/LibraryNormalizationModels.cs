@@ -44,6 +44,7 @@ public enum LibraryProgressStage
     Starting,
     Normalizing,
     VerifyingExisting,
+    RefreshingExisting,
     Complete,
     Skipped,
     Failed,

@@ -58,7 +58,9 @@ Destination: <destination-root>/Music Videos/example.mp4
 
 The source and destination roots must be separate and cannot be nested inside one another. `System Volume Information`, reparse-point/symbolic-link directories, images, text files, and unsupported extensions are ignored.
 
-Without `--overwrite`, an existing destination is independently verified. A valid destination is recorded as a verified skip; an invalid or unreadable destination is recorded as a failure and is not silently accepted. With `--overwrite`, only the destination is replaced, and only after the new temporary output passes verification.
+Each successful output has a sidecar source manifest named `<output>.mp4.nzytetv.json`. It records the source-relative path, source size, source last-modified UTC, manifest schema, and broadcast-profile version.
+
+Without `--overwrite`, an existing destination is skipped only when its source manifest matches the current source and independent verification passes. A missing, corrupt, stale, or profile-mismatched manifest forces re-normalization. A matching destination that fails verification is also re-normalized. With `--overwrite`, only the destination is replaced, and only after the new temporary output passes verification.
 
 One failed file does not stop later files. The final summary reports discovered, normalized, verified-skipped, failed, and verified-ready counts. Any per-file failure makes the command exit nonzero. Ctrl+C cancels the active FFmpeg process and does not publish its partial output.
 
@@ -157,7 +159,49 @@ For a complete library run, the production command is:
   /srv/nzyte-tv/work/BroadcastReady
 ```
 
-This batch command is implemented and covered by automated tests. A complete 39-file run on the Raspberry Pi has not yet been recorded, so no total runtime is claimed. It is safe to stop and rerun: verified destinations are skipped unless `--overwrite` is supplied.
+This batch command is implemented and covered by automated tests. A complete 39-file run on the Raspberry Pi has not yet been recorded, so no full-library runtime is claimed. It is safe to stop and rerun: destinations with matching manifests and passing verification are skipped unless `--overwrite` is supplied.
+
+## Raspberry Pi acceptance results
+
+NZYTE TV v0.1 completed real-media acceptance testing on a Raspberry Pi 4 Model B with 4 GB RAM, Ubuntu, and packaged FFmpeg/FFprobe.
+
+A representative production batch contained five music videos and four vlog episodes:
+
+| Result | First run | Unchanged second run |
+|---|---:|---:|
+| Discovered | 9 | 9 |
+| Normalized | 9 | 0 |
+| Skipped existing | 0 | 9 |
+| Failed | 0 | 0 |
+| Verified ready | 9 | 9 |
+| Elapsed | 01:31:57 | 00:00:57 |
+
+Every first-run output completed normalization and independent verification. On the second run, all nine existing destinations were re-verified and skipped correctly. These measurements were recorded before source manifests were introduced. After upgrading to the manifest-aware build, pre-manifest outputs are normalized once more to establish a trusted source/output association.
+
+Three normalized files were then streamed manually from the Pi to YouTube Live with FFmpeg stream-copy (`-c copy`) and FLV over RTMPS:
+
+1. `Nzyte - CASH RULES (Official Music Video).mp4`
+2. `Nzyte Vlog Episode 3.mp4`
+3. `Nzyte - American Dreams (Official Video).mp4`
+
+All three displayed with correct audio and aspect ratio, maintained A/V synchronization, ran at approximately `speed=1.00x`, and received YouTube **Excellent** stream health. This validates the prepared-media path through normalization, verification, Raspberry Pi stream-copy, and YouTube ingest. It does not add broadcasting or YouTube integration to the application.
+
+### Live FLV shutdown warning
+
+When a manually operated live FLV/RTMP stream is stopped, FFmpeg can print:
+
+```text
+Failed to update header with correct duration.
+Failed to update header with correct filesize.
+```
+
+These warnings are harmless in this live-stream shutdown context: a live, non-seekable output cannot have its header rewritten like a completed local file. Future broadcaster commands may use this option to suppress the expected warnings:
+
+```text
+-flvflags no_duration_filesize
+```
+
+No broadcaster command is implemented in v0.1.
 
 ## Windows development setup
 
