@@ -1,6 +1,6 @@
 # NZYTE TV
 
-NZYTE TV v0.1 is the media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps.
+NZYTE TV v0.1 is the production-validated media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps. The v0.1 media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
 
 Streaming, scheduling, playlist selection, YouTube integration, services, and automatic restarts remain out of scope.
 
@@ -181,15 +181,17 @@ The full 39-file production normalization completed successfully on the Raspberr
 
 | Result | First run | Unchanged second run |
 |---|---:|---:|
-| Discovered | 39 | — |
+| Discovered | 39 | 39 |
 | Normalized | 39 | 0 |
-| Skipped existing | — | 39 |
+| Skipped existing | 0 | 39 |
 | Failed | 0 | 0 |
 | Verified ready | 39 | 39 |
 | Manifests | 39 | 39 existing |
-| Elapsed | Not yet supplied | Not yet supplied |
+| Elapsed | 06:21:07 | 00:04:42 |
 
-All 39 source files were normalized and independently verified. On the unchanged second run, all 39 matching destinations were re-verified and skipped, confirming resumability and manifest-based source matching for the production library. The exact first- and second-run elapsed times and final library size remain to be recorded.
+All 39 source files were normalized and independently verified. On the unchanged second run, all 39 matching destinations were re-verified and skipped, confirming resumability and manifest-based source matching for the production library. Final validation found 39 broadcast-ready videos and 39 matching source manifests in a 3.3 GB normalized library.
+
+After normalization, the 30 GB external drive reported 11 GB used, 19 GB available, and 36% utilization. The production source and normalized library remain permanently stored beneath `/srv/nzyte-tv/media`, with `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library` as their stable convenience symlinks. This completes the v0.1 media-normalization and verification milestone as production-validated on Raspberry Pi 4 / `linux-arm64`.
 
 ## Raspberry Pi acceptance results
 

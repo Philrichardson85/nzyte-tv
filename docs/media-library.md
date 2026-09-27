@@ -142,15 +142,19 @@ The full 39-file production normalization completed successfully on the Raspberr
 
 | Result | First run | Unchanged second run |
 |---|---:|---:|
-| Discovered | 39 | — |
+| Discovered | 39 | 39 |
 | Normalized | 39 | 0 |
-| Skipped existing | — | 39 |
+| Skipped existing | 0 | 39 |
 | Failed | 0 | 0 |
 | Verified ready | 39 | 39 |
 | Manifests | 39 | 39 existing |
-| Elapsed | Not yet supplied | Not yet supplied |
+| Elapsed | 06:21:07 | 00:04:42 |
 
-All source files completed normalization and independent verification. The unchanged second run re-verified every matching destination and skipped all 39, confirming production-library resumability and source-manifest matching. The exact elapsed times and final normalized-library size remain to be recorded.
+All source files completed normalization and independent verification. The unchanged second run re-verified every matching destination and skipped all 39, confirming production-library resumability and source-manifest matching. Final validation found 39 broadcast-ready videos, 39 matching source manifests, and a 3.3 GB normalized library.
+
+After normalization, the external drive reported 30 GB total, 11 GB used, 19 GB available, and 36% utilization. All large source and normalized media remain on that drive under `/srv/nzyte-tv/media/source` and `/srv/nzyte-tv/media/library`; the stable application paths remain the `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library` symlinks.
+
+These results complete the v0.1 media-normalization and verification milestone and production-validate it on the Raspberry Pi 4 / `linux-arm64` deployment.
 
 A separate representative acceptance batch of nine production files previously completed normalization and verification successfully. That result validates the batch workflow but is not a result for the current 39-file run.
 

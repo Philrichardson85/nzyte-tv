@@ -526,15 +526,19 @@ The full source set occupies approximately 7.3 GB and has a combined runtime of 
 
 | Result | First run | Unchanged second run |
 |---|---:|---:|
-| Discovered | 39 | — |
+| Discovered | 39 | 39 |
 | Normalized | 39 | 0 |
-| Skipped existing | — | 39 |
+| Skipped existing | 0 | 39 |
 | Failed | 0 | 0 |
 | Verified ready | 39 | 39 |
 | Manifests | 39 | 39 existing |
-| Elapsed | Not yet supplied | Not yet supplied |
+| Elapsed | 06:21:07 | 00:04:42 |
 
-Every source completed normalization and independent verification. The unchanged second run re-verified and skipped all 39 destinations. The exact elapsed times and final normalized-library size remain to be recorded.
+Every source completed normalization and independent verification. The unchanged second run re-verified and skipped all 39 destinations. Final validation found 39 broadcast-ready videos, 39 matching source manifests, and a 3.3 GB normalized library.
+
+The permanent external drive then reported 30 GB total, 11 GB used, 19 GB available, and 36% utilization. Source masters and normalized outputs reside under `/srv/nzyte-tv/media/source` and `/srv/nzyte-tv/media/library`; production commands use their `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library` convenience symlinks.
+
+This completed production acceptance for the v0.1 media-normalization and verification milestone on Raspberry Pi 4 / `linux-arm64`.
 
 ### Recorded nine-file acceptance run
 

@@ -26,7 +26,7 @@ Video-only sources receive a silent 48 kHz stereo AAC track so every normalized 
 
 Normalization scales the source down or up to fit inside 1920x1080 while preserving its aspect ratio, then pads the unused area. The source is not stretched or cropped.
 
-The current media library includes `Vlog 2 episode 3.mp4` at 2628x1440. It is a useful future scale-and-pad regression case, but that specific file has not yet been recorded as a completed normalization reference.
+The production source library includes `Vlog 2 episode 3.mp4` at 2628x1440. It completed normalization and verification as part of the full 39-file Raspberry Pi production run. Its unusual source aspect ratio remains useful for a future dedicated scale-and-pad regression test.
 
 ## Why keyframes are verified from timestamps
 
@@ -104,6 +104,12 @@ RESULT: BROADCAST READY
 ```
 
 All required checks passed.
+
+## Full-library production validation
+
+The v0.1 media-normalization and verification milestone completed production acceptance on the Raspberry Pi 4 / `linux-arm64` deployment. The first full-library run normalized and verified all 39 source videos with no failures in 06:21:07. An unchanged integrity run then independently re-verified and skipped all 39 matching outputs with no failures in 00:04:42.
+
+Final validation found 39 broadcast-ready videos and 39 matching source manifests in the 3.3 GB normalized library at `/srv/nzyte-tv/library`. Together with the successful YouTube Live stream-copy acceptance below, these results validate the broadcast standard across the complete production media library.
 
 ## Hardware encoder status
 
