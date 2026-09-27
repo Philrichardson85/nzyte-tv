@@ -15,7 +15,8 @@ public interface IMediaNormalizer
         string outputPath,
         bool overwrite,
         IProgress<NormalizationProgress>? progress,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        NormalizationOptions? options = null);
 }
 
 public sealed class MediaNormalizer : IMediaNormalizer
@@ -43,7 +44,8 @@ public sealed class MediaNormalizer : IMediaNormalizer
         string outputPath,
         bool overwrite,
         IProgress<NormalizationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        NormalizationOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -72,11 +74,16 @@ public sealed class MediaNormalizer : IMediaNormalizer
                 throw new MediaNormalizationException("The source contains no video stream.");
             }
 
+            VerticalLayoutMode appliedVerticalLayout = ResolveVerticalLayout(
+                sourceMedia.Video,
+                options ?? NormalizationOptions.Default);
+
             progress?.Report(new NormalizationProgress("Encoding", stopwatch.Elapsed, 0));
             IReadOnlyList<string> arguments = FfmpegArgumentBuilder.BuildNormalizeArguments(
                 source,
                 temporaryPath,
-                sourceMedia.Audio is not null);
+                sourceMedia.Audio is not null,
+                appliedVerticalLayout);
 
             ProcessResult encodeResult = await _processRunner.RunAsync(
                 new ProcessRequest(
@@ -112,6 +119,32 @@ public sealed class MediaNormalizer : IMediaNormalizer
                 File.Delete(temporaryPath);
             }
         }
+    }
+
+    private static VerticalLayoutMode ResolveVerticalLayout(
+        VideoDescription video,
+        NormalizationOptions options)
+    {
+        if (options.VerticalLayout == VerticalLayoutMode.None)
+        {
+            return VerticalLayoutMode.None;
+        }
+
+        if (options.VerticalLayout != VerticalLayoutMode.BlurredBackground)
+        {
+            throw new MediaNormalizationException(
+                $"Unsupported vertical layout mode: {options.VerticalLayout}.");
+        }
+
+        if (!VideoDisplayGeometry.TryGetDimensions(video, out VideoDisplayDimensions? dimensions, out string? error))
+        {
+            throw new MediaNormalizationException(
+                $"Source display orientation could not be safely determined: {error}.");
+        }
+
+        return dimensions!.IsPortrait
+            ? VerticalLayoutMode.BlurredBackground
+            : VerticalLayoutMode.None;
     }
 
     private static void ReportProgress(

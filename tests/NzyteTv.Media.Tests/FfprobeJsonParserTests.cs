@@ -71,4 +71,55 @@ public sealed class FfprobeJsonParserTests
     {
         Assert.Throws<FfprobeDataException>(() => FfprobeJsonParser.ParseMedia("not-json", "sample.mp4"));
     }
+
+    [Fact]
+    public void ParseMedia_MapsDisplayRotationAndSampleAspectRatio()
+    {
+        const string json = """
+            {
+              "streams": [{
+                "codec_type": "video",
+                "width": 1920,
+                "height": 1080,
+                "sample_aspect_ratio": "1:1",
+                "side_data_list": [{
+                  "side_data_type": "Display Matrix",
+                  "rotation": -90
+                }]
+              }],
+              "format": {}
+            }
+            """;
+
+        NzyteTv.Core.VideoDescription video = FfprobeJsonParser.ParseMedia(json, "rotated.mp4").Video!;
+
+        Assert.Equal("1:1", video.SampleAspectRatio);
+        Assert.Equal(270, video.RotationDegrees);
+        Assert.True(NzyteTv.Core.VideoDisplayGeometry.TryGetDimensions(video, out var dimensions, out _));
+        Assert.True(dimensions!.IsPortrait);
+    }
+
+    [Fact]
+    public void ParseMedia_NonRightAngleRotationIsMarkedUnsafe()
+    {
+        const string json = """
+            {
+              "streams": [{
+                "codec_type": "video",
+                "width": 1080,
+                "height": 1920,
+                "side_data_list": [{
+                  "side_data_type": "Display Matrix",
+                  "rotation": 12.5
+                }]
+              }],
+              "format": {}
+            }
+            """;
+
+        NzyteTv.Core.VideoDescription video = FfprobeJsonParser.ParseMedia(json, "invalid.mp4").Video!;
+
+        Assert.Null(video.RotationDegrees);
+        Assert.False(NzyteTv.Core.VideoDisplayGeometry.TryGetDimensions(video, out _, out _));
+    }
 }

@@ -32,7 +32,9 @@ public static class FfprobeJsonParser
                     video.Height,
                     video.PixelFormat ?? "unknown",
                     SelectFrameRate(video),
-                    ParseLong(video.BitRate)),
+                    ParseLong(video.BitRate),
+                    video.SampleAspectRatio,
+                    ParseRotation(video)),
             audio is null
                 ? null
                 : new AudioDescription(
@@ -70,6 +72,77 @@ public static class FfprobeJsonParser
         stream.AverageFrameRate is not null and not "0/0"
             ? stream.AverageFrameRate
             : stream.RealFrameRate;
+
+    private static int? ParseRotation(FfprobeStream stream)
+    {
+        var rotations = new List<double>();
+        foreach (FfprobeSideData sideData in (stream.SideDataList ?? []).Where(item =>
+            string.Equals(item.SideDataType, "Display Matrix", StringComparison.OrdinalIgnoreCase)
+            || item.Rotation.ValueKind is not JsonValueKind.Undefined))
+        {
+            if (!TryParseRotationValue(sideData.Rotation, out double rotation))
+            {
+                return null;
+            }
+
+            rotations.Add(rotation);
+        }
+
+        KeyValuePair<string, JsonElement> rotationTag = (stream.Tags ?? []).FirstOrDefault(item =>
+            string.Equals(item.Key, "rotate", StringComparison.OrdinalIgnoreCase));
+        if (rotationTag.Key is not null)
+        {
+            if (!TryParseRotationValue(rotationTag.Value, out double taggedRotation))
+            {
+                return null;
+            }
+
+            rotations.Add(taggedRotation);
+        }
+
+        if (rotations.Count == 0)
+        {
+            return 0;
+        }
+
+        int? normalized = NormalizeRotation(rotations[0]);
+        if (normalized is null
+            || rotations.Skip(1).Any(rotation => NormalizeRotation(rotation) != normalized))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    private static bool TryParseRotationValue(JsonElement value, out double rotation)
+    {
+        rotation = 0;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.TryGetDouble(out rotation) && double.IsFinite(rotation),
+            JsonValueKind.String => ParseDouble(value.GetString()) is double parsed && Assign(parsed, out rotation),
+            _ => false,
+        };
+    }
+
+    private static bool Assign(double value, out double result)
+    {
+        result = value;
+        return true;
+    }
+
+    private static int? NormalizeRotation(double value)
+    {
+        double nearestRightAngle = Math.Round(value / 90d) * 90d;
+        if (Math.Abs(value - nearestRightAngle) > 0.01)
+        {
+            return null;
+        }
+
+        int normalized = (int)nearestRightAngle % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
+    }
 
     private static TimeSpan? ParseDuration(string? value)
     {

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace NzyteTv.Media;
@@ -43,11 +44,29 @@ public sealed class FfprobeStream
     [JsonPropertyName("bit_rate")]
     public string? BitRate { get; init; }
 
+    [JsonPropertyName("sample_aspect_ratio")]
+    public string? SampleAspectRatio { get; init; }
+
     [JsonPropertyName("sample_rate")]
     public string? SampleRate { get; init; }
 
     [JsonPropertyName("channels")]
     public int? Channels { get; init; }
+
+    [JsonPropertyName("tags")]
+    public Dictionary<string, JsonElement>? Tags { get; init; } = [];
+
+    [JsonPropertyName("side_data_list")]
+    public List<FfprobeSideData>? SideDataList { get; init; } = [];
+}
+
+public sealed class FfprobeSideData
+{
+    [JsonPropertyName("side_data_type")]
+    public string? SideDataType { get; init; }
+
+    [JsonPropertyName("rotation")]
+    public JsonElement Rotation { get; init; }
 }
 
 public sealed class FfprobeFormat

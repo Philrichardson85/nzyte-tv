@@ -9,7 +9,8 @@ public sealed record SourceFingerprint(
     string SourceRelativePath,
     long SourceSize,
     DateTime SourceLastModifiedUtc,
-    string BroadcastProfileVersion);
+    string BroadcastProfileVersion,
+    string? VerticalLayout = null);
 
 public enum ManifestMatchStatus
 {
@@ -26,7 +27,10 @@ public sealed record ManifestMatchResult(ManifestMatchStatus Status, string Deta
 
 public interface ISourceManifestStore
 {
-    SourceFingerprint CreateFingerprint(string sourceRoot, string sourcePath);
+    SourceFingerprint CreateFingerprint(
+        string sourceRoot,
+        string sourcePath,
+        NormalizationOptions? options = null);
 
     ManifestMatchResult Evaluate(string destinationPath, SourceFingerprint expected);
 
@@ -52,7 +56,10 @@ public sealed class SourceManifestStore : ISourceManifestStore
         _broadcastProfileVersion = broadcastProfileVersion;
     }
 
-    public SourceFingerprint CreateFingerprint(string sourceRoot, string sourcePath)
+    public SourceFingerprint CreateFingerprint(
+        string sourceRoot,
+        string sourcePath,
+        NormalizationOptions? options = null)
     {
         string root = Path.GetFullPath(sourceRoot);
         string source = Path.GetFullPath(sourcePath);
@@ -76,7 +83,8 @@ public sealed class SourceManifestStore : ISourceManifestStore
             relativePath.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/'),
             file.Length,
             file.LastWriteTimeUtc,
-            _broadcastProfileVersion);
+            _broadcastProfileVersion,
+            (options ?? NormalizationOptions.Default).VerticalLayoutManifestValue);
     }
 
     public ManifestMatchResult Evaluate(string destinationPath, SourceFingerprint expected)
@@ -111,6 +119,15 @@ public sealed class SourceManifestStore : ISourceManifestStore
                 return new ManifestMatchResult(
                     ManifestMatchStatus.Mismatch,
                     $"Broadcast profile changed ({actual.BroadcastProfileVersion} -> {expected.BroadcastProfileVersion}).");
+            }
+
+            string actualVerticalLayout = NormalizeVerticalLayout(actual.VerticalLayout);
+            string expectedVerticalLayout = NormalizeVerticalLayout(expected.VerticalLayout);
+            if (!string.Equals(actualVerticalLayout, expectedVerticalLayout, StringComparison.Ordinal))
+            {
+                return new ManifestMatchResult(
+                    ManifestMatchStatus.Mismatch,
+                    $"Vertical layout changed ({actualVerticalLayout} -> {expectedVerticalLayout}).");
             }
 
             if (!string.Equals(actual.SourceRelativePath, expected.SourceRelativePath, StringComparison.Ordinal)
@@ -168,4 +185,7 @@ public sealed class SourceManifestStore : ISourceManifestStore
     private static StringComparison GetPathComparison() => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
+
+    private static string NormalizeVerticalLayout(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "none" : value;
 }

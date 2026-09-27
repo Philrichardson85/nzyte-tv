@@ -26,6 +26,10 @@ Video-only sources receive a silent 48 kHz stereo AAC track so every normalized 
 
 Normalization scales the source down or up to fit inside 1920x1080 while preserving its aspect ratio, then pads the unused area. The source is not stretched or cropped.
 
+With the explicit `--vertical-layout blurred-background` option, display-portrait sources use a second presentation inside the same normalization encode. The sharp foreground scales proportionally to full 1080-pixel height and is centered. A second copy fills and crops to 1920x1080, then receives `boxblur=30:15` and `eq=brightness=-0.18:saturation=0.70`. Landscape inputs continue through the ordinary scale-and-pad filter even when the option is present. FFprobe display-rotation metadata and sample aspect ratio are used to determine orientation; unsafe or contradictory orientation data fails instead of being guessed.
+
+The layout does not define another broadcast profile. Output still uses the codec, H.264 profile, pixel format, frame rate, GOP, bitrate/buffer, audio, faststart, temporary publication, and independent verification rules in this document. No intermediate encoded media is created.
+
 The production source library includes `Vlog 2 episode 3.mp4` at 2628x1440. It completed normalization and verification as part of the full 39-file Raspberry Pi production run. Its unusual source aspect ratio remains useful for a future dedicated scale-and-pad regression test.
 
 ## Why keyframes are verified from timestamps

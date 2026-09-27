@@ -34,6 +34,97 @@ Application and operator commands should use these convenience symlinks:
 
 The persistent mount and blank-device setup are documented in [raspberry-pi-setup.md](raspberry-pi-setup.md). Do not format the existing media drive during application setup.
 
+## Portable media-root initialization
+
+On Windows or Linux, initialize a blank or partially populated removable drive with:
+
+```text
+nzytetv media init <media-root>
+```
+
+Examples:
+
+```powershell
+nzytetv media init "E:\"
+```
+
+```bash
+nzytetv media init /mnt/nzyte-media
+```
+
+The command uses platform-neutral filesystem APIs. It does not format or partition the device, copy media, invoke FFmpeg/FFprobe, normalize, initialize metadata, or build playlists. It creates only missing paths and files:
+
+```text
+<media-root>/
+|-- .nzytetv-media-root.json
+|-- source/
+|   |-- Music Videos/
+|   |-- Lyric Videos/
+|   |-- Performance Videos/
+|   |-- Vlog Episodes/
+|   |-- Bumpers/
+|   |-- Promos/
+|   |-- Interstitials/
+|   |-- Advertisements/
+|   `-- Specials/
+|-- library/
+|-- catalog/
+|   `-- song-catalog.json
+|-- playlists/
+`-- work/
+```
+
+The descriptor contains only `{ "schemaVersion": 1 }`; it stores no drive letter, mount path, machine identity, or secret. A valid existing descriptor is preserved byte-for-byte. A corrupt or unsupported descriptor stops initialization before the root is changed. A missing song catalog is created as the existing schema-version-1 catalog with an empty `songs` array. Any existing catalog, including a populated one, is preserved exactly.
+
+The source folders come from the authoritative directory/category mapping used by metadata discovery. `short-form` remains a supported programming type and optional recognized folder, but `media init` does not create a dedicated `Short Form` directory. Visualizer and Animated Visual categories are not created in this version.
+
+### New-drive workstation-to-Pi workflow
+
+1. Initialize the drive on the workstation:
+
+   ```powershell
+   nzytetv media init "E:\"
+   ```
+
+2. Copy original masters into `E:\source\<correct category>\`.
+
+3. Normalize directly from source to library:
+
+   ```powershell
+   nzytetv normalize-library `
+     "E:\source" `
+     "E:\library"
+   ```
+
+   For portrait social-media masters, use the existing one-pass layout:
+
+   ```powershell
+   nzytetv normalize-library `
+     "E:\source" `
+     "E:\library" `
+     --vertical-layout blurred-background
+   ```
+
+4. Run metadata initialization/review with the drive's catalog and source/library paths:
+
+   ```powershell
+   nzytetv metadata initialize `
+     "E:\source" `
+     "E:\library" `
+     --catalog "E:\catalog\song-catalog.json"
+
+   nzytetv metadata review `
+     "E:\source" `
+     "E:\library" `
+     --catalog "E:\catalog\song-catalog.json"
+   ```
+
+5. Safely eject the physical drive, attach it to the Raspberry Pi, and mount it (for example at `/srv/nzyte-tv/media`).
+
+The portrait path creates no intermediate H.264 file: visual treatment, canonical broadcast normalization, verification, publication, and technical-manifest writing remain one pipeline. Landscape files continue through ordinary normalization. A drive-letter or mount-path change does not change `assetId`, `contentGroupId`, source-relative technical fingerprints, or media-root identity, so the Pi does not need to re-encode assets that are already current and verified.
+
+The catalog, `.nzytetv.meta.json` programming sidecars, `.nzytetv.json` technical manifests, and any playlist/history JSON can travel on the media drive. The application executable and repository do not need to. Keeping catalog/playlists on the Pi's SD card remains supported; all commands accept explicit paths.
+
 ## Source and library rules
 
 `/srv/nzyte-tv/source` contains original/master media. Normalization must never modify or replace these files.
@@ -135,6 +226,48 @@ The workflow has these safety and resumability rules:
 - colliding source names such as `name.mov` and `name.mkv` in one category fail rather than overwrite the same `name.mp4` destination;
 - Ctrl+C cancels the active file, while temporary-output handling prevents a partial final destination.
 
+### Portrait and 9:16 source workflow
+
+Portrait masters remain in the normal source tree and can be converted during the existing one-pass normalization workflow:
+
+```bash
+/opt/nzyte-tv/app/nzytetv normalize-library \
+  /srv/nzyte-tv/source \
+  /srv/nzyte-tv/library \
+  --vertical-layout blurred-background
+```
+
+For a single file:
+
+```bash
+/opt/nzyte-tv/app/nzytetv normalize \
+  "/srv/nzyte-tv/source/Short Form/portrait master.mp4" \
+  --vertical-layout blurred-background
+```
+
+The option is explicit. FFprobe display dimensions, sample aspect ratio, and rotation metadata determine whether a source is portrait. Portrait video is centered without stretching at full 1080-pixel height. A second copy fills and crops the 1920x1080 background, is blurred, darkened by `-0.18`, and desaturated to `0.70`. Landscape files use the existing scale-and-pad filter. If display orientation cannot be determined safely, that file fails clearly while later batch files continue.
+
+This replaces the separate PowerShell `16x9 Output` conversion tree for normal NZYTE TV ingest. The original portrait file belongs under `source/`; the verified 16:9 result belongs under the same relative path in `library/`. A custom hand-designed 16:9 export may instead be placed in `source/` and normalized normally without `--vertical-layout`.
+
+The selected layout is stored in the technical source manifest. Requesting blurred-background after an ordinary normalization, or returning to ordinary normalization later, invalidates the resumable skip and rebuilds the destination. Legacy manifests without this field are treated as ordinary mode, avoiding unnecessary regeneration of existing landscape assets.
+
+#### Manual PowerShell/FFmpeg visual reference
+
+The application command above is the supported ingest path because it combines the visual transformation, canonical broadcast encoding, verification, atomic publication, and manifest update in one operation. The former manual recipe is retained only as a reference/fallback for reproducing the visual composition:
+
+```powershell
+$filter = @"
+[0:v]split=2[bgsrc][fgsrc];
+[bgsrc]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=30:15,eq=brightness=-0.18:saturation=0.70[bg];
+[fgsrc]scale=-2:1080[fg];
+[bg][fg]overlay=(W-w)/2:(H-h)/2[outv]
+"@
+
+ffmpeg -i $InputPath -filter_complex $filter -map "[outv]" -map "0:a?" $ReferenceOutput
+```
+
+That reference command does not replace NZYTE TV normalization or verification. A manually produced file must still enter the standard source/library workflow before it is broadcast eligible.
+
 Do not use `--overwrite` unless deliberate regeneration of existing destinations is required. It replaces destinations only and never authorizes replacement of source masters.
 
 ### Completed production run
@@ -202,7 +335,8 @@ A source manifest records:
 - source-relative path;
 - source size;
 - source last-modified UTC;
-- broadcast-profile version.
+- broadcast-profile version;
+- requested vertical-layout mode (`none` or `blurred-background`).
 
 The manifest is written atomically beside the normalized file after output verification passes. If the source changes during normalization, the batch records a failure and does not mark that output as current.
 

@@ -25,6 +25,11 @@ public static class CliApplication
 
         try
         {
+            if (command.Kind == CommandKind.MediaInit)
+            {
+                return await RunMediaInitAsync(command.Input!, cancellationToken).ConfigureAwait(false);
+            }
+
             if (command.Kind is CommandKind.MetadataInitialize
                 or CommandKind.MetadataReview
                 or CommandKind.MetadataSync
@@ -32,6 +37,14 @@ public static class CliApplication
                 or CommandKind.MetadataEdit)
             {
                 return await RunMetadataCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (command.Kind == CommandKind.BuildPlaylist)
+            {
+                string ffprobe = await new MediaToolLocator().LocateFfprobeAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                var playlistAnalyzer = new MediaAnalyzer(ffprobe, new ProcessRunner());
+                return await RunBuildPlaylistAsync(command, playlistAnalyzer, cancellationToken).ConfigureAwait(false);
             }
 
             var locator = new MediaToolLocator();
@@ -46,11 +59,12 @@ public static class CliApplication
                 CommandKind.Inspect => await InspectAsync(command.Input!, analyzer, cancellationToken).ConfigureAwait(false),
                 CommandKind.Verify => await VerifyAsync(command.Input!, verifier, cancellationToken).ConfigureAwait(false),
                 CommandKind.Normalize => await NormalizeAsync(
-                    command.Input!, command.Overwrite, tools.Ffmpeg, runner, analyzer, verifier, cancellationToken).ConfigureAwait(false),
+                    command.Input!, command.Overwrite, command.VerticalLayout, tools.Ffmpeg, runner, analyzer, verifier, cancellationToken).ConfigureAwait(false),
                 CommandKind.NormalizeLibrary => await NormalizeLibraryAsync(
                     command.Input!,
                     command.Destination!,
                     command.Overwrite,
+                    command.VerticalLayout,
                     tools.Ffmpeg,
                     runner,
                     analyzer,
@@ -137,6 +151,7 @@ public static class CliApplication
     private static async Task<int> NormalizeAsync(
         string input,
         bool overwrite,
+        VerticalLayoutMode verticalLayout,
         string ffmpegPath,
         IProcessRunner runner,
         IMediaAnalyzer analyzer,
@@ -146,6 +161,7 @@ public static class CliApplication
         string output = MediaPathPolicy.GetDefaultOutputPath(input, Environment.CurrentDirectory);
         Console.WriteLine($"Source:      {Path.GetFullPath(input)}");
         Console.WriteLine($"Destination: {output}");
+        Console.WriteLine($"Vertical layout: {FormatVerticalLayout(verticalLayout)}");
         Console.WriteLine();
 
         var normalizer = new MediaNormalizer(ffmpegPath, runner, analyzer, verifier);
@@ -160,7 +176,12 @@ public static class CliApplication
         });
 
         NormalizationResult result = await normalizer.NormalizeAsync(
-            input, output, overwrite, progress, cancellationToken).ConfigureAwait(false);
+            input,
+            output,
+            overwrite,
+            progress,
+            cancellationToken,
+            new NormalizationOptions { VerticalLayout = verticalLayout }).ConfigureAwait(false);
 
         Console.WriteLine();
         PrintVerification(result.Verification.Result);
@@ -173,6 +194,7 @@ public static class CliApplication
         string sourceRoot,
         string destinationRoot,
         bool overwrite,
+        VerticalLayoutMode verticalLayout,
         string ffmpegPath,
         IProcessRunner runner,
         IMediaAnalyzer analyzer,
@@ -186,6 +208,7 @@ public static class CliApplication
         Console.WriteLine($"Source root:      {source}");
         Console.WriteLine($"Destination root: {destination}");
         Console.WriteLine($"Overwrite:         {(overwrite ? "yes" : "no")}");
+        Console.WriteLine($"Vertical layout:   {FormatVerticalLayout(verticalLayout)}");
         Console.WriteLine();
 
         var fileNormalizer = new MediaNormalizer(ffmpegPath, runner, analyzer, verifier);
@@ -201,7 +224,8 @@ public static class CliApplication
             destination,
             overwrite,
             progress,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            new NormalizationOptions { VerticalLayout = verticalLayout }).ConfigureAwait(false);
 
         PrintLibrarySummary(result);
         return result.ExitCode;
@@ -288,6 +312,142 @@ public static class CliApplication
 
             default:
                 return 2;
+        }
+    }
+
+    private static async Task<int> RunMediaInitAsync(
+        string mediaRoot,
+        CancellationToken cancellationToken)
+    {
+        MediaRootInitializationResult result = await new MediaRootInitializer().InitializeAsync(
+            mediaRoot,
+            cancellationToken).ConfigureAwait(false);
+        Console.WriteLine("NZYTE TV Media Root Initialization");
+        Console.WriteLine();
+        Console.WriteLine("Media root:");
+        Console.WriteLine($"    {result.MediaRoot}");
+        Console.WriteLine();
+        PrintMediaRootPaths("Created", result.Created);
+        PrintMediaRootPaths("Existing", result.Existing);
+        Console.WriteLine("Files overwritten:");
+        Console.WriteLine($"    {result.FilesOverwritten}");
+        Console.WriteLine();
+        Console.WriteLine("Status:");
+        Console.WriteLine("    READY");
+        return 0;
+    }
+
+    private static void PrintMediaRootPaths(string heading, IReadOnlyList<string> paths)
+    {
+        Console.WriteLine($"{heading}:");
+        if (paths.Count == 0)
+        {
+            Console.WriteLine("    (none)");
+        }
+        else
+        {
+            foreach (string path in paths)
+            {
+                Console.WriteLine($"    {path}");
+            }
+        }
+
+        Console.WriteLine();
+    }
+
+    private static async Task<int> RunBuildPlaylistAsync(
+        ParsedCommand command,
+        IMediaAnalyzer analyzer,
+        CancellationToken cancellationToken)
+    {
+        var builder = new PlaylistBuilder(
+            new SongCatalogStore(),
+            new PlaylistLibraryLoader(analyzer),
+            new PlaylistStore(),
+            new PlaylistHistoryStore(),
+            new PlaylistGenerator());
+        PlaylistBuildResult result = await builder.BuildAsync(
+            new PlaylistBuildRequest(
+                command.Input!,
+                command.CatalogPath!,
+                command.OutputPath!,
+                command.TargetDuration!.Value,
+                command.Seed,
+                command.HistoryPath,
+                command.DryRun),
+            cancellationToken).ConfigureAwait(false);
+        PrintPlaylistSummary(result);
+        return 0;
+    }
+
+    private static void PrintPlaylistSummary(PlaylistBuildResult result)
+    {
+        PlaylistDocument playlist = result.Generation.Playlist;
+        PlaylistSummary summary = playlist.Summary;
+        Console.WriteLine("NZYTE TV Playlist Generation");
+        Console.WriteLine();
+        if (result.DryRun)
+        {
+            Console.WriteLine("DRY RUN: no playlist or history file was written.");
+            Console.WriteLine();
+        }
+
+        Console.WriteLine($"Target duration:            {FormatScheduleDuration(playlist.TargetDurationSeconds)}");
+        Console.WriteLine($"Actual duration:            {FormatScheduleDuration(playlist.ActualDurationSeconds)}");
+        Console.WriteLine($"Overrun:                    {FormatScheduleDuration(playlist.OverrunSeconds)}");
+        Console.WriteLine($"Seed:                       {playlist.Seed}");
+        Console.WriteLine($"Eligible assets:            {summary.EligibleAssets}");
+        Console.WriteLine($"Excluded assets:            {summary.ExcludedAssets}");
+        Console.WriteLine();
+        Console.WriteLine("Airtime:");
+        foreach ((string type, double percentage) in summary.AirtimePercentages)
+        {
+            Console.WriteLine($"    {type,-24}{percentage,6:0.00}%");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Relaxations:");
+        Console.WriteLine($"    category target:        {summary.CategoryTargetRelaxations}");
+        Console.WriteLine($"    exact asset cooldown:   {summary.ExactAssetCooldownRelaxations}");
+        Console.WriteLine($"    hot-rotation bypass:    {summary.NewReleasePreferenceBypasses}");
+        Console.WriteLine($"    song cooldown:          {summary.ContentGroupCooldownRelaxations}");
+        Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
+        Console.WriteLine();
+        Console.WriteLine("Cadence misses:");
+        Console.WriteLine($"    bumper:                  {summary.BumperCadenceMisses}");
+        Console.WriteLine($"    promo:                   {summary.PromoCadenceMisses}");
+        Console.WriteLine($"    interstitial:            {summary.InterstitialCadenceMisses}");
+
+        if (playlist.ExcludedAssets.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Excluded assets:");
+            foreach (PlaylistExclusion exclusion in playlist.ExcludedAssets)
+            {
+                Console.WriteLine($"    {exclusion.RelativePath}");
+                foreach (string reason in exclusion.Reasons)
+                {
+                    Console.WriteLine($"        - {reason}");
+                }
+            }
+        }
+
+        Console.WriteLine();
+        if (result.DryRun)
+        {
+            Console.WriteLine($"Playlist would be written:  {result.OutputPath}");
+            if (result.HistoryPath is not null)
+            {
+                Console.WriteLine($"History would be written:   {result.HistoryPath}");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Playlist written:           {result.OutputPath}");
+            if (result.HistoryPath is not null)
+            {
+                Console.WriteLine($"History written:            {result.HistoryPath}");
+            }
         }
     }
 
@@ -465,14 +625,16 @@ public static class CliApplication
     {
         if (command == CommandKind.RootHelp)
         {
-            Console.WriteLine("NZYTE TV media normalization, verification, and programming metadata");
+            Console.WriteLine("NZYTE TV media preparation, programming metadata, and playlist generation");
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  nzytetv inspect <input>");
-            Console.WriteLine("  nzytetv normalize <input> [--overwrite]");
-            Console.WriteLine("  nzytetv normalize-library <source-root> <destination-root> [--overwrite]");
+            Console.WriteLine("  nzytetv normalize <input> [--overwrite] [--vertical-layout blurred-background]");
+            Console.WriteLine("  nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]");
             Console.WriteLine("  nzytetv verify <input>");
+            Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
+            Console.WriteLine("  nzytetv media init <media-root>");
             Console.WriteLine();
             Console.WriteLine("Run 'nzytetv <command> --help' for command-specific help.");
             return;
@@ -485,18 +647,41 @@ public static class CliApplication
                 Console.WriteLine("Inspect media metadata using FFprobe JSON output.");
                 break;
             case CommandKind.Normalize:
-                Console.WriteLine("Usage: nzytetv normalize <input> [--overwrite]");
+                Console.WriteLine("Usage: nzytetv normalize <input> [--overwrite] [--vertical-layout blurred-background]");
                 Console.WriteLine("Create ./BroadcastReady/<original-name>.mp4 and verify it.");
                 Console.WriteLine("--overwrite  Replace an existing destination; the source is never replaced.");
+                Console.WriteLine("--vertical-layout blurred-background  Treat portrait video on a blurred 16:9 background.");
                 break;
             case CommandKind.NormalizeLibrary:
-                Console.WriteLine("Usage: nzytetv normalize-library <source-root> <destination-root> [--overwrite]");
+                Console.WriteLine("Usage: nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]");
                 Console.WriteLine("Recursively normalize supported videos while preserving relative folders.");
                 Console.WriteLine("--overwrite  Replace existing destinations; source files are never replaced.");
+                Console.WriteLine("--vertical-layout blurred-background  Treat portrait videos on blurred 16:9 backgrounds.");
                 break;
             case CommandKind.Verify:
                 Console.WriteLine("Usage: nzytetv verify <input>");
                 Console.WriteLine("Independently verify media and actual keyframe timestamps with FFprobe.");
+                break;
+            case CommandKind.BuildPlaylist:
+                Console.WriteLine("Usage: nzytetv build-playlist <library-root> --catalog <catalog-path> --output <playlist-path> --duration <value> [--seed <integer>] [--history <history-path>] [--dry-run]");
+                Console.WriteLine("Generate a deterministic whole-asset schedule from eligible normalized library media.");
+                Console.WriteLine("--duration  Positive duration such as 6h, 90m, or 3600s.");
+                Console.WriteLine("--seed      Reproduce candidate ordering; omitted uses a UTC daily seed.");
+                Console.WriteLine("--history   Carry cooldown state across playlist boundaries.");
+                Console.WriteLine("--dry-run   Generate and report without writing playlist or history files.");
+                break;
+            case CommandKind.MediaHelp:
+                Console.WriteLine("NZYTE TV portable media-root tools");
+                Console.WriteLine();
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv media init <media-root>");
+                Console.WriteLine();
+                Console.WriteLine("Initialize missing portable source, library, catalog, playlist, and work paths without touching existing content.");
+                break;
+            case CommandKind.MediaInit:
+                Console.WriteLine("Usage: nzytetv media init <media-root>");
+                Console.WriteLine("Create missing NZYTE TV media-root directories, descriptor, and an empty catalog.");
+                Console.WriteLine("Existing files and directories are preserved; no media tools or normalization are run.");
                 break;
             case CommandKind.MetadataHelp:
                 Console.WriteLine("NZYTE TV programming metadata and content catalog");
@@ -538,6 +723,19 @@ public static class CliApplication
 
     private static string FormatDuration(TimeSpan? duration) =>
         duration?.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture) ?? "unknown";
+
+    private static string FormatScheduleDuration(double seconds)
+    {
+        TimeSpan duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string FormatVerticalLayout(VerticalLayoutMode verticalLayout) => verticalLayout switch
+    {
+        VerticalLayoutMode.None => "standard",
+        VerticalLayoutMode.BlurredBackground => "blurred-background (portrait sources only)",
+        _ => verticalLayout.ToString(),
+    };
 
     private static string FormatFrameRate(string? rational) =>
         RationalNumber.TryParse(rational, out double fps) ? $"{fps:0.###} fps ({rational})" : rational ?? "unknown";

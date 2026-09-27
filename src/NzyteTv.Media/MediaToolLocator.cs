@@ -5,6 +5,8 @@ namespace NzyteTv.Media;
 public interface IMediaToolLocator
 {
     Task<MediaToolPaths> LocateAsync(CancellationToken cancellationToken);
+
+    Task<string> LocateFfprobeAsync(CancellationToken cancellationToken);
 }
 
 public sealed class MediaToolLocator : IMediaToolLocator
@@ -30,6 +32,20 @@ public sealed class MediaToolLocator : IMediaToolLocator
         await VerifyStartsAsync(ffmpeg, cancellationToken).ConfigureAwait(false);
         await VerifyStartsAsync(ffprobe, cancellationToken).ConfigureAwait(false);
         return new MediaToolPaths(ffmpeg, ffprobe);
+    }
+
+    public async Task<string> LocateFfprobeAsync(CancellationToken cancellationToken)
+    {
+        string? ffprobe = FindOnPath("ffprobe");
+        if (ffprobe is null)
+        {
+            throw new MediaToolNotFoundException(
+                "Required media tool not found on PATH: ffprobe. Install FFmpeg (which includes FFprobe), " +
+                "then verify with 'ffprobe -version'.");
+        }
+
+        await VerifyStartsAsync(ffprobe, cancellationToken).ConfigureAwait(false);
+        return ffprobe;
     }
 
     public static string? FindOnPath(string executableName)

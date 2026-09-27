@@ -1,4 +1,5 @@
 using NzyteTv.Cli;
+using NzyteTv.Core;
 
 namespace NzyteTv.Core.Tests;
 
@@ -30,6 +31,32 @@ public sealed class CommandLineParserTests
         Assert.Equal("/srv/nzyte-tv/media", result.Command.Input);
         Assert.Equal("/srv/nzyte-tv/work/BroadcastReady", result.Command.Destination);
         Assert.True(result.Command.Overwrite);
+    }
+
+    [Theory]
+    [InlineData("normalize", "portrait.mp4")]
+    [InlineData("normalize-library", "source", "library")]
+    public void Parse_NormalizeCommandsAcceptBlurredBackgroundLayout(
+        string command,
+        params string[] paths)
+    {
+        string[] arguments = [command, .. paths, "--vertical-layout", "blurred-background"];
+
+        CommandParseResult result = CommandLineParser.Parse(arguments);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(VerticalLayoutMode.BlurredBackground, result.Command!.VerticalLayout);
+    }
+
+    [Fact]
+    public void Parse_NormalizeRejectsUnsupportedVerticalLayout()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "normalize", "portrait.mp4", "--vertical-layout", "pillarbox",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("blurred-background", result.Error, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -66,6 +93,85 @@ public sealed class CommandLineParserTests
         CommandParseResult result = CommandLineParser.Parse(["inspect", "clip.mp4", "--overwrite"]);
 
         Assert.False(result.IsSuccess);
+    }
+
+    [Fact]
+    public void Parse_MediaInitReturnsPortableRoot()
+    {
+        CommandParseResult result = CommandLineParser.Parse(["media", "init", "E:\\"]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MediaInit, result.Command!.Kind);
+        Assert.Equal("E:\\", result.Command.Input);
+    }
+
+    [Theory]
+    [InlineData("--help", CommandKind.MediaHelp)]
+    [InlineData("init --help", CommandKind.MediaInit)]
+    public void Parse_MediaHelpCommandsAreSupported(string arguments, CommandKind expectedKind)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "media",
+            .. arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Command!.ShowHelp);
+        Assert.Equal(expectedKind, result.Command.Kind);
+    }
+
+    [Fact]
+    public void Parse_BuildPlaylistReturnsAllSchedulingOptions()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "build-playlist",
+            "/srv/nzyte-tv/library",
+            "--catalog",
+            "/srv/nzyte-tv/catalog/song-catalog.json",
+            "--output",
+            "/srv/nzyte-tv/playlists/current.json",
+            "--duration",
+            "6h",
+            "--seed",
+            "20260927",
+            "--history",
+            "/srv/nzyte-tv/playlists/history.json",
+            "--dry-run",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.BuildPlaylist, result.Command!.Kind);
+        Assert.Equal("/srv/nzyte-tv/library", result.Command.Input);
+        Assert.Equal("/srv/nzyte-tv/catalog/song-catalog.json", result.Command.CatalogPath);
+        Assert.Equal("/srv/nzyte-tv/playlists/current.json", result.Command.OutputPath);
+        Assert.Equal(TimeSpan.FromHours(6), result.Command.TargetDuration);
+        Assert.Equal(20260927, result.Command.Seed);
+        Assert.Equal("/srv/nzyte-tv/playlists/history.json", result.Command.HistoryPath);
+        Assert.True(result.Command.DryRun);
+    }
+
+    [Theory]
+    [InlineData("0h")]
+    [InlineData("forever")]
+    [InlineData("-1h")]
+    public void Parse_BuildPlaylistRejectsInvalidDuration(string duration)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "build-playlist", "library", "--catalog", "catalog.json",
+            "--output", "playlist.json", "--duration", duration,
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("duration", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Parse_BuildPlaylistRequiresCatalogOutputAndDuration()
+    {
+        CommandParseResult result = CommandLineParser.Parse(["build-playlist", "library"]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("--catalog", result.Error, StringComparison.Ordinal);
     }
 
     [Fact]

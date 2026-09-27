@@ -2,9 +2,9 @@
 
 NZYTE TV v0.1.0 is the production-validated media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps. The v0.1 media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
 
-v0.2 development adds the content catalog and programming-metadata foundation. Encoding remains independent from metadata resolution: media can normalize and verify while its song relationship is unresolved, and metadata operations never invoke FFmpeg or re-encode video.
+v0.2A adds the content catalog and programming-metadata foundation. v0.2B adds deterministic, inspectable playlist generation with airtime targets, cooldown history, hot-rotation weighting, and observable rule relaxation. Encoding remains independent from metadata and scheduling: playlist generation uses FFprobe for duration only and never invokes FFmpeg or re-encodes video.
 
-Streaming, scheduling, playlist selection, YouTube integration, services, and automatic restarts remain out of scope.
+Broadcasting/streaming, YouTube integration, services, live playlist watching, and automatic restarts remain out of scope.
 
 Windows x64 and Linux ARM64 remain first-class application targets; the verified production-style deployment is the Raspberry Pi environment below.
 
@@ -43,9 +43,11 @@ FFmpeg and FFprobe are required by media inspection, normalization, and verifica
 
 ```text
 nzytetv inspect <input>
-nzytetv normalize <input> [--overwrite]
-nzytetv normalize-library <source-root> <destination-root> [--overwrite]
+nzytetv media init <media-root>
+nzytetv normalize <input> [--overwrite] [--vertical-layout blurred-background]
+nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]
 nzytetv verify <input>
+nzytetv build-playlist <library-root> --catalog <catalog-path> --output <playlist-path> --duration <value> [--seed <integer>] [--history <history-path>] [--dry-run]
 nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
 nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
 nzytetv metadata sync <source-root> <library-root>
@@ -56,6 +58,23 @@ nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]
 Use `--help` on the root command or any subcommand. Exit code `0` means success; invalid arguments, media failures, and failed verification return non-zero codes.
 
 `normalize` writes `./BroadcastReady/<original-file-name>.mp4` relative to the current working directory. The source is never modified. An existing destination is rejected unless `--overwrite` is supplied, and that option still cannot replace the source. The final destination is published only after automatic verification succeeds. Video-only sources receive silent 48 kHz stereo AAC audio.
+
+Portrait and 9:16 sources can be normalized explicitly with `--vertical-layout blurred-background`. The source remains sharp, centered, and undistorted at full 1080-pixel height while a cropped, blurred, darkened, slightly desaturated copy fills the 1920x1080 background. Display rotation metadata is honored. Landscape inputs supplied with the option still use the ordinary scale-and-pad path. Transformation and broadcast normalization happen in one encode and use the same verification as every other asset; the option is never enabled implicitly.
+
+### Initialize a portable media root
+
+`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned.
+
+```powershell
+nzytetv media init "E:\"
+
+nzytetv normalize-library `
+  "E:\source" `
+  "E:\library" `
+  --vertical-layout blurred-background
+```
+
+Copy original masters into `E:\source\<category>\`, normalize on the workstation, then use the same physical drive on the Raspberry Pi. Source and library programming sidecars, technical manifests, the catalog, and optional playlists/history travel with the drive. Windows drive letters and Linux mount paths are not asset identity, so current normalized assets do not need another encode merely because `E:\` later mounts at `/srv/nzyte-tv/media`. The repository and executable remain installed on each host and do not need to live on the media drive. See [media-library.md](docs/media-library.md) for the complete workflow and directory layout.
 
 ### Normalize a library
 
@@ -68,11 +87,13 @@ Destination: <destination-root>/Music Videos/example.mp4
 
 The source and destination roots must be separate and cannot be nested inside one another. `System Volume Information`, reparse-point/symbolic-link directories, images, text files, and unsupported extensions are ignored.
 
-Each successful output has a sidecar source manifest named `<output>.mp4.nzytetv.json`. It records the source-relative path, source size, source last-modified UTC, manifest schema, and broadcast-profile version.
+Each successful output has a sidecar source manifest named `<output>.mp4.nzytetv.json`. It records the source-relative path, source size, source last-modified UTC, manifest schema, broadcast-profile version, and requested vertical-layout mode.
 
 Without `--overwrite`, an existing destination is skipped only when its source manifest matches the current source and independent verification passes. A missing, corrupt, stale, or profile-mismatched manifest forces re-normalization. A matching destination that fails verification is also re-normalized. With `--overwrite`, only the destination is replaced, and only after the new temporary output passes verification.
 
 One failed file does not stop later files. The final summary reports discovered, normalized, verified-skipped, failed, and verified-ready counts. Any per-file failure makes the command exit nonzero. Ctrl+C cancels the active FFmpeg process and does not publish its partial output.
+
+For bulk social-media ingest, keep portrait masters under `source/` and run `normalize-library ... --vertical-layout blurred-background`; relative folders are preserved under `library/`. This replaces the former separate PowerShell `16x9 Output` conversion for normal NZYTE TV ingest. Custom hand-designed 16:9 exports can still be placed in `source/` and normalized normally without the option. The former FFmpeg filter recipe remains documented as a manual reference in [media-library.md](docs/media-library.md).
 
 ### Content catalog and programming metadata
 
@@ -81,6 +102,12 @@ The versioned master song catalog provides stable `contentGroupId` values for so
 `metadata initialize` detects asset types from source categories and known short-form filename descriptors, preserves existing metadata, creates new identities, conservatively matches song titles or aliases, reports ambiguous and unresolved assets, and synchronizes metadata to existing normalized library files. `--dry-run` writes nothing. `metadata review` records an explicit human choice without changing `assetId`; `metadata edit` overrides a folder-derived type without moving or encoding media; `metadata sync` propagates programming changes without encoding; `metadata rebind` preserves identity after an intentional source rename.
 
 Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; after resolution, the catalog supplies the canonical song `title` and `artist` while the sidecar remains authoritative for asset identity and programming fields. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
+
+### Playlist generation
+
+`build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The default policy targets a six-hour 50% music-video, 25% lyric-video, and 25% vlog mix by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files.
+
+The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, same-song cooldown, and finally consecutive-vlog protection in that explicit order. Every relaxation and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
 
 ## Broadcast standard
 
@@ -310,8 +337,8 @@ Self-contained publishing includes the .NET runtime. FFmpeg and FFprobe remain e
 ## Architecture and testing
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
-- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, and eligibility rules. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, and JSON/filesystem adapters for catalogs and sidecars.
+- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, scheduling policy, cooldowns, relaxation, and playlist/history models. It has no FFmpeg dependency.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, read-only playlist library snapshots, duration inspection, and JSON/filesystem adapters.
 
 Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata idempotence, dry-run safety, review, synchronization, rename/rebind, orphan reporting, and playlist eligibility. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
@@ -321,3 +348,4 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Broadcast standard](docs/broadcast-standard.md)
 - [Media library and normalization workflow](docs/media-library.md)
 - [Content catalog and asset metadata](docs/content-catalog.md)
+- [Playlist and programming engine](docs/playlists.md)

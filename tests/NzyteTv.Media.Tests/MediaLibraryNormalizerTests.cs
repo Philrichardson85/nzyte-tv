@@ -223,6 +223,45 @@ public sealed class MediaLibraryNormalizerTests
     }
 
     [Fact]
+    public async Task NormalizeAsync_VerticalLayoutChangeInvalidatesManifestAndFlowsToNormalizer()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Short Form/Nested", "Portrait.mp4", destinationExists: true);
+        var manifestStore = new SourceManifestStore();
+        await WriteManifestAsync(fixture, file, manifestStore);
+        var normalizer = new RecordingNormalizer();
+        var service = CreateService([file], normalizer, new ConfigurableVerifier(), manifestStore);
+        var options = new NormalizationOptions
+        {
+            VerticalLayout = VerticalLayoutMode.BlurredBackground,
+        };
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None,
+            options);
+
+        Assert.Equal(1, result.Normalized);
+        var call = Assert.Single(normalizer.Calls);
+        Assert.Equal(VerticalLayoutMode.BlurredBackground, call.Options.VerticalLayout);
+        string normalizedDestination = call.Destination.Replace(
+            Path.AltDirectorySeparatorChar,
+            Path.DirectorySeparatorChar);
+        Assert.EndsWith(
+            Path.Combine("Short Form", "Nested", "Portrait.mp4"),
+            normalizedDestination,
+            StringComparison.Ordinal);
+        SourceFingerprint current = manifestStore.CreateFingerprint(
+            fixture.SourceRoot,
+            file.SourcePath,
+            options);
+        Assert.True(manifestStore.Evaluate(file.DestinationPath, current).IsMatch);
+    }
+
+    [Fact]
     public async Task NormalizeAsync_CorruptManifest_IsRenormalizedAndRepaired()
     {
         using var fixture = new LibraryFixture();
@@ -334,7 +373,12 @@ public sealed class MediaLibraryNormalizerTests
 
     private sealed class RecordingNormalizer : IMediaNormalizer
     {
-        public List<(string Source, string Destination, bool Overwrite)> Calls { get; } = [];
+        public List<(
+            string Source,
+            string Destination,
+            bool Overwrite,
+            NormalizationOptions Options)> Calls
+        { get; } = [];
 
         public HashSet<string> FailSources { get; } = new(StringComparer.Ordinal);
 
@@ -343,10 +387,11 @@ public sealed class MediaLibraryNormalizerTests
             string outputPath,
             bool overwrite,
             IProgress<NormalizationProgress>? progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            NormalizationOptions? options = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add((inputPath, outputPath, overwrite));
+            Calls.Add((inputPath, outputPath, overwrite, options ?? NormalizationOptions.Default));
             if (FailSources.Contains(inputPath))
             {
                 throw new MediaNormalizationException("simulated normalization failure");

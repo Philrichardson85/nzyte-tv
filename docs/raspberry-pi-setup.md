@@ -362,6 +362,18 @@ The OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 G
 
 See [media-library.md](media-library.md) for the directory inventory and handling rules.
 
+### Use a media root prepared on another workstation
+
+A blank removable drive can be initialized on Windows or Linux before it reaches the Pi:
+
+```text
+nzytetv media init <media-root>
+```
+
+For example, a Windows workstation can run `nzytetv media init "E:\"`, copy masters into `E:\source`, and normalize directly into `E:\library`. Portrait sources can use `--vertical-layout blurred-background` during that same normalization pass. The catalog can travel at `E:\catalog\song-catalog.json`, and programming sidecars, technical manifests, playlists, and history remain on the physical drive.
+
+After safe ejection and mounting at `/srv/nzyte-tv/media`, the Pi may consume the already-normalized `library/`. A drive-letter or mount-path change is not asset identity and does not by itself require another encode. The repository and `/opt/nzyte-tv/app` executable stay on the Pi; they are not required on the USB drive. The SD-card catalog/playlists layout below remains a supported deployment alternative because commands accept explicit paths.
+
 ## 8. Create the deployment layout
 
 The deployed layout separates source, published application files, mutable working data, logs, playlists, and permanent USB media:
@@ -447,10 +459,13 @@ Check executable help and each command's help without touching media:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv --help
+/opt/nzyte-tv/app/nzytetv media --help
+/opt/nzyte-tv/app/nzytetv media init --help
 /opt/nzyte-tv/app/nzytetv inspect --help
 /opt/nzyte-tv/app/nzytetv normalize --help
 /opt/nzyte-tv/app/nzytetv normalize-library --help
 /opt/nzyte-tv/app/nzytetv verify --help
+/opt/nzyte-tv/app/nzytetv build-playlist --help
 /opt/nzyte-tv/app/nzytetv metadata --help
 /opt/nzyte-tv/app/nzytetv metadata initialize --help
 /opt/nzyte-tv/app/nzytetv metadata review --help

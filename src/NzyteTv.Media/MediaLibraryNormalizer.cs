@@ -10,7 +10,8 @@ public interface IMediaLibraryNormalizer
         string destinationRoot,
         bool overwrite,
         IProgress<LibraryNormalizationProgress>? progress,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        NormalizationOptions? options = null);
 }
 
 public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
@@ -37,8 +38,10 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
         string destinationRoot,
         bool overwrite,
         IProgress<LibraryNormalizationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        NormalizationOptions? options = null)
     {
+        NormalizationOptions normalizationOptions = options ?? NormalizationOptions.Default;
         cancellationToken.ThrowIfCancellationRequested();
         LibraryPathPolicy.EnsureRootsDoNotOverlap(sourceRoot, destinationRoot);
         IReadOnlyList<LibraryMediaFile> files = _discovery.Discover(sourceRoot, destinationRoot);
@@ -69,7 +72,10 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
 
             try
             {
-                SourceFingerprint expectedFingerprint = _manifestStore.CreateFingerprint(sourceRoot, file.SourcePath);
+                SourceFingerprint expectedFingerprint = _manifestStore.CreateFingerprint(
+                    sourceRoot,
+                    file.SourcePath,
+                    normalizationOptions);
                 bool destinationExists = File.Exists(file.DestinationPath);
 
                 if (File.Exists(file.DestinationPath) && !overwrite)
@@ -156,9 +162,13 @@ public sealed class MediaLibraryNormalizer : IMediaLibraryNormalizer
                     file.DestinationPath,
                     replaceDestination,
                     fileProgress,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    normalizationOptions).ConfigureAwait(false);
 
-                SourceFingerprint completedFingerprint = _manifestStore.CreateFingerprint(sourceRoot, file.SourcePath);
+                SourceFingerprint completedFingerprint = _manifestStore.CreateFingerprint(
+                    sourceRoot,
+                    file.SourcePath,
+                    normalizationOptions);
                 if (completedFingerprint != expectedFingerprint)
                 {
                     throw new MediaNormalizationException(
