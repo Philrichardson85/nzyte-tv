@@ -35,7 +35,7 @@ free-fallin-lyric-video
 free-fallin-performance-krog-street
 ```
 
-Both IDs are stable. Filenames help discover relationships during initialization, but metadata becomes authoritative afterward. Renaming a file must not create a new identity for an initialized asset.
+Both IDs are stable. Filenames help discover relationships during initialization, but metadata becomes authoritative afterward. Once a song relationship resolves, the catalog is authoritative for canonical song `title` and `artist`; `assetId`, type/subtype, and other programming fields remain asset metadata. Renaming a file must not create a new identity for an initialized asset.
 
 Alternate visuals of the same recording—music videos, lyric videos, performances, and short-form clips—share one `contentGroupId`. A substantially different recording or remix may have its own `contentGroupId`; that is an editorial catalog decision and is never inferred automatically from a filename. Non-song programming such as vlogs, bumpers, album teasers, montages, medleys, promos, advertisements, and specials does not receive a fake song group. Multi-song relationships are outside v0.2A, so those assets may keep `contentGroupId: null`.
 
@@ -211,7 +211,7 @@ Initialization:
 - reports resolved groups, assets needing review, unresolved assets, errors, and orphaned sidecars;
 - reports encoding, metadata, and future playlist-eligibility status.
 
-Repeated initialization is safe. A valid resolved sidecar is authoritative and is not inferred again. A valid unresolved sidecar may gain a relationship later when a catalog change makes exactly one match possible; its `assetId` and user-entered fields remain unchanged.
+Repeated initialization is safe. A valid resolved relationship is not inferred again; initialization reconciles its `title` and `artist` to the referenced catalog entry while preserving `assetId`, type/subtype, and other programming fields. A valid unresolved sidecar may gain a relationship later when a catalog change makes exactly one match possible; its canonical title and artist then come from the catalog without changing its asset identity.
 
 Missing source assets are reported without deleting their metadata or history.
 
@@ -263,7 +263,7 @@ Run:
   --catalog /srv/nzyte-tv/catalog/songs.json
 ```
 
-Review prompts only for song assets whose relationship is unresolved or references a group no longer present in the catalog. The user chooses from catalog candidates or leaves the asset unresolved. A confirmed relationship becomes authoritative. Review preserves `assetId` and user-entered metadata, updates the source sidecar, and synchronizes the library sidecar when the normalized asset exists.
+Review prompts only for song assets whose relationship is unresolved or references a group no longer present in the catalog. The user chooses from catalog candidates or leaves the asset unresolved. A confirmed relationship becomes authoritative. Review preserves `assetId`, type/subtype, and non-catalog programming fields; it writes the selected catalog entry's canonical `title` and `artist`, updates the source sidecar, and synchronizes the library sidecar when the normalized asset exists.
 
 ## Synchronize without encoding
 

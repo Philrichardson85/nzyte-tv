@@ -252,10 +252,17 @@ public sealed class MetadataInitializer
             reason = "Existing non-song metadata is authoritative and was preserved.";
         }
         else if (!string.IsNullOrWhiteSpace(metadata.ContentGroupId)
-            && catalog.FindByContentGroupId(metadata.ContentGroupId) is not null)
+            && catalog.FindByContentGroupId(metadata.ContentGroupId) is SongCatalogEntry resolvedSong)
         {
+            effectiveMetadata = metadata.WithContentGroup(resolvedSong);
+            if (!dryRun)
+            {
+                await _metadataStore.WriteAsync(file.SourcePath, effectiveMetadata, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             status = MetadataInitializationStatus.Preserved;
-            reason = "Existing resolved metadata is authoritative and was preserved.";
+            reason = "Existing resolved relationship and asset identity were preserved; title and artist use the canonical catalog values.";
         }
         else if (!string.IsNullOrWhiteSpace(metadata.ContentGroupId))
         {
@@ -278,7 +285,7 @@ public sealed class MetadataInitializer
                 }
 
                 status = MetadataInitializationStatus.Resolved;
-                reason = "Previously unresolved metadata now has one unambiguous catalog match; existing asset identity and user fields were preserved.";
+                reason = "Previously unresolved metadata now has one unambiguous catalog match; asset identity and non-catalog fields were preserved, and title and artist use the canonical catalog values.";
             }
             else
             {

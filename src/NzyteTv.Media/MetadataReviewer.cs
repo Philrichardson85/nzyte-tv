@@ -95,8 +95,8 @@ public sealed class MetadataReviewer
                 Resolved: true,
                 synchronized,
                 destinationCollision
-                    ? "Explicit catalog relationship saved; assetId and user-entered metadata were preserved. Multiple sources map to the same library asset, so library synchronization was skipped."
-                    : "Explicit catalog relationship saved; assetId and user-entered metadata were preserved."));
+                    ? "Explicit catalog relationship saved with canonical title and artist; assetId and non-catalog fields were preserved. Multiple sources map to the same library asset, so library synchronization was skipped."
+                    : "Explicit catalog relationship saved with canonical title and artist; assetId and non-catalog fields were preserved."));
         }
 
         return new MetadataReviewResult(results);

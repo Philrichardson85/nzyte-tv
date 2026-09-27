@@ -80,7 +80,7 @@ The versioned master song catalog provides stable `contentGroupId` values for so
 
 `metadata initialize` detects asset types from source categories and known short-form filename descriptors, preserves existing metadata, creates new identities, conservatively matches song titles or aliases, reports ambiguous and unresolved assets, and synchronizes metadata to existing normalized library files. `--dry-run` writes nothing. `metadata review` records an explicit human choice without changing `assetId`; `metadata edit` overrides a folder-derived type without moving or encoding media; `metadata sync` propagates programming changes without encoding; `metadata rebind` preserves identity after an intentional source rename.
 
-Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; valid metadata becomes authoritative afterward. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
+Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; after resolution, the catalog supplies the canonical song `title` and `artist` while the sidecar remains authoritative for asset identity and programming fields. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
 
 ## Broadcast standard
 

@@ -31,6 +31,55 @@ public sealed class MetadataWorkflowTests
     }
 
     [Fact]
+    public async Task Initialize_AliasMatchWritesCanonicalCatalogTitleAndArtist()
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(Song(
+            "i-did-it-for-you",
+            "I Did It For You",
+            artist: "Canonical Artist",
+            aliases: ["I Did It 4 U"]));
+        string source = fixture.AddSource(
+            "Music Videos",
+            "Nzyte - I Did It 4 U (Official Music Video).mp4");
+
+        await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            dryRun: false,
+            CancellationToken.None);
+
+        AssetMetadata metadata = fixture.MetadataStore.Read(source);
+        Assert.Equal("i-did-it-for-you", metadata.ContentGroupId);
+        Assert.Equal("I Did It For You", metadata.Title);
+        Assert.Equal("Canonical Artist", metadata.Artist);
+    }
+
+    [Fact]
+    public async Task Initialize_AcronymAliasWritesFullCanonicalCatalogTitle()
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(Song(
+            "full-official-song",
+            "Some Full Official Song Title",
+            aliases: ["WALTW"]));
+        string source = fixture.AddSource("Music Videos", "WALTW Content 15.mp4");
+
+        await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            dryRun: false,
+            CancellationToken.None);
+
+        AssetMetadata metadata = fixture.MetadataStore.Read(source);
+        Assert.Equal("full-official-song", metadata.ContentGroupId);
+        Assert.Equal("Some Full Official Song Title", metadata.Title);
+        Assert.Equal("Nzyte", metadata.Artist);
+    }
+
+    [Fact]
     public async Task Initialize_DuplicateTitlesRequireReviewAndOverlappingSpecificTitleResolves()
     {
         using var fixture = new MetadataFixture();
@@ -85,6 +134,8 @@ public sealed class MetadataWorkflowTests
         AssetMetadata metadata = fixture.MetadataStore.Read(source);
         Assert.Equal(AssetTypes.ShortForm, metadata.Type);
         Assert.Equal(expectedSubtype, metadata.Subtype);
+        Assert.Equal("Cash Rules", metadata.Title);
+        Assert.Equal("Nzyte", metadata.Artist);
     }
 
     [Fact]
@@ -147,6 +198,7 @@ public sealed class MetadataWorkflowTests
         AssetMetadata metadata = fixture.MetadataStore.Read(source);
         Assert.Equal(type, metadata.Type);
         Assert.Null(metadata.ContentGroupId);
+        Assert.Equal("Album Medley Teaser", metadata.Title);
     }
 
     [Fact]
@@ -182,13 +234,19 @@ public sealed class MetadataWorkflowTests
     }
 
     [Fact]
-    public async Task Initialize_ExistingManualResolutionAndUserFieldsArePreserved()
+    public async Task Initialize_ExistingResolvedRelationshipUsesCanonicalIdentityWithoutTouchingEncoding()
     {
         using var fixture = new MetadataFixture();
         fixture.WriteCatalog(
-            Song("human-choice", "Human Choice"),
+            Song("human-choice", "Human Choice", artist: "Catalog Artist"),
             Song("filename-choice", "Filename Choice"));
-        string source = fixture.AddSource("Music Videos", "Filename Choice Official Video.mp4");
+        string source = fixture.AddSource(
+            "Music Videos",
+            "Filename Choice Official Video.mp4",
+            libraryExists: true);
+        string library = fixture.GetLibraryPath(source);
+        string technicalManifest = SourceManifestStore.GetManifestPath(library);
+        File.WriteAllText(technicalManifest, "technical normalization state");
         var metadata = new AssetMetadata
         {
             AssetId = "stable-manual-id",
@@ -201,6 +259,9 @@ public sealed class MetadataWorkflowTests
             Tags = ["manual"],
         };
         await fixture.MetadataStore.WriteAsync(source, metadata, CancellationToken.None);
+        string sourceMediaBefore = File.ReadAllText(source);
+        string libraryMediaBefore = File.ReadAllText(library);
+        string technicalManifestBefore = File.ReadAllText(technicalManifest);
 
         MetadataInitializationResult result = await fixture.CreateInitializer().InitializeAsync(
             fixture.SourceRoot,
@@ -214,10 +275,15 @@ public sealed class MetadataWorkflowTests
         AssetMetadata actual = fixture.MetadataStore.Read(source);
         Assert.Equal("stable-manual-id", actual.AssetId);
         Assert.Equal("human-choice", actual.ContentGroupId);
-        Assert.Equal("Custom Presentation Title", actual.Title);
+        Assert.Equal("Human Choice", actual.Title);
+        Assert.Equal("Catalog Artist", actual.Artist);
         Assert.Equal(new DateOnly(2026, 9, 27), actual.RotationStartDate);
         Assert.False(actual.Enabled);
         Assert.Equal(["manual"], actual.Tags);
+        Assert.Equal("Human Choice", fixture.MetadataStore.Read(library).Title);
+        Assert.Equal(sourceMediaBefore, File.ReadAllText(source));
+        Assert.Equal(libraryMediaBefore, File.ReadAllText(library));
+        Assert.Equal(technicalManifestBefore, File.ReadAllText(technicalManifest));
     }
 
     [Fact]
@@ -244,7 +310,8 @@ public sealed class MetadataWorkflowTests
         AssetMetadata actual = fixture.MetadataStore.Read(source);
         Assert.Equal("stable-unresolved-id", actual.AssetId);
         Assert.Equal("free-fallin", actual.ContentGroupId);
-        Assert.Equal("Presentation Title", actual.Title);
+        Assert.Equal("Free Fallin", actual.Title);
+        Assert.Equal("Nzyte", actual.Artist);
     }
 
     [Fact]
@@ -407,12 +474,12 @@ public sealed class MetadataWorkflowTests
     {
         using var fixture = new MetadataFixture();
         fixture.WriteCatalog(
-            Song("cold-american-dreams-2", "Cold", "American Dreams 2"),
-            Song("cold-future-project", "Cold", "Future Project"));
-        string source = fixture.AddSource("Performance Videos", "Cold Performance.mp4", libraryExists: true);
+            Song("cold-project-a", "Cold", "Project A", artist: "Project A Artist"),
+            Song("cold-project-b", "Cold", "Project B", artist: "Project B Artist"));
+        string source = fixture.AddSource("Performance Videos", "Cold - Performance.mp4", libraryExists: true);
         AssetMetadata metadata = Metadata("stable-cold-performance", null, AssetTypes.Performance);
         await fixture.MetadataStore.WriteAsync(source, metadata, CancellationToken.None);
-        var prompt = new SelectingPrompt("cold-future-project");
+        var prompt = new SelectingPrompt("cold-project-a");
         var reviewer = new MetadataReviewer(
             new SongCatalogStore(),
             fixture.Discovery,
@@ -429,10 +496,16 @@ public sealed class MetadataWorkflowTests
         MetadataReviewFileResult reviewed = Assert.Single(result.Files);
         Assert.True(reviewed.Resolved);
         Assert.Equal("stable-cold-performance", reviewed.AssetId);
-        Assert.Equal("cold-future-project", reviewed.ContentGroupId);
-        Assert.Equal("cold-future-project", fixture.MetadataStore.Read(source).ContentGroupId);
-        Assert.Equal("cold-future-project", fixture.MetadataStore.Read(
-            fixture.GetLibraryPath(source)).ContentGroupId);
+        Assert.Equal("cold-project-a", reviewed.ContentGroupId);
+        AssetMetadata sourceMetadata = fixture.MetadataStore.Read(source);
+        Assert.Equal("cold-project-a", sourceMetadata.ContentGroupId);
+        Assert.Equal("Cold", sourceMetadata.Title);
+        Assert.Equal("Project A Artist", sourceMetadata.Artist);
+        Assert.Equal("stable-cold-performance", sourceMetadata.AssetId);
+        AssetMetadata libraryMetadata = fixture.MetadataStore.Read(fixture.GetLibraryPath(source));
+        Assert.Equal("cold-project-a", libraryMetadata.ContentGroupId);
+        Assert.Equal("Cold", libraryMetadata.Title);
+        Assert.Equal("Project A Artist", libraryMetadata.Artist);
     }
 
     [Fact]
@@ -508,14 +581,19 @@ public sealed class MetadataWorkflowTests
         Assert.True(File.Exists(AssetMetadataStore.GetMetadataPath(missingSource)));
     }
 
-    private static SongCatalogEntry Song(string id, string title, string? project = null) => new()
-    {
-        ContentGroupId = id,
-        Title = title,
-        Artist = "Nzyte",
-        Project = project,
-        Aliases = [],
-    };
+    private static SongCatalogEntry Song(
+        string id,
+        string title,
+        string? project = null,
+        string artist = "Nzyte",
+        List<string>? aliases = null) => new()
+        {
+            ContentGroupId = id,
+            Title = title,
+            Artist = artist,
+            Project = project,
+            Aliases = aliases ?? [],
+        };
 
     private static AssetMetadata Metadata(string assetId, string? groupId, string type, bool enabled = true) => new()
     {
