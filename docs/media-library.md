@@ -14,7 +14,7 @@ The permanent media location is a SanDisk Cruzer Glide USB drive:
 | Mount point | `/srv/nzyte-tv/media` |
 | Mount behavior | systemd automount |
 
-The Raspberry Pi OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Keep Ubuntu, the application, repository, logs, playlists, and working data on the SD card. Keep large source and normalized media on the external drive.
+The Raspberry Pi OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Keep Ubuntu, the application, repository, catalog, logs, playlists, and working data on the SD card. Keep large source and normalized media on the external drive.
 
 The permanent physical layout is:
 
@@ -48,6 +48,7 @@ Bumpers/
 Interstitials/
 Lyric Videos/
 Music Videos/
+Performance Videos/
 Promos/
 Specials/
 Vlog Episodes/
@@ -208,3 +209,5 @@ The manifest is written atomically beside the normalized file after output verif
 Outputs created by older versions do not have manifests. The first run after upgrading conservatively normalizes those files again and creates sidecars. The application does not adopt an existing output based only on technical validity because it cannot prove that the output came from the current source master.
 
 The required media format is defined in [broadcast-standard.md](broadcast-standard.md).
+
+Programming identity and scheduling metadata are separate from normalization. The master song catalog, `.nzytetv.meta.json` sidecars, initialization/review/synchronization commands, and eligibility rules are defined in [content-catalog.md](content-catalog.md). Introducing or changing programming metadata never requires these 39 production assets to be encoded again.

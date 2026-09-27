@@ -47,13 +47,19 @@ Increment `BroadcastStandard.ProfileVersion` whenever a broadcast-standard chang
 
 Write source manifests atomically only after normalization and verification succeed. Never create or update a matching manifest for an unverified output.
 
+Encoding is independent from programming-metadata resolution. Missing, ambiguous, or invalid programming metadata must never prevent source media from normalizing and verifying, and metadata commands must never invoke FFmpeg or trigger normalization.
+
+`.nzytetv.json` is machine-managed technical normalization state. `.nzytetv.meta.json` is programming/catalog metadata. Do not confuse, merge, or substitute these sidecars.
+
 ## Production storage layout
 
 The Raspberry Pi production media drive is mounted at `/srv/nzyte-tv/media`. Its `source/` directory contains original/master media, and its `library/` directory contains only normalized and verified broadcast assets.
 
 Application and operational examples should use the stable convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`, which are symlinks to the corresponding directories on the external drive. Preserve correct behavior when roots are symlinks, and remember that maintenance tools such as `find` and `du` may require `-L` to follow them.
 
-Future broadcaster and playlist components must consume `/srv/nzyte-tv/library`, never `/srv/nzyte-tv/source`. Keep large source and normalized media on the external drive; the SD card is primarily for the OS, application, repository, logs, playlists, and working data.
+Future broadcaster and playlist components must consume `/srv/nzyte-tv/library`, never `/srv/nzyte-tv/source`. Keep large source and normalized media on the external drive; the SD card is primarily for the OS, application, repository, catalog, logs, playlists, and working data.
+
+The recommended master song catalog directory is `/srv/nzyte-tv/catalog` on the SD card. Do not hardcode that path into domain logic; CLI operations accept catalog paths explicitly.
 
 ## Safety
 

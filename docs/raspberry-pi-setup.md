@@ -358,7 +358,7 @@ findmnt /srv/nzyte-tv/media
 
 Because `x-systemd.automount` is enabled, the first `findmnt` after boot can show `systemd-1` and filesystem type `autofs`. Accessing the directory triggers the real NTFS mount; the second `findmnt` should then show the mounted drive. The verified ownership was `u24 u24`.
 
-The OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Reserve that storage primarily for Ubuntu, the application, repository, logs, playlists, and working data. Keep large source and normalized media on the external drive.
+The OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Reserve that storage primarily for Ubuntu, the application, repository, catalog, logs, playlists, and working data. Keep large source and normalized media on the external drive.
 
 See [media-library.md](media-library.md) for the directory inventory and handling rules.
 
@@ -374,6 +374,7 @@ The deployed layout separates source, published application files, mutable worki
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
+|-- catalog/                       versioned programming catalog
 |-- work/
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
@@ -387,9 +388,9 @@ Create the directories and grant the deployment user ownership of application an
 
 ```bash
 sudo mkdir -p /opt/nzyte-tv/src /opt/nzyte-tv/app
-sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
 sudo chown -R "$USER":"$USER" /opt/nzyte-tv
-sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
 
 mkdir -p /srv/nzyte-tv/media/source /srv/nzyte-tv/media/library
 sudo ln -s /srv/nzyte-tv/media/source /srv/nzyte-tv/source
@@ -450,7 +451,15 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv normalize --help
 /opt/nzyte-tv/app/nzytetv normalize-library --help
 /opt/nzyte-tv/app/nzytetv verify --help
+/opt/nzyte-tv/app/nzytetv metadata --help
+/opt/nzyte-tv/app/nzytetv metadata initialize --help
+/opt/nzyte-tv/app/nzytetv metadata review --help
+/opt/nzyte-tv/app/nzytetv metadata sync --help
+/opt/nzyte-tv/app/nzytetv metadata rebind --help
+/opt/nzyte-tv/app/nzytetv metadata edit --help
 ```
+
+The recommended master song catalog path is `/srv/nzyte-tv/catalog/songs.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. See [content-catalog.md](content-catalog.md) before initializing sidecars for production media.
 
 The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
 

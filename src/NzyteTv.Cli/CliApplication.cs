@@ -25,6 +25,15 @@ public static class CliApplication
 
         try
         {
+            if (command.Kind is CommandKind.MetadataInitialize
+                or CommandKind.MetadataReview
+                or CommandKind.MetadataSync
+                or CommandKind.MetadataRebind
+                or CommandKind.MetadataEdit)
+            {
+                return await RunMetadataCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             var locator = new MediaToolLocator();
             MediaToolPaths tools = await locator.LocateAsync(cancellationToken).ConfigureAwait(false);
             var runner = new ProcessRunner();
@@ -65,6 +74,7 @@ public static class CliApplication
         }
         catch (Exception exception) when (exception is
             FileNotFoundException or IOException or UnauthorizedAccessException or InvalidOperationException or
+            InvalidDataException or CatalogValidationException or AssetMetadataValidationException or
             MediaToolNotFoundException or ProcessExecutionException or MediaProbeException or
             MediaNormalizationException or FfprobeDataException)
         {
@@ -197,6 +207,240 @@ public static class CliApplication
         return result.ExitCode;
     }
 
+    private static async Task<int> RunMetadataCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        var discovery = new MetadataAssetDiscovery();
+        var metadataStore = new AssetMetadataStore();
+        var synchronizer = new MetadataSynchronizer(discovery, metadataStore);
+
+        switch (command.Kind)
+        {
+            case CommandKind.MetadataInitialize:
+                var initializer = new MetadataInitializer(
+                    new SongCatalogStore(),
+                    discovery,
+                    metadataStore,
+                    synchronizer);
+                MetadataInitializationResult initialized = await initializer.InitializeAsync(
+                    command.Input!,
+                    command.Destination!,
+                    command.CatalogPath!,
+                    command.DryRun,
+                    cancellationToken).ConfigureAwait(false);
+                PrintMetadataInitialization(initialized, command.Input!);
+                return initialized.ExitCode;
+
+            case CommandKind.MetadataReview:
+                var reviewer = new MetadataReviewer(
+                    new SongCatalogStore(),
+                    discovery,
+                    metadataStore,
+                    synchronizer,
+                    new ConsoleMetadataReviewPrompt());
+                MetadataReviewResult reviewed = await reviewer.ReviewAsync(
+                    command.Input!,
+                    command.Destination!,
+                    command.CatalogPath!,
+                    cancellationToken).ConfigureAwait(false);
+                PrintMetadataReviewSummary(reviewed);
+                return 0;
+
+            case CommandKind.MetadataSync:
+                MetadataSyncResult synchronized = await synchronizer.SynchronizeAsync(
+                    command.Input!,
+                    command.Destination!,
+                    dryRun: false,
+                    cancellationToken).ConfigureAwait(false);
+                PrintMetadataSync(synchronized, command.Input!);
+                return synchronized.ExitCode;
+
+            case CommandKind.MetadataRebind:
+                new MetadataRebinder(metadataStore).Rebind(command.Input!, command.Destination!);
+                AssetMetadata rebound = metadataStore.Read(command.Destination!);
+                Console.WriteLine("NZYTE TV Metadata Rebind");
+                Console.WriteLine();
+                Console.WriteLine($"Old source: {Path.GetFullPath(command.Input!)}");
+                Console.WriteLine($"New source: {Path.GetFullPath(command.Destination!)}");
+                Console.WriteLine($"Asset ID:   {rebound.AssetId}");
+                Console.WriteLine($"Group ID:   {rebound.ContentGroupId ?? "(not applicable or unresolved)"}");
+                Console.WriteLine();
+                Console.WriteLine("Programming metadata moved without encoding media.");
+                return 0;
+
+            case CommandKind.MetadataEdit:
+                AssetMetadata edited = await new MetadataEditor(metadataStore).UpdateTypeAsync(
+                    command.Input!,
+                    command.MetadataType!,
+                    command.MetadataSubtype,
+                    cancellationToken).ConfigureAwait(false);
+                Console.WriteLine("NZYTE TV Metadata Edit");
+                Console.WriteLine();
+                Console.WriteLine($"Source:    {Path.GetFullPath(command.Input!)}");
+                Console.WriteLine($"Asset ID:  {edited.AssetId}");
+                Console.WriteLine($"Type:      {edited.Type}");
+                Console.WriteLine($"Subtype:   {edited.Subtype ?? "(none)"}");
+                Console.WriteLine($"Group ID:  {edited.ContentGroupId ?? "(not applicable or unresolved)"}");
+                Console.WriteLine();
+                Console.WriteLine("Programming metadata updated without encoding media. Run metadata sync to copy it to an existing library asset.");
+                return 0;
+
+            default:
+                return 2;
+        }
+    }
+
+    private static void PrintMetadataInitialization(MetadataInitializationResult result, string sourceRoot)
+    {
+        Console.WriteLine("NZYTE TV Metadata Initialization");
+        Console.WriteLine();
+        if (result.DryRun)
+        {
+            Console.WriteLine("DRY RUN: no files were written.");
+            Console.WriteLine();
+        }
+
+        foreach (IGrouping<string, MetadataAssetResult> group in result.Assets
+            .Where(asset => !string.IsNullOrWhiteSpace(asset.ContentGroupId)
+                && asset.Status is MetadataInitializationStatus.Resolved or MetadataInitializationStatus.Preserved)
+            .GroupBy(asset => asset.ContentGroupId!, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"GROUP: {group.Key}");
+            Console.WriteLine($"Status: {(group.Any(asset => asset.Status == MetadataInitializationStatus.Resolved) ? "AUTO-GROUPED" : "METADATA PRESERVED")}");
+            Console.WriteLine();
+            foreach (MetadataAssetResult asset in group)
+            {
+                PrintMetadataAsset(asset, sourceRoot);
+            }
+        }
+
+        PrintMetadataSection(
+            "NON-SONG ASSETS",
+            result.Assets.Where(asset => asset.Status is MetadataInitializationStatus.NonSong
+                || (asset.Status == MetadataInitializationStatus.Preserved
+                    && string.IsNullOrWhiteSpace(asset.ContentGroupId))),
+            sourceRoot);
+        PrintMetadataSection(
+            "REVIEW REQUIRED",
+            result.Assets.Where(asset => asset.Status == MetadataInitializationStatus.ReviewRequired),
+            sourceRoot);
+        PrintMetadataSection(
+            "UNRESOLVED",
+            result.Assets.Where(asset => asset.Status == MetadataInitializationStatus.Unresolved),
+            sourceRoot);
+        PrintMetadataSection(
+            "ORPHANED / MISSING SOURCE",
+            result.Assets.Where(asset => asset.Status == MetadataInitializationStatus.Orphaned),
+            sourceRoot);
+        PrintMetadataSection(
+            "ERRORS",
+            result.Assets.Where(asset => asset.Status == MetadataInitializationStatus.Error),
+            sourceRoot);
+
+        Console.WriteLine("SUMMARY");
+        Console.WriteLine();
+        Console.WriteLine($"    Assets scanned:               {result.AssetsScanned}");
+        Console.WriteLine($"    Existing metadata preserved:  {result.ExistingMetadataPreserved}");
+        Console.WriteLine($"    Metadata created:             {result.MetadataCreated}");
+        Console.WriteLine($"    Automatically resolved:       {result.AutomaticallyResolved}");
+        Console.WriteLine($"    Review required:              {result.ReviewRequired}");
+        Console.WriteLine($"    Unresolved:                   {result.Unresolved}");
+        Console.WriteLine($"    Orphaned metadata:            {result.Orphaned}");
+        Console.WriteLine($"    Errors:                       {result.Errors}");
+    }
+
+    private static void PrintMetadataSection(
+        string heading,
+        IEnumerable<MetadataAssetResult> assets,
+        string sourceRoot)
+    {
+        MetadataAssetResult[] materialized = assets.ToArray();
+        if (materialized.Length == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine(heading);
+        Console.WriteLine();
+        foreach (MetadataAssetResult asset in materialized)
+        {
+            PrintMetadataAsset(asset, sourceRoot);
+        }
+    }
+
+    private static void PrintMetadataAsset(MetadataAssetResult asset, string sourceRoot)
+    {
+        string displayType = string.IsNullOrWhiteSpace(asset.Subtype)
+            ? asset.Type ?? "unknown"
+            : $"{asset.Type} / {asset.Subtype}";
+        Console.WriteLine($"    [{displayType}]");
+        Console.WriteLine($"    {GetDisplayPath(sourceRoot, asset.SourcePath)}");
+        if (!string.IsNullOrWhiteSpace(asset.AssetId))
+        {
+            Console.WriteLine($"    Asset ID: {asset.AssetId}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(asset.ContentGroupId))
+        {
+            Console.WriteLine($"    Content group: {asset.ContentGroupId}");
+        }
+
+        Console.WriteLine($"    Reason: {asset.Reason}");
+        if (asset.Candidates?.Count > 0)
+        {
+            Console.WriteLine("    Possible matches:");
+            foreach (SongCatalogEntry candidate in asset.Candidates)
+            {
+                Console.WriteLine($"      - {candidate.Title} — {candidate.Project ?? "project unspecified"} ({candidate.ContentGroupId})");
+            }
+        }
+
+        if (asset.Eligibility is not null)
+        {
+            Console.WriteLine($"    Encoding status: {asset.Eligibility.EncodingStatus.ToString().ToUpperInvariant()}");
+            Console.WriteLine($"    Metadata status: {asset.Eligibility.MetadataStatus.ToString().ToUpperInvariant()}");
+            Console.WriteLine($"    Playlist eligibility: {(asset.Eligibility.IsPlaylistEligible ? "YES" : "NO")}");
+        }
+
+        Console.WriteLine();
+    }
+
+    private static void PrintMetadataSync(MetadataSyncResult result, string sourceRoot)
+    {
+        Console.WriteLine("NZYTE TV Metadata Synchronization");
+        Console.WriteLine();
+        foreach (MetadataSyncFileResult file in result.Files)
+        {
+            Console.WriteLine($"{GetDisplayPath(sourceRoot, file.SourcePath)}");
+            Console.WriteLine($"    Status: {file.Status.ToString().ToUpperInvariant()}");
+            Console.WriteLine($"    {file.Detail}");
+            Console.WriteLine();
+        }
+
+        Console.WriteLine($"Assets scanned: {result.Files.Count}");
+        Console.WriteLine($"Errors: {result.Files.Count(file => file.Status == MetadataSyncStatus.Error)}");
+    }
+
+    private static void PrintMetadataReviewSummary(MetadataReviewResult result)
+    {
+        Console.WriteLine();
+        Console.WriteLine("NZYTE TV Metadata Review Summary");
+        Console.WriteLine();
+        Console.WriteLine($"Assets reviewed: {result.Files.Count}");
+        Console.WriteLine($"Resolved:        {result.Files.Count(file => file.Resolved)}");
+        Console.WriteLine($"Left unresolved: {result.Files.Count(file => !file.Resolved)}");
+    }
+
+    private static string GetDisplayPath(string root, string path)
+    {
+        string relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path));
+        return Path.IsPathRooted(relative) || relative.StartsWith("..", StringComparison.Ordinal)
+            ? path
+            : relative;
+    }
+
     public static void PrintVerification(VerificationResult result)
     {
         Console.WriteLine("NZYTE TV Broadcast Verification");
@@ -221,13 +465,14 @@ public static class CliApplication
     {
         if (command == CommandKind.RootHelp)
         {
-            Console.WriteLine("NZYTE TV media normalization and verification");
+            Console.WriteLine("NZYTE TV media normalization, verification, and programming metadata");
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  nzytetv inspect <input>");
             Console.WriteLine("  nzytetv normalize <input> [--overwrite]");
             Console.WriteLine("  nzytetv normalize-library <source-root> <destination-root> [--overwrite]");
             Console.WriteLine("  nzytetv verify <input>");
+            Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine();
             Console.WriteLine("Run 'nzytetv <command> --help' for command-specific help.");
             return;
@@ -252,6 +497,39 @@ public static class CliApplication
             case CommandKind.Verify:
                 Console.WriteLine("Usage: nzytetv verify <input>");
                 Console.WriteLine("Independently verify media and actual keyframe timestamps with FFprobe.");
+                break;
+            case CommandKind.MetadataHelp:
+                Console.WriteLine("NZYTE TV programming metadata and content catalog");
+                Console.WriteLine();
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]");
+                Console.WriteLine("  nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>");
+                Console.WriteLine("  nzytetv metadata sync <source-root> <library-root>");
+                Console.WriteLine("  nzytetv metadata rebind <old-source-path> <new-source-path>");
+                Console.WriteLine("  nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]");
+                Console.WriteLine();
+                Console.WriteLine("Metadata commands never encode media or invoke FFmpeg.");
+                break;
+            case CommandKind.MetadataInitialize:
+                Console.WriteLine("Usage: nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]");
+                Console.WriteLine("Create or preserve programming sidecars and synchronize existing library assets.");
+                Console.WriteLine("--dry-run  Report planned changes without writing any file.");
+                break;
+            case CommandKind.MetadataReview:
+                Console.WriteLine("Usage: nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>");
+                Console.WriteLine("Interactively resolve only song assets that need human review.");
+                break;
+            case CommandKind.MetadataSync:
+                Console.WriteLine("Usage: nzytetv metadata sync <source-root> <library-root>");
+                Console.WriteLine("Copy source programming sidecars to existing normalized library assets without encoding.");
+                break;
+            case CommandKind.MetadataRebind:
+                Console.WriteLine("Usage: nzytetv metadata rebind <old-source-path> <new-source-path>");
+                Console.WriteLine("Move a programming sidecar to an intentionally renamed source while preserving identity.");
+                break;
+            case CommandKind.MetadataEdit:
+                Console.WriteLine("Usage: nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]");
+                Console.WriteLine("Override folder-derived programming type without moving or encoding media.");
                 break;
             default:
                 break;
@@ -350,5 +628,56 @@ public static class CliApplication
     private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
     {
         public void Report(T value) => handler(value);
+    }
+
+    private sealed class ConsoleMetadataReviewPrompt : IMetadataReviewPrompt
+    {
+        public Task<string?> SelectContentGroupAsync(
+            MetadataReviewRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.WriteLine();
+            Console.WriteLine("Asset:");
+            Console.WriteLine($"    {request.SourcePath}");
+            Console.WriteLine();
+            Console.WriteLine($"Detected title: {request.DetectedTitle}");
+            Console.WriteLine($"Reason: {request.Reason}");
+            Console.WriteLine();
+            Console.WriteLine("Possible matches:");
+            Console.WriteLine();
+            for (int index = 0; index < request.Candidates.Count; index++)
+            {
+                SongCatalogEntry candidate = request.Candidates[index];
+                Console.WriteLine($"    {index + 1}. {candidate.Title} — {candidate.Project ?? "project unspecified"}");
+                Console.WriteLine($"       ID: {candidate.ContentGroupId}");
+            }
+
+            int unresolvedChoice = request.Candidates.Count + 1;
+            Console.WriteLine($"    {unresolvedChoice}. Leave unresolved");
+            Console.WriteLine();
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Console.Write("Selection: ");
+                string? input = Console.ReadLine();
+                if (input is null)
+                {
+                    return Task.FromResult<string?>(null);
+                }
+
+                if (int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out int selection)
+                    && selection >= 1
+                    && selection <= unresolvedChoice)
+                {
+                    return Task.FromResult(selection == unresolvedChoice
+                        ? null
+                        : request.Candidates[selection - 1].ContentGroupId);
+                }
+
+                Console.WriteLine($"Enter a number from 1 through {unresolvedChoice}.");
+            }
+        }
     }
 }

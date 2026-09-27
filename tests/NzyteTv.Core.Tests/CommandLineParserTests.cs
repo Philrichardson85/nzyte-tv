@@ -68,6 +68,132 @@ public sealed class CommandLineParserTests
         Assert.False(result.IsSuccess);
     }
 
+    [Fact]
+    public void Parse_MetadataInitialize_ReturnsRootsCatalogAndDryRun()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "initialize",
+            "/srv/nzyte-tv/source",
+            "/srv/nzyte-tv/library",
+            "--catalog",
+            "/srv/nzyte-tv/catalog/songs.json",
+            "--dry-run",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MetadataInitialize, result.Command!.Kind);
+        Assert.Equal("/srv/nzyte-tv/source", result.Command.Input);
+        Assert.Equal("/srv/nzyte-tv/library", result.Command.Destination);
+        Assert.Equal("/srv/nzyte-tv/catalog/songs.json", result.Command.CatalogPath);
+        Assert.True(result.Command.DryRun);
+    }
+
+    [Fact]
+    public void Parse_MetadataReview_RequiresCatalog()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "review",
+            "source",
+            "library",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("--catalog", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_MetadataSync_DoesNotRequireCatalog()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "sync",
+            "source",
+            "library",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MetadataSync, result.Command!.Kind);
+    }
+
+    [Fact]
+    public void Parse_MetadataRebind_ReturnsBothSourcePaths()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "rebind",
+            "old source.mp4",
+            "new source.mp4",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MetadataRebind, result.Command!.Kind);
+        Assert.Equal("old source.mp4", result.Command.Input);
+        Assert.Equal("new source.mp4", result.Command.Destination);
+    }
+
+    [Fact]
+    public void Parse_MetadataEdit_ReturnsTypeAndExtensibleSubtype()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "edit",
+            "source file.mp4",
+            "--type",
+            "short-form",
+            "--subtype",
+            "vertical-performance",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MetadataEdit, result.Command!.Kind);
+        Assert.Equal("source file.mp4", result.Command.Input);
+        Assert.Equal("short-form", result.Command.MetadataType);
+        Assert.Equal("vertical-performance", result.Command.MetadataSubtype);
+    }
+
+    [Fact]
+    public void Parse_MetadataEditWithoutType_IsRejected()
+    {
+        CommandParseResult result = CommandLineParser.Parse(["metadata", "edit", "source.mp4"]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("--type", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_DryRunOnMetadataReview_IsRejected()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "review",
+            "source",
+            "library",
+            "--catalog",
+            "songs.json",
+            "--dry-run",
+        ]);
+
+        Assert.False(result.IsSuccess);
+    }
+
+    [Fact]
+    public void Parse_MetadataCatalogOptionWithoutValue_IsRejected()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "initialize",
+            "source",
+            "library",
+            "--catalog",
+            "--dry-run",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("catalog path", result.Error, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("--help")]
     [InlineData("-h")]

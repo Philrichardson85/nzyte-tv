@@ -1,6 +1,8 @@
 # NZYTE TV
 
-NZYTE TV v0.1 is the production-validated media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps. The v0.1 media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
+NZYTE TV v0.1.0 is the production-validated media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps. The v0.1 media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
+
+v0.2 development adds the content catalog and programming-metadata foundation. Encoding remains independent from metadata resolution: media can normalize and verify while its song relationship is unresolved, and metadata operations never invoke FFmpeg or re-encode video.
 
 Streaming, scheduling, playlist selection, YouTube integration, services, and automatic restarts remain out of scope.
 
@@ -35,6 +37,8 @@ For the complete blank-device procedure, see [Raspberry Pi 4 deployment guide](d
 
 NZYTE TV does not implement codecs in managed code and does not bundle FFmpeg or FFprobe.
 
+FFmpeg and FFprobe are required by media inspection, normalization, and verification commands. The `metadata` command group does not require or invoke either tool.
+
 ## CLI
 
 ```text
@@ -42,6 +46,11 @@ nzytetv inspect <input>
 nzytetv normalize <input> [--overwrite]
 nzytetv normalize-library <source-root> <destination-root> [--overwrite]
 nzytetv verify <input>
+nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
+nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
+nzytetv metadata sync <source-root> <library-root>
+nzytetv metadata rebind <old-source-path> <new-source-path>
+nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]
 ```
 
 Use `--help` on the root command or any subcommand. Exit code `0` means success; invalid arguments, media failures, and failed verification return non-zero codes.
@@ -64,6 +73,14 @@ Each successful output has a sidecar source manifest named `<output>.mp4.nzytetv
 Without `--overwrite`, an existing destination is skipped only when its source manifest matches the current source and independent verification passes. A missing, corrupt, stale, or profile-mismatched manifest forces re-normalization. A matching destination that fails verification is also re-normalized. With `--overwrite`, only the destination is replaced, and only after the new temporary output passes verification.
 
 One failed file does not stop later files. The final summary reports discovered, normalized, verified-skipped, failed, and verified-ready counts. Any per-file failure makes the command exit nonzero. Ctrl+C cancels the active FFmpeg process and does not publish its partial output.
+
+### Content catalog and programming metadata
+
+The versioned master song catalog provides stable `contentGroupId` values for songs. Each source video receives its own stable `assetId` in a `.nzytetv.meta.json` programming sidecar. This is separate from the existing `.nzytetv.json` technical normalization manifest.
+
+`metadata initialize` detects asset types from source categories and known short-form filename descriptors, preserves existing metadata, creates new identities, conservatively matches song titles or aliases, reports ambiguous and unresolved assets, and synchronizes metadata to existing normalized library files. `--dry-run` writes nothing. `metadata review` records an explicit human choice without changing `assetId`; `metadata edit` overrides a folder-derived type without moving or encoding media; `metadata sync` propagates programming changes without encoding; `metadata rebind` preserves identity after an intentional source rename.
+
+Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; valid metadata becomes authoritative afterward. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
 
 ## Broadcast standard
 
@@ -91,6 +108,7 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
+|-- catalog/                       versioned programming catalog
 |-- work/
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
@@ -100,7 +118,7 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 `-- library -> /srv/nzyte-tv/media/library
 ```
 
-The verified executable is `/opt/nzyte-tv/app/nzytetv`. It is not named `NzyteTv.Cli`. The SD card should primarily hold Ubuntu, the application, repository, logs, playlists, and working data. Large source and broadcast media belong on the external USB drive. Application commands should use the convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`.
+The verified executable is `/opt/nzyte-tv/app/nzytetv`. It is not named `NzyteTv.Cli`. The SD card should primarily hold Ubuntu, the application, repository, catalog, logs, playlists, and working data. Large source and broadcast media belong on the external USB drive. Application commands should use the convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`.
 
 ## Raspberry Pi quick-start deployment
 
@@ -110,9 +128,9 @@ Create the directory layout:
 
 ```bash
 sudo mkdir -p /opt/nzyte-tv/src /opt/nzyte-tv/app
-sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
 sudo chown -R "$USER":"$USER" /opt/nzyte-tv
-sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
 ```
 
 After mounting the external drive at `/srv/nzyte-tv/media`, create the permanent media directories and convenience links on a blank deployment:
@@ -292,13 +310,14 @@ Self-contained publishing includes the .NET runtime. FFmpeg and FFprobe remain e
 ## Architecture and testing
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
-- `NzyteTv.Core` owns domain models, output safety, rational-number handling, and broadcast validation. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization, and verification orchestration.
+- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, and eligibility rules. It has no FFmpeg dependency.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, and JSON/filesystem adapters for catalogs and sidecars.
 
-Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, and keyframe intervals. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
+Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata idempotence, dry-run safety, review, synchronization, rename/rebind, orphan reporting, and playlist eligibility. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
 ## Further documentation
 
 - [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
 - [Broadcast standard](docs/broadcast-standard.md)
 - [Media library and normalization workflow](docs/media-library.md)
+- [Content catalog and asset metadata](docs/content-catalog.md)

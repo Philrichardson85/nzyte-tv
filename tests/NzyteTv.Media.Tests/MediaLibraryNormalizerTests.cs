@@ -74,6 +74,40 @@ public sealed class MediaLibraryNormalizerTests
     }
 
     [Fact]
+    public async Task NormalizeAsync_UnresolvedProgrammingMetadata_DoesNotBlockEncodingOrVerification()
+    {
+        using var fixture = new LibraryFixture();
+        LibraryMediaFile file = fixture.AddFile("Performance Videos", "Unknown Performance.mp4");
+        var metadata = new AssetMetadata
+        {
+            AssetId = "unknown-performance",
+            ContentGroupId = null,
+            Title = "Unknown Performance",
+            Artist = null,
+            Type = AssetTypes.Performance,
+            Enabled = true,
+            Tags = [],
+        };
+        await new AssetMetadataStore().WriteAsync(file.SourcePath, metadata, CancellationToken.None);
+        var normalizer = new RecordingNormalizer();
+        var service = CreateService([file], normalizer, new ConfigurableVerifier());
+
+        LibraryNormalizationResult result = await service.NormalizeAsync(
+            fixture.SourceRoot,
+            fixture.DestinationRoot,
+            overwrite: false,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.Normalized);
+        Assert.Equal(1, result.VerifiedReady);
+        Assert.Equal(0, result.Failed);
+        Assert.Single(normalizer.Calls);
+        Assert.True(File.Exists(file.DestinationPath));
+        Assert.Null(new AssetMetadataStore().Read(file.SourcePath).ContentGroupId);
+    }
+
+    [Fact]
     public async Task NormalizeAsync_FailedFile_DoesNotAbortLaterFilesAndSummaryIsAccurate()
     {
         using var fixture = new LibraryFixture();
