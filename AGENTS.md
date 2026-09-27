@@ -47,6 +47,14 @@ Increment `BroadcastStandard.ProfileVersion` whenever a broadcast-standard chang
 
 Write source manifests atomically only after normalization and verification succeed. Never create or update a matching manifest for an unverified output.
 
+## Production storage layout
+
+The Raspberry Pi production media drive is mounted at `/srv/nzyte-tv/media`. Its `source/` directory contains original/master media, and its `library/` directory contains only normalized and verified broadcast assets.
+
+Application and operational examples should use the stable convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`, which are symlinks to the corresponding directories on the external drive. Preserve correct behavior when roots are symlinks, and remember that maintenance tools such as `find` and `du` may require `-L` to follow them.
+
+Future broadcaster and playlist components must consume `/srv/nzyte-tv/library`, never `/srv/nzyte-tv/source`. Keep large source and normalized media on the external drive; the SD card is primarily for the OS, application, repository, logs, playlists, and working data.
+
 ## Safety
 
 Source media must never be overwritten during normalization unless the product behavior is explicitly changed, reviewed, documented, and tested. Current `--overwrite` behavior replaces only an existing destination and must never permit a source file to be used as its own destination.

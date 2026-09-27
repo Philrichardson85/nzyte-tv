@@ -12,9 +12,9 @@ This guide reproduces the tested NZYTE TV deployment from a blank Raspberry Pi 4
 
 | Component | Verified value |
 |---|---|
-| Hardware | Raspberry Pi 4 |
-| OS/application storage | 32 GB microSD card |
-| Media storage | SanDisk Cruzer Glide USB drive |
+| Hardware | Raspberry Pi 4 Model B, 4 GB RAM |
+| OS/application storage | `/dev/mmcblk0p2`, ext4, approximately 29 GB usable |
+| Media storage | SanDisk Cruzer Glide `/dev/sda1`, NTFS3, approximately 30 GB |
 | Display connection | Raspberry Pi 4 micro-HDMI |
 | OS | Ubuntu Desktop 24.04.5 LTS, 64-bit |
 | Architecture | ARM64 / `aarch64` |
@@ -301,7 +301,8 @@ Package updates may install a later .NET 10 patch. Keep the major version at 10 
 | Model | SanDisk Cruzer Glide |
 | Device | `/dev/sda` |
 | Partition | `/dev/sda1` |
-| Filesystem | NTFS |
+| Filesystem | NTFS3 |
+| Approximate size | 30 GB |
 | UUID | `F424A3DE24A3A25A` |
 | Permanent mount | `/srv/nzyte-tv/media` |
 | Verified owner | `u24 u24` |
@@ -357,11 +358,13 @@ findmnt /srv/nzyte-tv/media
 
 Because `x-systemd.automount` is enabled, the first `findmnt` after boot can show `systemd-1` and filesystem type `autofs`. Accessing the directory triggers the real NTFS mount; the second `findmnt` should then show the mounted drive. The verified ownership was `u24 u24`.
 
+The OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Reserve that storage primarily for Ubuntu, the application, repository, logs, playlists, and working data. Keep large source and normalized media on the external drive.
+
 See [media-library.md](media-library.md) for the directory inventory and handling rules.
 
 ## 8. Create the deployment layout
 
-The recommended and deployed layout separates source, published application files, mutable working data, logs, and USB media:
+The deployed layout separates source, published application files, mutable working data, logs, playlists, and permanent USB media:
 
 ```text
 /opt/nzyte-tv/
@@ -369,22 +372,38 @@ The recommended and deployed layout separates source, published application file
 `-- app/
 
 /srv/nzyte-tv/
-|-- media/
-|-- incoming/
+|-- logs/
+|-- playlists/
 |-- work/
-`-- logs/
+|-- media/                         external USB mount
+|   |-- source/                    original/master media
+|   |-- library/                   normalized and verified assets
+|   `-- System Volume Information/ Windows/NTFS metadata; ignore
+|-- source -> /srv/nzyte-tv/media/source
+`-- library -> /srv/nzyte-tv/media/library
 ```
 
 Create the directories and grant the deployment user ownership of application and mutable local directories:
 
 ```bash
 sudo mkdir -p /opt/nzyte-tv/src /opt/nzyte-tv/app
-sudo mkdir -p /srv/nzyte-tv/incoming /srv/nzyte-tv/work /srv/nzyte-tv/logs
+sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
 sudo chown -R "$USER":"$USER" /opt/nzyte-tv
-sudo chown -R "$USER":"$USER" /srv/nzyte-tv/incoming /srv/nzyte-tv/work /srv/nzyte-tv/logs
+sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+
+mkdir -p /srv/nzyte-tv/media/source /srv/nzyte-tv/media/library
+sudo ln -s /srv/nzyte-tv/media/source /srv/nzyte-tv/source
+sudo ln -s /srv/nzyte-tv/media/library /srv/nzyte-tv/library
 ```
 
-The ownership of `/srv/nzyte-tv/media` comes from the NTFS mount options and should not be changed recursively.
+The ownership of `/srv/nzyte-tv/media` comes from the NTFS mount options and should not be changed recursively. The `ln -s` commands are for a blank deployment; if either convenience path already exists, inspect it with `ls -ld` instead of replacing it blindly.
+
+Maintenance commands do not always follow directory symlinks by default. Use `-L` when inspecting content through the convenience paths:
+
+```bash
+du -shL /srv/nzyte-tv/source
+find -L /srv/nzyte-tv/source -type f
+```
 
 ## 9. Clone, test, and publish NZYTE TV
 
@@ -433,13 +452,13 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv verify --help
 ```
 
-The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` also completed a representative nine-file production acceptance run and an unchanged second-run test. A complete 39-file run has not yet been recorded.
+The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
 
-Inspect a quoted path from the mounted media library:
+Inspect a quoted source-master path through the convenience symlink:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv inspect \
-  "/srv/nzyte-tv/media/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
+  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
 ```
 
 ## 11. Run the first normalization test
@@ -450,7 +469,7 @@ The output location is based on the current working directory. Change to `/srv/n
 cd /srv/nzyte-tv/work
 
 /opt/nzyte-tv/app/nzytetv normalize \
-  "/srv/nzyte-tv/media/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
+  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
 ```
 
 The command creates and automatically verifies:
@@ -474,14 +493,16 @@ RESULT: BROADCAST READY
 
 Do not use `--overwrite` unless replacing an existing destination is intentional. It never permits the source itself to be replaced. See [broadcast-standard.md](broadcast-standard.md) for the complete before/after measurements.
 
+The temporary acceptance-test media was removed from `/srv/nzyte-tv/work` after testing. The work directory now contains only small reference/test metadata files.
+
 ## 12. Normalize the complete media library
 
 The production batch command is:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv normalize-library \
-  /srv/nzyte-tv/media \
-  /srv/nzyte-tv/work/BroadcastReady
+  /srv/nzyte-tv/source \
+  /srv/nzyte-tv/library
 ```
 
 It recursively finds `.mp4`, `.mov`, and `.mkv` files, preserves category folders, and verifies every output before counting it as ready. Run it inside a persistent SSH terminal multiplexer if the SSH connection may be interrupted; use of a particular multiplexer has not yet been standardized by this project.
@@ -492,14 +513,28 @@ Use `--overwrite` only when all existing destinations should be deliberately reg
 
 ```bash
 /opt/nzyte-tv/app/nzytetv normalize-library \
-  /srv/nzyte-tv/media \
-  /srv/nzyte-tv/work/BroadcastReady \
+  /srv/nzyte-tv/source \
+  /srv/nzyte-tv/library \
   --overwrite
 ```
 
 Ctrl+C cancels the active conversion. The active temporary file is removed instead of being published as its final destination. Previously completed files remain in place and will be verified and skipped on the next run.
 
-The complete 39-file library has not yet been normalized with this command on the Raspberry Pi, so total batch runtime and long-duration thermal behavior are not yet verified.
+### Recorded 39-file production run
+
+The full source set occupies approximately 7.3 GB and has a combined runtime of 1:17:09 (4,630 seconds). Production results were:
+
+| Result | First run | Unchanged second run |
+|---|---:|---:|
+| Discovered | 39 | — |
+| Normalized | 39 | 0 |
+| Skipped existing | — | 39 |
+| Failed | 0 | 0 |
+| Verified ready | 39 | 39 |
+| Manifests | 39 | 39 existing |
+| Elapsed | Not yet supplied | Not yet supplied |
+
+Every source completed normalization and independent verification. The unchanged second run re-verified and skipped all 39 destinations. The exact elapsed times and final normalized-library size remain to be recorded.
 
 ### Recorded nine-file acceptance run
 
@@ -557,5 +592,5 @@ This is acceptance-test documentation only. NZYTE TV v0.1 does not implement str
 - AnyDesk without an active physical monitor.
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
-- Total runtime and thermal behavior for a complete 39-file `normalize-library` run.
+- Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
 - Continuous production operation, scheduling, streaming, or service supervision.

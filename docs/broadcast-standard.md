@@ -1,6 +1,6 @@
 # NZYTE TV broadcast standard
 
-Every file admitted to a future NZYTE TV broadcast library must first be normalized and pass verification. A successful FFmpeg process alone is not sufficient.
+Every file admitted to the production NZYTE TV library at `/srv/nzyte-tv/library` must first be normalized and pass verification. A successful FFmpeg process alone is not sufficient.
 
 ## Required format
 
@@ -76,6 +76,8 @@ The command was run with `/srv/nzyte-tv/work` as the current directory. It produ
 ```
 
 Normalization plus automatic verification took 13 minutes 38 seconds on the Raspberry Pi 4. This is a measured reference, not a guaranteed duration for other media.
+
+That path was the temporary acceptance-test output used at the time. It was later removed from `/srv/nzyte-tv/work`; permanent production batch outputs now belong under `/srv/nzyte-tv/library`. This clarification does not change the broadcast standard or the recorded test result.
 
 ### Normalized result
 

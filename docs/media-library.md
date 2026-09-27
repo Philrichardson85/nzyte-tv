@@ -1,44 +1,76 @@
 # Media library and normalization workflow
 
-This document records the mounted media library observed on the Raspberry Pi and defines safe handling rules for future media-scanning work.
+This document records the production media layout established on the Raspberry Pi and defines safe handling rules for normalization and future media-scanning work.
 
-## Storage location
+## Storage architecture
 
-The SanDisk Cruzer Glide NTFS partition is mounted at:
+The permanent media location is a SanDisk Cruzer Glide USB drive:
 
-```text
-/srv/nzyte-tv/media
-```
+| Property | Production value |
+|---|---|
+| Device | `/dev/sda1` |
+| Filesystem | NTFS3 |
+| Approximate capacity | 30 GB |
+| Mount point | `/srv/nzyte-tv/media` |
+| Mount behavior | systemd automount |
 
-Its persistent mount and recovery procedure are documented in [raspberry-pi-setup.md](raspberry-pi-setup.md). Do not format this drive during application setup.
+The Raspberry Pi OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Keep Ubuntu, the application, repository, logs, playlists, and working data on the SD card. Keep large source and normalized media on the external drive.
 
-## Verified category folders
+The permanent physical layout is:
 
 ```text
 /srv/nzyte-tv/media/
-|-- Advertisements/
-|-- Bumpers/
-|-- Interstitials/
-|-- Lyric Videos/
-|-- Music Videos/
-|-- Promos/
-|-- Specials/
-`-- Vlog Episodes/
+|-- source/                    original/master media
+|-- library/                   normalized and verified broadcast assets
+`-- System Volume Information/ Windows/NTFS metadata; ignore
 ```
 
-Folder names, spaces, and capitalization are intentional. Code and operational commands must preserve them exactly.
-
-Because the drive is NTFS and has been used with Windows, this directory may also appear:
+Application and operator commands should use these convenience symlinks:
 
 ```text
-System Volume Information
+/srv/nzyte-tv/source  -> /srv/nzyte-tv/media/source
+/srv/nzyte-tv/library -> /srv/nzyte-tv/media/library
 ```
 
-It is filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
+The persistent mount and blank-device setup are documented in [raspberry-pi-setup.md](raspberry-pi-setup.md). Do not format the existing media drive during application setup.
 
-## Verified inventory
+## Source and library rules
 
-At the time of the Raspberry Pi deployment review, the library contained 39 video files:
+`/srv/nzyte-tv/source` contains original/master media. Normalization must never modify or replace these files.
+
+`/srv/nzyte-tv/library` contains only NZYTE TV-normalized assets that passed automatic independent verification. Future broadcaster and playlist components must consume media from `/srv/nzyte-tv/library`, never from `/srv/nzyte-tv/source`.
+
+The category folders are:
+
+```text
+Advertisements/
+Bumpers/
+Interstitials/
+Lyric Videos/
+Music Videos/
+Promos/
+Specials/
+Vlog Episodes/
+```
+
+Folder names, spaces, and capitalization are intentional. Preserve them exactly. The remaining empty categories also remain part of the production layout so future station programming can use them.
+
+`System Volume Information` is Windows/NTFS filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
+
+## Current source inventory
+
+The production source library currently contains 39 video files:
+
+| Category group | Count |
+|---|---:|
+| Lyric Videos | 14 |
+| Music Videos | 5 |
+| Vlog-related videos | 20 |
+| **Total** | **39** |
+
+The source library occupies approximately 7.3 GB. Its combined runtime is 1:17:09, or 4,630 seconds.
+
+The earlier format inventory found:
 
 - all 39 inspected files used H.264 video and `yuv420p`;
 - 31 files were 24 fps;
@@ -47,17 +79,11 @@ At the time of the Raspberry Pi deployment review, the library contained 39 vide
 - 21 files were 2560x1440;
 - 1 file was 2628x1440.
 
-The 2628x1440 file is:
-
-```text
-Vlog 2 episode 3.mp4
-```
-
-It is a useful future scale-and-pad regression case because its aspect ratio does not exactly match 1920x1080. That specific regression test has not yet been automated.
+The 2628x1440 file is `Vlog 2 episode 3.mp4`. It is a useful future scale-and-pad regression case because its aspect ratio does not exactly match 1920x1080. That specific regression test has not yet been automated.
 
 ## Media-file filtering
 
-The `normalize-library` command provides the first recursive media scanner. Its current case-insensitive allowlist is:
+`normalize-library` recursively scans the source root. Its current case-insensitive allowlist is:
 
 ```text
 .mp4
@@ -65,101 +91,103 @@ The `normalize-library` command provides the first recursive media scanner. Its 
 .mkv
 ```
 
-It does not assume that every file or directory beneath a category is playable media. Current scanner behavior:
+It does not assume that every file beneath the source root is playable media. Current scanner behavior:
 
-- enumerate only configured category directories;
-- skip `System Volume Information` and other non-category directories;
-- filter candidate files by the explicit, case-insensitive allowlist above;
-- preserve the original full path, filename, spaces, capitalization, and Unicode;
-- send candidates through `inspect` and then normalization/verification rather than trusting an extension;
-- continue safely when an unsupported or unreadable file is encountered.
+- skip `System Volume Information` and reparse-point/symbolic-link directories encountered below the root;
+- ignore images, text files, and unsupported extensions;
+- filter candidate files with the explicit, case-insensitive allowlist;
+- preserve relative directories, filenames, spaces, capitalization, and Unicode;
+- normalize and independently verify candidates rather than trusting an extension.
 
-`.mp4` is verified with the current Raspberry Pi library and workflow. `.mov` and `.mkv` discovery and destination mapping are covered by automated tests, but representative Pi library normalization runs for those source containers have not yet been recorded. Add extensions only with representative tests.
+`.mp4` is verified with the current Raspberry Pi library and workflow. `.mov` and `.mkv` discovery and destination mapping are covered by automated tests, but representative Raspberry Pi production runs for those source containers have not yet been recorded. Add extensions only with representative tests.
 
-## Source and BroadcastReady files
+## Production normalization workflow
 
-Mounted library files are source media. Keep them unchanged.
-
-The current verified workflow uses local working storage:
-
-```text
-/srv/nzyte-tv/work/
-`-- BroadcastReady/
-```
-
-Run normalization from `/srv/nzyte-tv/work`:
-
-```bash
-cd /srv/nzyte-tv/work
-/opt/nzyte-tv/app/nzytetv normalize \
-  "/srv/nzyte-tv/media/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
-```
-
-The result is:
-
-```text
-/srv/nzyte-tv/work/BroadcastReady/Lady Lady - Nzyte (Official Music Video).mp4
-```
-
-Normalization writes to a temporary output, verifies it, and publishes the destination only when verification passes. `--overwrite` replaces an existing destination only; it never replaces the source.
-
-Treat a file as broadcast ready only after either:
-
-- `normalize` completes and its automatic verification reports `RESULT: BROADCAST READY`; or
-- an independent `verify` command reports the same result.
-
-For the entire library, use:
+The production command is:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv normalize-library \
-  /srv/nzyte-tv/media \
-  /srv/nzyte-tv/work/BroadcastReady
+  /srv/nzyte-tv/source \
+  /srv/nzyte-tv/library
 ```
 
-This creates paths such as:
+It creates corresponding paths such as:
 
 ```text
-/srv/nzyte-tv/work/BroadcastReady/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4
-/srv/nzyte-tv/work/BroadcastReady/Vlog Episodes/Vlog 2 episode 3.mp4
+Source:      /srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4
+Destination: /srv/nzyte-tv/library/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4
+
+Source:      /srv/nzyte-tv/source/Vlog Episodes/Vlog 2 episode 3.mp4
+Destination: /srv/nzyte-tv/library/Vlog Episodes/Vlog 2 episode 3.mp4
 ```
 
-The batch workflow has these safety and resumability rules:
+The workflow has these safety and resumability rules:
 
 - source and destination roots must be separate and non-overlapping;
 - relative category directories are preserved;
 - `.mov` and `.mkv` destination extensions become `.mp4`;
+- normalization uses temporary output and publishes the final destination only after verification passes;
 - each successful destination receives a `<output>.mp4.nzytetv.json` source-manifest sidecar;
 - a destination is skipped only when its source fingerprint matches and independent verification passes;
 - a changed source, changed broadcast profile, missing/corrupt manifest, or invalid destination causes re-normalization;
 - failures are recorded without aborting later files;
-- colliding source names such as `name.mov` and `name.mkv` in one category fail rather than overwriting the same `name.mp4` destination;
+- colliding source names such as `name.mov` and `name.mkv` in one category fail rather than overwrite the same `name.mp4` destination;
 - Ctrl+C cancels the active file, while temporary-output handling prevents a partial final destination.
 
-Promotion from the work directory into a future permanent broadcast library is not implemented in v0.1. Do not describe a manual copy as an application feature.
+Do not use `--overwrite` unless deliberate regeneration of existing destinations is required. It replaces destinations only and never authorizes replacement of source masters.
+
+### Completed production run
+
+The full 39-file production normalization completed successfully on the Raspberry Pi 4:
+
+| Result | First run | Unchanged second run |
+|---|---:|---:|
+| Discovered | 39 | — |
+| Normalized | 39 | 0 |
+| Skipped existing | — | 39 |
+| Failed | 0 | 0 |
+| Verified ready | 39 | 39 |
+| Manifests | 39 | 39 existing |
+| Elapsed | Not yet supplied | Not yet supplied |
+
+All source files completed normalization and independent verification. The unchanged second run re-verified every matching destination and skipped all 39, confirming production-library resumability and source-manifest matching. The exact elapsed times and final normalized-library size remain to be recorded.
+
+A separate representative acceptance batch of nine production files previously completed normalization and verification successfully. That result validates the batch workflow but is not a result for the current 39-file run.
+
+## Work-directory cleanup
+
+Temporary acceptance-test media under `/srv/nzyte-tv/work` was removed after testing. The work directory now contains only small reference/test metadata files. It remains available for working data, but the permanent normalized library is `/srv/nzyte-tv/library`.
+
+## Symlinks and maintenance commands
+
+Some commands do not follow the `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library` symlinks by default. Use `-L` when the intent is to inspect their target content:
+
+```bash
+du -shL /srv/nzyte-tv/source
+du -shL /srv/nzyte-tv/library
+find -L /srv/nzyte-tv/source -type f
+find -L /srv/nzyte-tv/library -type f
+```
+
+To confirm the links themselves and the underlying mount:
+
+```bash
+ls -ld /srv/nzyte-tv/source /srv/nzyte-tv/library
+findmnt /srv/nzyte-tv/media
+```
+
+Because the drive uses `x-systemd.automount`, access to `/srv/nzyte-tv/media` can be required before `findmnt` shows the real NTFS3 mount instead of `systemd-1`/`autofs`.
 
 ## Quoting paths on Linux
 
-Always quote paths because category and media names contain spaces:
+Always quote media paths because category and filenames contain spaces:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv inspect \
-  "/srv/nzyte-tv/media/Vlog Episodes/Vlog 2 episode 3.mp4"
+  "/srv/nzyte-tv/source/Vlog Episodes/Vlog 2 episode 3.mp4"
 ```
 
 The application passes paths directly to FFmpeg and FFprobe without constructing a shell command. Scripts that call the application must still quote each shell argument correctly.
-
-## Normalization checklist
-
-1. Confirm the USB drive is mounted by accessing `/srv/nzyte-tv/media` and running `findmnt`.
-2. Inspect the source with its complete quoted path.
-3. Change to `/srv/nzyte-tv/work`.
-4. Run `normalize` without `--overwrite` for a new output.
-5. Review the automatic verification report.
-6. Run `verify` independently when performing an acceptance test.
-7. Retain the source unchanged.
-8. Do not treat failed or partial output as library-ready media.
-
-For an unattended batch, run `normalize-library`, retain its final summary, investigate every listed failure, and rerun without `--overwrite` to resume. A representative nine-file Raspberry Pi batch took 01:31:57; the unchanged second run re-verified and skipped all nine files in 00:00:57. A full 39-file batch has not yet been timed.
 
 ## Source manifests and migration
 
@@ -171,10 +199,8 @@ A source manifest records:
 - source last-modified UTC;
 - broadcast-profile version.
 
-The manifest is written atomically after the output passes normalization and verification. If the source changes during normalization, the batch records a failure and does not mark that output as current.
+The manifest is written atomically beside the normalized file after output verification passes. If the source changes during normalization, the batch records a failure and does not mark that output as current.
 
 Outputs created by older versions do not have manifests. The first run after upgrading conservatively normalizes those files again and creates sidecars. The application does not adopt an existing output based only on technical validity because it cannot prove that the output came from the current source master.
 
-The nine-file acceptance run occurred before manifests were implemented. Its second-run skip result validated the earlier verify-and-skip behavior; the next run with the manifest-aware version will intentionally rebuild those nine outputs once.
-
-The required format is defined in [broadcast-standard.md](broadcast-standard.md).
+The required media format is defined in [broadcast-standard.md](broadcast-standard.md).

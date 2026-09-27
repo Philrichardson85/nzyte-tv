@@ -16,7 +16,8 @@ The media-normalization workflow has been run successfully on:
 - FFmpeg and FFprobe `6.1.1-3ubuntu5`;
 - .NET SDK `10.0.112`, host/runtime `10.0.12`;
 - .NET RID `ubuntu.24.04-arm64`;
-- SanDisk Cruzer Glide NTFS media drive mounted at `/srv/nzyte-tv/media`.
+- OS storage at `/dev/mmcblk0p2`, ext4, approximately 29 GB;
+- external media storage at `/dev/sda1`, NTFS3, approximately 30 GB, mounted through systemd automount at `/srv/nzyte-tv/media`.
 
 The verified deployment uses Xorg/X11 for incoming AnyDesk sessions. In the tested setup, an active physical monitor connected through the Raspberry Pi's micro-HDMI port is required for AnyDesk to display the desktop. A dummy HDMI adapter has not been tested.
 
@@ -80,7 +81,7 @@ Broadcast-ready files must pass all of these checks:
 
 See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, tolerances, operational background, and the verified Lady Lady before/after reference case.
 
-## Recommended deployment layout
+## Production deployment layout
 
 ```text
 /opt/nzyte-tv/
@@ -88,13 +89,18 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 `-- app/       published production application
 
 /srv/nzyte-tv/
-|-- media/     USB media mount
-|-- incoming/  staging for newly received media
-|-- work/      normalization working directory
-`-- logs/      future operational logs
+|-- logs/
+|-- playlists/
+|-- work/
+|-- media/                         external USB mount
+|   |-- source/                    original/master media
+|   |-- library/                   normalized and verified assets
+|   `-- System Volume Information/ Windows/NTFS metadata; ignore
+|-- source -> /srv/nzyte-tv/media/source
+`-- library -> /srv/nzyte-tv/media/library
 ```
 
-The verified executable is `/opt/nzyte-tv/app/nzytetv`. It is not named `NzyteTv.Cli`.
+The verified executable is `/opt/nzyte-tv/app/nzytetv`. It is not named `NzyteTv.Cli`. The SD card should primarily hold Ubuntu, the application, repository, logs, playlists, and working data. Large source and broadcast media belong on the external USB drive. Application commands should use the convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`.
 
 ## Raspberry Pi quick-start deployment
 
@@ -104,9 +110,17 @@ Create the directory layout:
 
 ```bash
 sudo mkdir -p /opt/nzyte-tv/src /opt/nzyte-tv/app
-sudo mkdir -p /srv/nzyte-tv/incoming /srv/nzyte-tv/work /srv/nzyte-tv/logs
+sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
 sudo chown -R "$USER":"$USER" /opt/nzyte-tv
-sudo chown -R "$USER":"$USER" /srv/nzyte-tv/incoming /srv/nzyte-tv/work /srv/nzyte-tv/logs
+sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists
+```
+
+After mounting the external drive at `/srv/nzyte-tv/media`, create the permanent media directories and convenience links on a blank deployment:
+
+```bash
+mkdir -p /srv/nzyte-tv/media/source /srv/nzyte-tv/media/library
+sudo ln -s /srv/nzyte-tv/media/source /srv/nzyte-tv/source
+sudo ln -s /srv/nzyte-tv/media/library /srv/nzyte-tv/library
 ```
 
 Clone, restore, build, and test:
@@ -136,7 +150,7 @@ Validate the application:
 ```bash
 /opt/nzyte-tv/app/nzytetv --help
 /opt/nzyte-tv/app/nzytetv inspect \
-  "/srv/nzyte-tv/media/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
+  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
 ```
 
 Run normalization from the desired working directory:
@@ -144,22 +158,38 @@ Run normalization from the desired working directory:
 ```bash
 cd /srv/nzyte-tv/work
 /opt/nzyte-tv/app/nzytetv normalize \
-  "/srv/nzyte-tv/media/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
+  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
 /opt/nzyte-tv/app/nzytetv verify \
   "/srv/nzyte-tv/work/BroadcastReady/Lady Lady - Nzyte (Official Music Video).mp4"
 ```
 
 The verified normalization and automatic verification took 13 minutes 38 seconds on the Raspberry Pi 4. The independent verification reported `RESULT: BROADCAST READY`.
 
+That was a temporary acceptance-test output. The test media was later removed from `/srv/nzyte-tv/work`, which now contains only small reference/test metadata files. Permanent production outputs belong in `/srv/nzyte-tv/library` through the batch workflow below.
+
 For a complete library run, the production command is:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv normalize-library \
-  /srv/nzyte-tv/media \
-  /srv/nzyte-tv/work/BroadcastReady
+  /srv/nzyte-tv/source \
+  /srv/nzyte-tv/library
 ```
 
-This batch command is implemented and covered by automated tests. A complete 39-file run on the Raspberry Pi has not yet been recorded, so no full-library runtime is claimed. It is safe to stop and rerun: destinations with matching manifests and passing verification are skipped unless `--overwrite` is supplied.
+The production source library contains 39 videos: 14 lyric videos, 5 music videos, and 20 vlog-related videos. Its source size is approximately 7.3 GB and its combined runtime is 1:17:09 (4,630 seconds). The other category folders intentionally remain empty for future station programming.
+
+The full 39-file production normalization completed successfully on the Raspberry Pi 4:
+
+| Result | First run | Unchanged second run |
+|---|---:|---:|
+| Discovered | 39 | — |
+| Normalized | 39 | 0 |
+| Skipped existing | — | 39 |
+| Failed | 0 | 0 |
+| Verified ready | 39 | 39 |
+| Manifests | 39 | 39 existing |
+| Elapsed | Not yet supplied | Not yet supplied |
+
+All 39 source files were normalized and independently verified. On the unchanged second run, all 39 matching destinations were re-verified and skipped, confirming resumability and manifest-based source matching for the production library. The exact first- and second-run elapsed times and final library size remain to be recorded.
 
 ## Raspberry Pi acceptance results
 
