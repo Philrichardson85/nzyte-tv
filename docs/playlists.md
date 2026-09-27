@@ -71,6 +71,16 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The v0.2B current-li
 
 Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. Performance, short-form, advertisement, and special assets remain supported but require a future policy target/cadence before they participate. Bumpers, promos, and interstitials participate only when eligible inventory exists; their absence never prevents generation.
 
+Cadence windows have a minimum eligibility boundary as well as a preferred/overdue boundary:
+
+- a promo is ineligible before 30 minutes, preferred from 30 through 45 minutes, and overdue after 45 minutes;
+- an interstitial is ineligible before 20 minutes, preferred from 20 through 30 minutes, and overdue after 30 minutes;
+- a bumper is ineligible until four normal programs have played, is preferred after four, and is overdue after five.
+
+A normal program is any scheduled type other than bumper, promo, or interstitial. Cadence items do not increment the bumper's normal-program count.
+
+Minimum cadence eligibility is independent of the ordinary exact-asset cooldown and is not opened by the normal fallback ladder. When a cadence category is due, assets outside their exact cooldown are preferred. If every asset in an overdue cadence category is still inside its ordinary exact cooldown, that cooldown may be relaxed for the cadence insertion. This never permits an insertion before the cadence minimum. Multiple eligible cadence assets continue to use deterministic seeded selection.
+
 The future 40/20/20/20 music-video, lyric-video, performance, and vlog mix can be represented by another `PlaylistPolicy` without changing scheduler logic. External policy JSON is intentionally deferred.
 
 ## Hot rotation
@@ -98,7 +108,7 @@ If the limited catalog cannot satisfy every preference, the engine progressively
 4. same `contentGroupId` cooldown;
 5. no consecutive vlogs.
 
-Later rules are protected more strongly. In particular, same-song spacing is more important than exact-video spacing, and avoiding consecutive vlogs is the strongest normal pacing protection. Every selected-item compromise increments the corresponding summary counter. Cadence misses are also reported. With at least one policy-enabled eligible asset, the final stage guarantees forward progress rather than deadlocking.
+Later rules are protected more strongly. In particular, same-song spacing is more important than exact-video spacing, and avoiding consecutive vlogs is the strongest normal pacing protection. Every selected-item compromise increments the corresponding summary counter. Cadence misses and insertion counts are also reported. Cadence minimum spacing is not a relaxation stage: cadence assets are removed from consideration until their minimum window opens. With at least one policy-enabled normal asset, the final stage guarantees forward progress rather than deadlocking.
 
 ## Playlist schema
 
@@ -138,6 +148,9 @@ Playlist schema version 1 is JSON with camel-case property names:
     "bumperCadenceMisses": 0,
     "promoCadenceMisses": 0,
     "interstitialCadenceMisses": 0,
+    "bumperInsertions": 0,
+    "promoInsertions": 8,
+    "interstitialInsertions": 0,
     "airtimePercentages": {
       "music-video": 51.2,
       "lyric-video": 24.0,
@@ -147,7 +160,7 @@ Playlist schema version 1 is JSON with camel-case property names:
 }
 ```
 
-Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision.
+Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. The three insertion counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
 
 ## History schema and playlist boundaries
 

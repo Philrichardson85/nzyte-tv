@@ -107,7 +107,7 @@ Duplicate song titles are supported because relationships use `contentGroupId`, 
 
 `build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The default policy targets a six-hour 50% music-video, 25% lyric-video, and 25% vlog mix by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files.
 
-The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, same-song cooldown, and finally consecutive-vlog protection in that explicit order. Every relaxation and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
+The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, same-song cooldown, and finally consecutive-vlog protection in that explicit order. Promo, interstitial, and bumper minimum cadence spacing remains a separate eligibility invariant, so these assets cannot become generic fallback filler. Every relaxation, cadence insertion, cadence miss, and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
 
 ## Broadcast standard
 

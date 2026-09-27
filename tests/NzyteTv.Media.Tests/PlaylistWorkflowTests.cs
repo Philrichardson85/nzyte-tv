@@ -114,6 +114,10 @@ public sealed class PlaylistWorkflowTests
         Assert.Equal(1, playlist.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(123, playlist.RootElement.GetProperty("seed").GetInt32());
         Assert.Equal("ready", playlist.RootElement.GetProperty("items")[0].GetProperty("assetId").GetString());
+        JsonElement summary = playlist.RootElement.GetProperty("summary");
+        Assert.Equal(0, summary.GetProperty("bumperInsertions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("promoInsertions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("interstitialInsertions").GetInt32());
         Assert.Equal(1, history.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.NotEmpty(history.RootElement.GetProperty("plays").EnumerateArray());
     }

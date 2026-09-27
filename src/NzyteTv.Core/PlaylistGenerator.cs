@@ -60,12 +60,16 @@ public sealed class PlaylistGenerator
         {
             DateTimeOffset playTime = scheduleStart.AddSeconds(offsetSeconds);
             IReadOnlySet<string> preferredTypes = GetPreferredTypes(assets, state, policy, playTime);
-            CandidateEvaluation[] evaluated = assets.Select(asset => new CandidateEvaluation(
-                asset,
-                preferredTypes.Contains(asset.Type),
-                IsExactAssetAllowed(asset, state, policy, playTime),
-                IsContentGroupAllowed(asset, state, policy, playTime),
-                IsVlogAllowed(asset, state, policy)))
+            CandidateEvaluation[] evaluated = assets
+                .Where(asset => IsCadenceEligible(asset.Type, state, policy, playTime))
+                .Select(asset => new CandidateEvaluation(
+                    asset,
+                    preferredTypes.Contains(asset.Type),
+                    IsExactAssetAllowed(asset, state, policy, playTime),
+                    IsContentGroupAllowed(asset, state, policy, playTime),
+                    IsVlogAllowed(asset, state, policy),
+                    IsCadenceOverdue(asset.Type, state, policy, playTime),
+                    state.GetLastAssetPlay(asset.AssetId)))
                 .ToArray();
 
             CandidateSelection selection = SelectCandidate(evaluated, policy, playTime, random);
@@ -132,6 +136,9 @@ public sealed class PlaylistGenerator
             BumperCadenceMisses = relaxation.BumperCadence,
             PromoCadenceMisses = relaxation.PromoCadence,
             InterstitialCadenceMisses = relaxation.InterstitialCadence,
+            BumperInsertions = items.Count(item => item.Type == AssetTypes.Bumper),
+            PromoInsertions = items.Count(item => item.Type == AssetTypes.Promo),
+            InterstitialInsertions = items.Count(item => item.Type == AssetTypes.Interstitial),
             AirtimePercentages = airtime,
         };
         var playlist = new PlaylistDocument
@@ -188,6 +195,26 @@ public sealed class PlaylistGenerator
                 .ToArray();
             if (available.Length == 0)
             {
+                if (stage == 0)
+                {
+                    CandidateEvaluation[] overdueCadence = candidates
+                        .Where(candidate => candidate.CadenceOverdue
+                            && candidate.ContentGroupAllowed
+                            && candidate.VlogAllowed)
+                        .ToArray();
+                    if (overdueCadence.Length > 0)
+                    {
+                        DateTimeOffset oldestPlay = overdueCadence
+                            .Min(candidate => candidate.LastAssetPlayedAt ?? DateTimeOffset.MinValue);
+                        CandidateEvaluation[] rotationCandidates = overdueCadence
+                            .Where(candidate => (candidate.LastAssetPlayedAt ?? DateTimeOffset.MinValue) == oldestPlay)
+                            .ToArray();
+                        return new CandidateSelection(
+                            WeightedChoice(rotationCandidates, policy, playTime, random),
+                            HotPreferenceBypassed: false);
+                    }
+                }
+
                 continue;
             }
 
@@ -270,14 +297,14 @@ public sealed class PlaylistGenerator
 
         if (availableTypes.Contains(AssetTypes.Promo)
             && policy.PromoCadence is not null
-            && playTime - state.LastPromoAt >= policy.PromoCadence.MaximumInterval)
+            && playTime - state.LastPromoAt > policy.PromoCadence.MaximumInterval)
         {
             overdue.Add(AssetTypes.Promo);
         }
 
         if (availableTypes.Contains(AssetTypes.Interstitial)
             && policy.InterstitialCadence is not null
-            && playTime - state.LastInterstitialAt >= policy.InterstitialCadence.MaximumInterval)
+            && playTime - state.LastInterstitialAt > policy.InterstitialCadence.MaximumInterval)
         {
             overdue.Add(AssetTypes.Interstitial);
         }
@@ -360,6 +387,36 @@ public sealed class PlaylistGenerator
         || asset.Type != AssetTypes.Vlog
         || state.PreviousType != AssetTypes.Vlog;
 
+    private static bool IsCadenceEligible(
+        string type,
+        SchedulerState state,
+        PlaylistPolicy policy,
+        DateTimeOffset playTime) => type switch
+        {
+            AssetTypes.Bumper when policy.BumperCadence is not null =>
+                state.NormalProgramsSinceBumper >= policy.BumperCadence.MinimumPrograms,
+            AssetTypes.Promo when policy.PromoCadence is not null =>
+                playTime - state.LastPromoAt >= policy.PromoCadence.MinimumInterval,
+            AssetTypes.Interstitial when policy.InterstitialCadence is not null =>
+                playTime - state.LastInterstitialAt >= policy.InterstitialCadence.MinimumInterval,
+            _ => true,
+        };
+
+    private static bool IsCadenceOverdue(
+        string type,
+        SchedulerState state,
+        PlaylistPolicy policy,
+        DateTimeOffset playTime) => type switch
+        {
+            AssetTypes.Bumper when policy.BumperCadence is not null =>
+                state.NormalProgramsSinceBumper >= policy.BumperCadence.MaximumPrograms,
+            AssetTypes.Promo when policy.PromoCadence is not null =>
+                playTime - state.LastPromoAt > policy.PromoCadence.MaximumInterval,
+            AssetTypes.Interstitial when policy.InterstitialCadence is not null =>
+                playTime - state.LastInterstitialAt > policy.InterstitialCadence.MaximumInterval,
+            _ => false,
+        };
+
     private static void CountCadenceMisses(
         string selectedType,
         IReadOnlySet<string> availableTypes,
@@ -378,7 +435,7 @@ public sealed class PlaylistGenerator
 
         if (availableTypes.Contains(AssetTypes.Promo)
             && policy.PromoCadence is not null
-            && playTime - state.LastPromoAt >= policy.PromoCadence.MaximumInterval
+            && playTime - state.LastPromoAt > policy.PromoCadence.MaximumInterval
             && selectedType != AssetTypes.Promo)
         {
             relaxation.PromoCadence++;
@@ -386,7 +443,7 @@ public sealed class PlaylistGenerator
 
         if (availableTypes.Contains(AssetTypes.Interstitial)
             && policy.InterstitialCadence is not null
-            && playTime - state.LastInterstitialAt >= policy.InterstitialCadence.MaximumInterval
+            && playTime - state.LastInterstitialAt > policy.InterstitialCadence.MaximumInterval
             && selectedType != AssetTypes.Interstitial)
         {
             relaxation.InterstitialCadence++;
@@ -460,7 +517,9 @@ public sealed class PlaylistGenerator
         bool CategoryPreferred,
         bool ExactAssetAllowed,
         bool ContentGroupAllowed,
-        bool VlogAllowed);
+        bool VlogAllowed,
+        bool CadenceOverdue,
+        DateTimeOffset? LastAssetPlayedAt);
 
     private sealed record CandidateSelection(
         CandidateEvaluation Candidate,
@@ -526,6 +585,9 @@ public sealed class PlaylistGenerator
         public DateTimeOffset LastInterstitialAt { get; private set; }
 
         public double GetAirtimeSeconds(string type) => _airtime.GetValueOrDefault(type);
+
+        public DateTimeOffset? GetLastAssetPlay(string assetId) =>
+            LastAssetPlay.TryGetValue(assetId, out DateTimeOffset playedAt) ? playedAt : null;
 
         public void Record(PlaylistAsset asset, DateTimeOffset playTime)
         {

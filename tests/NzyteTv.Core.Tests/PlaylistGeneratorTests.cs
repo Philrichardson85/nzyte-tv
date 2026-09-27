@@ -388,6 +388,247 @@ public sealed class PlaylistGeneratorTests
     }
 
     [Fact]
+    public void Generate_OnePromoRespectsThirtyMinuteMinimumUnderFallbackPressure()
+    {
+        PlaylistPolicy policy = Policy(TimeSpan.FromHours(6), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+        PlaylistAsset[] assets =
+        [
+            .. Enumerable.Range(1, 6)
+                .Select(index => Asset($"music-{index}", AssetTypes.MusicVideo, 300, $"song-{index}")),
+            Asset("only-promo", AssetTypes.Promo, 15.433),
+        ];
+
+        PlaylistDocument playlist = Generate(assets, policy, seed: 20260927).Playlist;
+        PlaylistItem[] promos = playlist.Items
+            .Where(item => item.Type == AssetTypes.Promo)
+            .OrderBy(item => item.StartOffsetSeconds)
+            .ToArray();
+
+        Assert.NotEmpty(promos);
+        Assert.True(promos[0].StartOffsetSeconds >= policy.PromoCadence.MinimumInterval.TotalSeconds);
+        Assert.True(promos[0].StartOffsetSeconds
+            <= policy.PromoCadence.MaximumInterval.TotalSeconds + 300);
+        Assert.All(promos.Zip(promos.Skip(1)), pair =>
+            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds
+                >= policy.PromoCadence.MinimumInterval.TotalSeconds));
+        Assert.All(promos.Zip(promos.Skip(1)), pair =>
+            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds
+                <= policy.PromoCadence.MaximumInterval.TotalSeconds + 300));
+        Assert.DoesNotContain(playlist.Items.Zip(playlist.Items.Skip(1)), pair =>
+            pair.First.Type == AssetTypes.Promo && pair.Second.Type == AssetTypes.Promo);
+        Assert.True(promos.Length <= Math.Ceiling(
+            policy.TargetDuration.TotalSeconds / policy.PromoCadence.MinimumInterval.TotalSeconds));
+        Assert.Equal(promos.Length, playlist.Summary.PromoInsertions);
+    }
+
+    [Fact]
+    public void Generate_DuePromoMayRelaxExactCooldownWithoutRelaxingMinimumSpacing()
+    {
+        PlaylistPolicy policy = Policy(TimeSpan.FromMinutes(95), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 300, "music"),
+                Asset("promo", AssetTypes.Promo, 15),
+            ],
+            policy,
+            seed: 7).Playlist;
+        PlaylistItem[] promos = playlist.Items.Where(item => item.Type == AssetTypes.Promo).ToArray();
+
+        Assert.True(promos.Length >= 2);
+        Assert.Contains(promos.Zip(promos.Skip(1)), pair =>
+            pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds
+                < policy.ExactAssetCooldown.TotalSeconds);
+        Assert.All(promos.Zip(promos.Skip(1)), pair =>
+            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds
+                >= policy.PromoCadence.MinimumInterval.TotalSeconds));
+        Assert.True(playlist.Summary.ExactAssetCooldownRelaxations > 0);
+    }
+
+    [Fact]
+    public void Generate_PromoIsPreferredInsideCadenceWindow()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("prior-promo", null, AssetTypes.Promo, Now.AddMinutes(-35)));
+        PlaylistPolicy policy = Policy(TimeSpan.FromMinutes(1), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("promo", AssetTypes.Promo, 15),
+            ],
+            policy,
+            seed: 1,
+            history: history).Playlist;
+
+        Assert.Equal(AssetTypes.Promo, playlist.Items[0].Type);
+    }
+
+    [Fact]
+    public void Generate_OverduePromoOverridesItsOrdinaryExactAssetCooldown()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("promo", null, AssetTypes.Promo, Now.AddMinutes(-46)));
+        PlaylistPolicy policy = Policy(TimeSpan.FromSeconds(15), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("promo", AssetTypes.Promo, 15),
+            ],
+            policy,
+            seed: 3,
+            history: history).Playlist;
+
+        Assert.Equal("promo", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(1, playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(1, playlist.Summary.PromoInsertions);
+    }
+
+    [Fact]
+    public void Generate_MultiplePromosPreferAnAssetOutsideExactCooldown()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("promo-a", null, AssetTypes.Promo, Now.AddMinutes(-46)));
+        PlaylistPolicy policy = Policy(TimeSpan.FromSeconds(15), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("promo-a", AssetTypes.Promo, 15),
+                Asset("promo-b", AssetTypes.Promo, 15),
+            ],
+            policy,
+            seed: 11,
+            history: history).Playlist;
+
+        Assert.Equal("promo-b", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(0, playlist.Summary.ExactAssetCooldownRelaxations);
+    }
+
+    [Fact]
+    public void Generate_MultipleBlockedPromosRotateToLeastRecentlyPlayedAssetWhenOverdue()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("promo-b", null, AssetTypes.Promo, Now.AddMinutes(-60)),
+            new PlaylistHistoryEntry("promo-a", null, AssetTypes.Promo, Now.AddMinutes(-46)));
+        PlaylistPolicy policy = Policy(TimeSpan.FromSeconds(15), (AssetTypes.MusicVideo, 1)) with
+        {
+            PromoCadence = new TimeCadence(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("promo-a", AssetTypes.Promo, 15),
+                Asset("promo-b", AssetTypes.Promo, 15),
+            ],
+            policy,
+            seed: 19,
+            history: history).Playlist;
+
+        Assert.Equal("promo-b", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(1, playlist.Summary.ExactAssetCooldownRelaxations);
+    }
+
+    [Fact]
+    public void Generate_InterstitialCannotBypassTwentyMinuteMinimum()
+    {
+        PlaylistPolicy policy = Policy(TimeSpan.FromMinutes(70), (AssetTypes.MusicVideo, 1)) with
+        {
+            InterstitialCadence = new TimeCadence(TimeSpan.FromMinutes(20), TimeSpan.FromMinutes(30)),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("interstitial", AssetTypes.Interstitial, 15),
+            ],
+            policy,
+            seed: 5).Playlist;
+        PlaylistItem[] interstitials = playlist.Items
+            .Where(item => item.Type == AssetTypes.Interstitial)
+            .ToArray();
+
+        Assert.NotEmpty(interstitials);
+        Assert.True(interstitials[0].StartOffsetSeconds
+            >= policy.InterstitialCadence.MinimumInterval.TotalSeconds);
+        Assert.All(interstitials.Zip(interstitials.Skip(1)), pair =>
+            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds
+                >= policy.InterstitialCadence.MinimumInterval.TotalSeconds));
+        Assert.Equal(interstitials.Length, playlist.Summary.InterstitialInsertions);
+    }
+
+    [Fact]
+    public void Generate_BumperRequiresFourNormalProgramsBeforeInsertion()
+    {
+        PlaylistPolicy policy = Policy(TimeSpan.FromMinutes(15), (AssetTypes.MusicVideo, 1)) with
+        {
+            BumperCadence = new ProgramCountCadence(4, 5),
+        };
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("music", AssetTypes.MusicVideo, 60, "music"),
+                Asset("bumper", AssetTypes.Bumper, 15),
+            ],
+            policy,
+            seed: 9).Playlist;
+        int normalPrograms = 0;
+        int bumpers = 0;
+        foreach (PlaylistItem item in playlist.Items)
+        {
+            if (item.Type == AssetTypes.Bumper)
+            {
+                Assert.True(normalPrograms >= policy.BumperCadence.MinimumPrograms);
+                normalPrograms = 0;
+                bumpers++;
+            }
+            else if (item.Type is not (AssetTypes.Promo or AssetTypes.Interstitial))
+            {
+                normalPrograms++;
+            }
+        }
+
+        Assert.True(bumpers > 0);
+        Assert.Equal(bumpers, playlist.Summary.BumperInsertions);
+    }
+
+    [Fact]
+    public void Generate_SixHoursWithOneNormalAssetStillMakesProgressWithoutCadenceAssets()
+    {
+        PlaylistDocument playlist = Generate(
+            [Asset("only-music", AssetTypes.MusicVideo, 300, "only-song")],
+            new PlaylistPolicy(),
+            seed: 12).Playlist;
+
+        Assert.True(playlist.ActualDurationSeconds >= TimeSpan.FromHours(6).TotalSeconds);
+        Assert.All(playlist.Items, item => Assert.Equal(AssetTypes.MusicVideo, item.Type));
+        Assert.Equal(0, playlist.Summary.BumperInsertions);
+        Assert.Equal(0, playlist.Summary.PromoInsertions);
+        Assert.Equal(0, playlist.Summary.InterstitialInsertions);
+    }
+
+    [Fact]
     public void Generate_PolicyDisabledAssetsAreReportedAsExcluded()
     {
         PlaylistDocument playlist = Generate(

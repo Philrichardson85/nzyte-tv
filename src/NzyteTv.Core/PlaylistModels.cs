@@ -46,6 +46,12 @@ public sealed class PlaylistSummary
 
     public int InterstitialCadenceMisses { get; init; }
 
+    public int BumperInsertions { get; init; }
+
+    public int PromoInsertions { get; init; }
+
+    public int InterstitialInsertions { get; init; }
+
     public IReadOnlyDictionary<string, double> AirtimePercentages { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal);
 }

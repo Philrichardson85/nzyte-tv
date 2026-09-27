@@ -417,6 +417,11 @@ public static class CliApplication
         Console.WriteLine($"    bumper:                  {summary.BumperCadenceMisses}");
         Console.WriteLine($"    promo:                   {summary.PromoCadenceMisses}");
         Console.WriteLine($"    interstitial:            {summary.InterstitialCadenceMisses}");
+        Console.WriteLine();
+        Console.WriteLine("Cadence insertions:");
+        Console.WriteLine($"    bumper:                  {summary.BumperInsertions}");
+        Console.WriteLine($"    promo:                   {summary.PromoInsertions}");
+        Console.WriteLine($"    interstitial:            {summary.InterstitialInsertions}");
 
         if (playlist.ExcludedAssets.Count > 0)
         {
