@@ -68,6 +68,7 @@ public sealed class PlaylistGenerator
                     IsExactAssetAllowed(asset, state, policy, playTime),
                     IsContentGroupPreferred(asset, state, policy, playTime),
                     IsContentGroupFloorAllowed(asset, state, policy, playTime),
+                    IsContentGroupRescueAllowed(asset, state, policy, playTime),
                     IsVlogPreferred(asset, state, policy),
                     IsVlogWithinNormalLimit(asset, state, policy),
                     IsCadenceOverdue(asset.Type, state, policy, playTime),
@@ -96,7 +97,12 @@ public sealed class PlaylistGenerator
                 relaxation.ContentGroup++;
             }
 
-            if (!selected.ContentGroupFloorAllowed)
+            if (selection.MusicFirstRescueUsed)
+            {
+                relaxation.MusicFirstRescue++;
+            }
+
+            if (!selected.ContentGroupRescueAllowed)
             {
                 relaxation.EmergencyContentGroupFloor++;
             }
@@ -144,6 +150,7 @@ public sealed class PlaylistGenerator
             ExactAssetCooldownRelaxations = relaxation.ExactAsset,
             NewReleasePreferenceBypasses = relaxation.HotPreference,
             ContentGroupCooldownRelaxations = relaxation.ContentGroup,
+            MusicFirstRescueRelaxations = relaxation.MusicFirstRescue,
             EmergencyContentGroupFloorViolations = relaxation.EmergencyContentGroupFloor,
             ConsecutiveVlogViolations = relaxation.ConsecutiveVlog,
             EmergencyVlogRunViolations = relaxation.EmergencyVlogRun,
@@ -230,7 +237,8 @@ public sealed class PlaylistGenerator
                             .ToArray();
                         return new CandidateSelection(
                             WeightedChoice(rotationCandidates, policy, playTime, random),
-                            HotPreferenceBypassed: false);
+                            HotPreferenceBypassed: false,
+                            MusicFirstRescueUsed: false);
                     }
                 }
 
@@ -240,32 +248,54 @@ public sealed class PlaylistGenerator
             CandidateEvaluation selected = WeightedChoice(available, policy, playTime, random);
             bool hotPreferenceBypassed = MaximumRotationWeight(baseCandidates, policy, playTime)
                 > MaximumRotationWeight(available, policy, playTime);
-            return new CandidateSelection(selected, hotPreferenceBypassed);
+            return new CandidateSelection(selected, hotPreferenceBypassed, MusicFirstRescueUsed: false);
         }
 
         CandidateEvaluation[] emergencyVlogRun = candidates
-            .Where(candidate => candidate.ContentGroupFloorAllowed)
+            .Where(candidate => candidate.ContentGroupFloorAllowed
+                && !candidate.VlogWithinNormalLimit
+                && candidate.Asset.Type == AssetTypes.Vlog)
             .ToArray();
         if (emergencyVlogRun.Length > 0)
         {
+            CandidateEvaluation[] musicFirstRescue = candidates
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId)
+                    && candidate.ContentGroupRescueAllowed
+                    && !candidate.ContentGroupFloorAllowed
+                    && candidate.VlogWithinNormalLimit)
+                .ToArray();
+            if (musicFirstRescue.Length > 0)
+            {
+                return new CandidateSelection(
+                    WeightedChoice(musicFirstRescue, policy, playTime, random),
+                    HotPreferenceBypassed: false,
+                    MusicFirstRescueUsed: true);
+            }
+
             return new CandidateSelection(
                 WeightedChoice(emergencyVlogRun, policy, playTime, random),
-                HotPreferenceBypassed: false);
+                HotPreferenceBypassed: false,
+                MusicFirstRescueUsed: false);
         }
 
         CandidateEvaluation[] emergencyContentGroupFloor = candidates
-            .Where(candidate => candidate.VlogWithinNormalLimit)
+            .Where(candidate => candidate.VlogWithinNormalLimit
+                && !candidate.ContentGroupRescueAllowed)
             .ToArray();
         if (emergencyContentGroupFloor.Length > 0)
         {
             return new CandidateSelection(
                 WeightedChoice(emergencyContentGroupFloor, policy, playTime, random),
-                HotPreferenceBypassed: false);
+                HotPreferenceBypassed: false,
+                MusicFirstRescueUsed: false);
         }
 
         if (candidates.Count > 0)
         {
-            return new CandidateSelection(WeightedChoice(candidates, policy, playTime, random), false);
+            return new CandidateSelection(
+                WeightedChoice(candidates, policy, playTime, random),
+                HotPreferenceBypassed: false,
+                MusicFirstRescueUsed: false);
         }
 
         throw new InvalidOperationException("Playlist scheduling made no progress because no candidates are available.");
@@ -420,6 +450,15 @@ public sealed class PlaylistGenerator
         || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
         || playTime - previous >= policy.ContentGroupMinimumCooldown;
 
+    private static bool IsContentGroupRescueAllowed(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy,
+        DateTimeOffset playTime) =>
+        string.IsNullOrWhiteSpace(asset.ContentGroupId)
+        || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
+        || playTime - previous >= policy.ContentGroupMusicFirstRescueCooldown;
+
     private static bool IsVlogPreferred(PlaylistAsset asset, SchedulerState state, PlaylistPolicy policy) =>
         !policy.AvoidConsecutiveVlogs
         || asset.Type != AssetTypes.Vlog
@@ -563,6 +602,7 @@ public sealed class PlaylistGenerator
         bool ExactAssetAllowed,
         bool ContentGroupPreferred,
         bool ContentGroupFloorAllowed,
+        bool ContentGroupRescueAllowed,
         bool VlogPreferred,
         bool VlogWithinNormalLimit,
         bool CadenceOverdue,
@@ -570,7 +610,8 @@ public sealed class PlaylistGenerator
 
     private sealed record CandidateSelection(
         CandidateEvaluation Candidate,
-        bool HotPreferenceBypassed);
+        bool HotPreferenceBypassed,
+        bool MusicFirstRescueUsed);
 
     private sealed class RelaxationCounts
     {
@@ -581,6 +622,8 @@ public sealed class PlaylistGenerator
         public int HotPreference { get; set; }
 
         public int ContentGroup { get; set; }
+
+        public int MusicFirstRescue { get; set; }
 
         public int EmergencyContentGroupFloor { get; set; }
 

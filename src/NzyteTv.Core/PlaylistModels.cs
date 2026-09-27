@@ -38,6 +38,8 @@ public sealed class PlaylistSummary
 
     public int ContentGroupCooldownRelaxations { get; init; }
 
+    public int MusicFirstRescueRelaxations { get; init; }
+
     public int EmergencyContentGroupFloorViolations { get; init; }
 
     public int ConsecutiveVlogViolations { get; init; }

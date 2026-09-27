@@ -24,6 +24,8 @@ public sealed record PlaylistPolicy
 
     public TimeSpan ContentGroupMinimumCooldown { get; init; } = TimeSpan.FromMinutes(60);
 
+    public TimeSpan ContentGroupMusicFirstRescueCooldown { get; init; } = TimeSpan.FromMinutes(45);
+
     public bool AvoidConsecutiveVlogs { get; init; } = true;
 
     public int MaximumConsecutiveVlogs { get; init; } = 2;
@@ -82,7 +84,8 @@ public sealed record PlaylistPolicy
 
         if (ExactAssetCooldown < TimeSpan.Zero
             || ContentGroupCooldown < TimeSpan.Zero
-            || ContentGroupMinimumCooldown < TimeSpan.Zero)
+            || ContentGroupMinimumCooldown < TimeSpan.Zero
+            || ContentGroupMusicFirstRescueCooldown < TimeSpan.Zero)
         {
             errors.Add("Cooldowns must not be negative.");
         }
@@ -90,6 +93,11 @@ public sealed record PlaylistPolicy
         if (ContentGroupMinimumCooldown > ContentGroupCooldown)
         {
             errors.Add("The content-group minimum cooldown must not exceed the preferred cooldown.");
+        }
+
+        if (ContentGroupMusicFirstRescueCooldown > ContentGroupMinimumCooldown)
+        {
+            errors.Add("The content-group music-first rescue cooldown must not exceed the normal floor.");
         }
 
         if (MaximumConsecutiveVlogs < 1)

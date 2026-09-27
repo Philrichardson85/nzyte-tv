@@ -65,6 +65,7 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The v0.2B current-li
 | Exact asset cooldown | 2 hours |
 | Same `contentGroupId` preferred cooldown | 90 minutes |
 | Same `contentGroupId` normal floor | 60 minutes |
+| Music-first rescue floor | 45 minutes, only before vlog #3+ |
 | Consecutive vlogs | one preferred; two permitted as fallback |
 | Bumper cadence | every 4–5 normal programs |
 | Interstitial cadence | every 20–30 minutes |
@@ -101,6 +102,8 @@ Weights feed the seeded deterministic choice. Hot preference cannot bypass same-
 
 Different visual assets with the same `contentGroupId` are one song family. A music video, lyric video, performance, and short-form clip for one song all share one cooldown clock. The preferred target is 90 minutes. A controlled relaxation may schedule the group from 60 through 90 minutes; ordinary fallback never schedules it below the 60-minute floor. Short-form has no special song-repeat escape hatch.
 
+The 45-minute music-first rescue floor is not an ordinary candidate tier and cannot be used to improve category percentages. After two consecutive vlogs, if no candidate at or above the normal 60-minute floor is usable, the scheduler searches for song candidates whose shared content-group clock is at least 45 minutes old. A 45–60-minute song then replaces what would otherwise be vlog #3 or later. If no such song exists, the scheduler may record an emergency vlog-run violation. Song repeats below 45 minutes remain a later pathological forward-progress fallback.
+
 If the limited catalog cannot satisfy every preference, the engine progressively opens rules in this order:
 
 1. category airtime target;
@@ -109,7 +112,7 @@ If the limited catalog cannot satisfy every preference, the engine progressively
 4. no-consecutive-vlog preference, permitting a second vlog;
 5. preferred 90-minute `contentGroupId` target, but only down to the 60-minute floor.
 
-The scheduler prefers one vlog at a time, but a second consecutive vlog is a controlled pacing fallback and is preferable to relaxing song spacing. A third consecutive vlog is not part of ordinary scheduling. If a pathological inventory still cannot progress, third-or-later vlog runs and sub-60-minute song repeats use separately counted emergency stages. Emergency vlog pacing is attempted before breaking the song floor; an absolute last-resort selection may report both violations. `contentGroupCooldownRelaxations` therefore counts only controlled 60–90-minute song spacing, while `emergencyContentGroupFloorViolations` identifies sub-60-minute repeats.
+The scheduler prefers one vlog at a time, but a second consecutive vlog is a controlled pacing fallback and is preferable to relaxing song spacing. A third consecutive vlog is not part of ordinary scheduling. Before that emergency, the scheduler may use the music-first 45–60-minute rescue tier. `contentGroupCooldownRelaxations` counts only controlled 60–90-minute song spacing, `musicFirstRescueRelaxations` counts the rescue tier, and `emergencyContentGroupFloorViolations` identifies sub-45-minute repeats. If pathological inventory still cannot progress, third-or-later vlog runs and sub-45-minute song repeats use separately counted emergency stages; an absolute last-resort selection may report both violations.
 
 Cadence misses and insertion counts are also reported. Cadence minimum spacing is not a relaxation stage: cadence assets are removed from consideration until their minimum window opens. With at least one policy-enabled asset, the explicit emergency stages guarantee forward progress rather than deadlocking.
 
@@ -147,6 +150,7 @@ Playlist schema version 1 is JSON with camel-case property names:
     "exactAssetCooldownRelaxations": 6,
     "newReleasePreferenceBypasses": 2,
     "contentGroupCooldownRelaxations": 0,
+    "musicFirstRescueRelaxations": 1,
     "emergencyContentGroupFloorViolations": 0,
     "consecutiveVlogViolations": 0,
     "emergencyVlogRunViolations": 0,
@@ -165,7 +169,7 @@ Playlist schema version 1 is JSON with camel-case property names:
 }
 ```
 
-Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. The cadence insertion and emergency-violation counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
+Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. The music-first rescue, cadence insertion, and emergency-violation counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
 
 ## History schema and playlist boundaries
 

@@ -101,6 +101,7 @@ public sealed class PlaylistGeneratorTests
             ExactAssetCooldown = TimeSpan.Zero,
             ContentGroupCooldown = TimeSpan.Zero,
             ContentGroupMinimumCooldown = TimeSpan.Zero,
+            ContentGroupMusicFirstRescueCooldown = TimeSpan.Zero,
         };
         PlaylistDocument playlist = Generate(
             [
@@ -185,6 +186,7 @@ public sealed class PlaylistGeneratorTests
                 ExactAssetCooldown = TimeSpan.Zero,
                 ContentGroupCooldown = TimeSpan.Zero,
                 ContentGroupMinimumCooldown = TimeSpan.Zero,
+                ContentGroupMusicFirstRescueCooldown = TimeSpan.Zero,
             },
             seed: 5).Playlist;
 
@@ -331,6 +333,133 @@ public sealed class PlaylistGeneratorTests
     }
 
     [Fact]
+    public void Generate_UsesMusicFirstRescueBeforeThirdConsecutiveVlog()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("song-music", "song", AssetTypes.MusicVideo, Now.AddMinutes(-50)),
+            new PlaylistHistoryEntry("vlog-a", null, AssetTypes.Vlog, Now.AddMinutes(-1)),
+            new PlaylistHistoryEntry("vlog-b", null, AssetTypes.Vlog, Now));
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("song-performance", AssetTypes.Performance, 60, "song"),
+                Asset("vlog-c", AssetTypes.Vlog, 60),
+            ],
+            Policy(
+                TimeSpan.FromMinutes(1),
+                (AssetTypes.Performance, 0.5),
+                (AssetTypes.Vlog, 0.5)),
+            seed: 21,
+            history: history).Playlist;
+
+        Assert.Equal("song-performance", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(1, playlist.Summary.MusicFirstRescueRelaxations);
+        Assert.Equal(0, playlist.Summary.ContentGroupCooldownRelaxations);
+        Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyVlogRunViolations);
+    }
+
+    [Fact]
+    public void Generate_DoesNotUseMusicFirstRescueForCategoryTargeting()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("rescue-prior", "rescue", AssetTypes.MusicVideo, Now.AddMinutes(-50)));
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("rescue-lyric", AssetTypes.LyricVideo, 60, "rescue"),
+                Asset("normal-music", AssetTypes.MusicVideo, 60, "normal"),
+            ],
+            Policy(
+                TimeSpan.FromMinutes(1),
+                (AssetTypes.LyricVideo, 0.99),
+                (AssetTypes.MusicVideo, 0.01)),
+            seed: 22,
+            history: history).Playlist;
+
+        Assert.Equal("normal-music", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(0, playlist.Summary.MusicFirstRescueRelaxations);
+        Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
+    }
+
+    [Fact]
+    public void Generate_NormalFloorCandidateWinsBeforeMusicFirstRescue()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("rescue-prior", "rescue", AssetTypes.MusicVideo, Now.AddMinutes(-50)),
+            new PlaylistHistoryEntry("normal-prior", "normal", AssetTypes.MusicVideo, Now.AddMinutes(-70)),
+            new PlaylistHistoryEntry("vlog-a", null, AssetTypes.Vlog, Now.AddMinutes(-1)),
+            new PlaylistHistoryEntry("vlog-b", null, AssetTypes.Vlog, Now));
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("rescue-lyric", AssetTypes.LyricVideo, 60, "rescue"),
+                Asset("normal-performance", AssetTypes.Performance, 60, "normal"),
+                Asset("vlog-c", AssetTypes.Vlog, 60),
+            ],
+            Policy(
+                TimeSpan.FromMinutes(1),
+                (AssetTypes.LyricVideo, 0.34),
+                (AssetTypes.Performance, 0.33),
+                (AssetTypes.Vlog, 0.33)),
+            seed: 23,
+            history: history).Playlist;
+
+        Assert.Equal("normal-performance", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(1, playlist.Summary.ContentGroupCooldownRelaxations);
+        Assert.Equal(0, playlist.Summary.MusicFirstRescueRelaxations);
+        Assert.Equal(0, playlist.Summary.EmergencyVlogRunViolations);
+    }
+
+    [Fact]
+    public void Generate_SubFortyFiveMinuteRepeatIsEmergencyFloorViolation()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("song-music", "song", AssetTypes.MusicVideo, Now.AddMinutes(-44)));
+
+        PlaylistDocument playlist = Generate(
+            [Asset("song-lyric", AssetTypes.LyricVideo, 60, "song")],
+            Policy(TimeSpan.FromMinutes(1), (AssetTypes.LyricVideo, 1)),
+            seed: 24,
+            history: history).Playlist;
+
+        Assert.Equal("song-lyric", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(0, playlist.Summary.MusicFirstRescueRelaxations);
+        Assert.Equal(1, playlist.Summary.EmergencyContentGroupFloorViolations);
+    }
+
+    [Fact]
+    public void Generate_ThirdVlogEmergencyRemainsWhenNoRescueCandidateExists()
+    {
+        PlaylistHistoryDocument history = History(
+            Now,
+            new PlaylistHistoryEntry("song-music", "song", AssetTypes.MusicVideo, Now.AddMinutes(-44)),
+            new PlaylistHistoryEntry("vlog-a", null, AssetTypes.Vlog, Now.AddMinutes(-1)),
+            new PlaylistHistoryEntry("vlog-b", null, AssetTypes.Vlog, Now));
+
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("song-lyric", AssetTypes.LyricVideo, 60, "song"),
+                Asset("vlog-c", AssetTypes.Vlog, 60),
+            ],
+            Policy(
+                TimeSpan.FromMinutes(1),
+                (AssetTypes.LyricVideo, 0.5),
+                (AssetTypes.Vlog, 0.5)),
+            seed: 25,
+            history: history).Playlist;
+
+        Assert.Equal("vlog-c", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(0, playlist.Summary.MusicFirstRescueRelaxations);
+        Assert.Equal(1, playlist.Summary.EmergencyVlogRunViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
+    }
+
+    [Fact]
     public void Generate_ContentGroupMayRelaxOnlyIntoSixtyToNinetyMinuteWindow()
     {
         PlaylistHistoryDocument history = History(
@@ -447,6 +576,7 @@ public sealed class PlaylistGeneratorTests
             ExactAssetCooldown = TimeSpan.Zero,
             ContentGroupCooldown = TimeSpan.Zero,
             ContentGroupMinimumCooldown = TimeSpan.Zero,
+            ContentGroupMusicFirstRescueCooldown = TimeSpan.Zero,
         };
         PlaylistDocument playlist = Generate(
             [
@@ -493,6 +623,7 @@ public sealed class PlaylistGeneratorTests
             ExactAssetCooldown = TimeSpan.Zero,
             ContentGroupCooldown = TimeSpan.Zero,
             ContentGroupMinimumCooldown = TimeSpan.Zero,
+            ContentGroupMusicFirstRescueCooldown = TimeSpan.Zero,
             BumperCadence = new ProgramCountCadence(2, 3),
             PromoCadence = new TimeCadence(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3)),
             InterstitialCadence = new TimeCadence(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3)),
