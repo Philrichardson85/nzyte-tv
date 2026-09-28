@@ -1,6 +1,6 @@
 # Playlist and programming engine
 
-NZYTE TV v0.2B generates deterministic, inspectable schedules from normalized library assets. It does not broadcast, re-encode, edit metadata, or modify media.
+NZYTE TV generates deterministic, inspectable schedules from normalized library assets. Playlist generation does not broadcast, re-encode, edit metadata, or modify media. For the complete novice workflow around generation, history, and live playback, see the [operations runbook](operations-runbook.md).
 
 ## Build a playlist
 
@@ -40,7 +40,7 @@ The summary reports target duration, actual duration, and overrun.
 
 ## Eligibility snapshot
 
-Generation scans the normalized library once. An asset is schedulable only when the existing v0.2A eligibility rules pass:
+Generation scans the normalized library once. An asset is schedulable only when the eligibility rules pass:
 
 - the normalized media exists;
 - the technical `.nzytetv.json` manifest exists;
@@ -234,6 +234,8 @@ The next playlist starts no earlier than the prior `scheduleEndUtc`. This preven
 
 Missing history starts cleanly. Malformed, unsupported, or internally inconsistent history fails with a clear error; it is never silently ignored or overwritten.
 
+During ongoing station operation, generate each next playlist block with the same current history path. Do not delete or reset history casually: doing so discards the cross-playlist exact-asset and same-song cooldown context.
+
 ## Scope boundary
 
-v0.2B produces schedules and bounded history only. It does not implement YouTube broadcasting, RTMP, a broadcaster service, a continuous playback loop, systemd integration, live reload, or filesystem watching.
+Playlist generation produces schedules and bounded history only. The separate `broadcast` command can play supplied playlist files, but it does not automatically generate future blocks, run as a systemd service, monitor YouTube, or watch the filesystem.

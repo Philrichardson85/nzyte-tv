@@ -1,6 +1,6 @@
 # Raspberry Pi 4 deployment guide
 
-This guide reproduces the tested NZYTE TV deployment from a blank Raspberry Pi 4. It covers the operating system, remote administration, media storage, .NET, FFmpeg, application publishing, and the first real normalization run.
+This guide reproduces the tested NZYTE TV deployment from a blank Raspberry Pi 4. It covers the operating system, remote administration, media storage, .NET, FFmpeg, and application publishing. For the complete novice workflow through playlists, RTMPS, tmux, and live operation, use the [operations runbook](operations-runbook.md).
 
 For novice explanations of Git, .NET, FFmpeg/FFprobe, release tags, source updates, self-contained publishing, and command-not-found errors, read the [workstation setup guide](workstation-setup.md) first. This document focuses on Pi-specific installation, mounting, deployment, and validation.
 
@@ -16,7 +16,7 @@ For novice explanations of Git, .NET, FFmpeg/FFprobe, release tags, source updat
 |---|---|
 | Hardware | Raspberry Pi 4 Model B, 4 GB RAM |
 | OS/application storage | `/dev/mmcblk0p2`, ext4, approximately 29 GB usable |
-| Media storage | SanDisk Cruzer Glide `/dev/sda1`, NTFS3, approximately 30 GB |
+| Portable media workflow | exFAT USB moved from Windows and mounted by UUID |
 | Display connection | Raspberry Pi 4 micro-HDMI |
 | OS | Ubuntu Desktop 24.04.5 LTS, 64-bit |
 | Architecture | ARM64 / `aarch64` |
@@ -300,69 +300,45 @@ Package updates may install a later .NET 10 patch. Keep the major version at 10 
 
 ## 7. Mount the USB media drive
 
-### Verified drive
+### Portable drive and fstab safety
 
-| Property | Value |
-|---|---|
-| Model | SanDisk Cruzer Glide |
-| Device | `/dev/sda` |
-| Partition | `/dev/sda1` |
-| Filesystem | NTFS3 |
-| Approximate size | 30 GB |
-| UUID | `F424A3DE24A3A25A` |
-| Permanent mount | `/srv/nzyte-tv/media` |
-| Verified owner | `u24 u24` |
+The current portable workflow has been validated with an exFAT USB drive moved from Windows to the Pi. **Do not format a drive that already contains media.** Device names such as `/dev/sda1` can change; persistent configuration must use the filesystem UUID.
 
-The drive already contains media. **Do not format it.** Device names such as `/dev/sda1` can change; the persistent configuration uses the filesystem UUID instead.
-
-Inspect the device before changing mount configuration:
+Stop any active broadcast. Inspect the drive and current configuration before editing anything:
 
 ```bash
-lsblk -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS
-sudo blkid /dev/sda1
-id u24
+lsblk -f
+cat /etc/fstab
+findmnt /srv/nzyte-tv/media
+id
 ```
 
-Confirm that the expected UUID is present and that the deployment account has UID and GID `1000`. If the account IDs differ, adjust the `uid` and `gid` values below rather than copying them blindly.
-
-Create the mount point and back up `/etc/fstab`:
+Confirm the USB UUID, filesystem, and deployment-user IDs. Back up fstab before editing:
 
 ```bash
 sudo mkdir -p /srv/nzyte-tv/media
-sudo cp /etc/fstab /etc/fstab.pre-nzyte-tv
+sudo cp /etc/fstab /etc/fstab.backup
 sudoedit /etc/fstab
 ```
 
-Add the verified entry as one line:
+Generic exFAT example—replace `<USB-UUID>` and confirm the user/group IDs before saving:
 
 ```fstab
-UUID=F424A3DE24A3A25A /srv/nzyte-tv/media ntfs3 defaults,uid=1000,gid=1000,umask=022,nofail,x-systemd.automount 0 0
+UUID=<USB-UUID> /srv/nzyte-tv/media exfat defaults,uid=1000,gid=1000,umask=022,nofail,x-systemd.automount 0 0
 ```
 
-Validate without rebooting:
+Never paste a UUID from documentation as though it belongs to the current drive. Edit only the media-drive line; leave operating-system partitions unchanged.
+
+Reload systemd and validate without rebooting:
 
 ```bash
+sudo systemctl daemon-reload
 sudo mount -a
 ls -la /srv/nzyte-tv/media
 findmnt /srv/nzyte-tv/media
-ls -ld /srv/nzyte-tv/media
 ```
 
-Reboot and test again:
-
-```bash
-sudo reboot
-```
-
-After reconnecting:
-
-```bash
-findmnt /srv/nzyte-tv/media
-ls /srv/nzyte-tv/media
-findmnt /srv/nzyte-tv/media
-```
-
-Because `x-systemd.automount` is enabled, the first `findmnt` after boot can show `systemd-1` and filesystem type `autofs`. Accessing the directory triggers the real NTFS mount; the second `findmnt` should then show the mounted drive. The verified ownership was `u24 u24`.
+Stop if `mount -a` reports an error or the expected portable-root directories are absent. With `x-systemd.automount`, accessing the directory may be required before `findmnt` shows the real filesystem rather than `systemd-1`/`autofs`.
 
 The OS partition is `/dev/mmcblk0p2`, uses ext4, and provides approximately 29 GB. Reserve that storage primarily for Ubuntu, the application, repository, catalog, logs, playlists, and working data. Keep large source and normalized media on the external drive.
 
@@ -378,7 +354,7 @@ nzytetv media init <media-root>
 
 For example, a Windows workstation can run `nzytetv media init "E:\"`, copy masters into `E:\source`, and normalize directly into `E:\library`. Portrait sources can use `--vertical-layout blurred-background` during that same normalization pass. The catalog can travel at `E:\catalog\song-catalog.json`, and programming sidecars, technical manifests, playlists, and history remain on the physical drive.
 
-After upgrading NZYTE TV, rerun `nzytetv media init "E:\"` on an existing v0.2.0 drive to add only `E:\source\Visualizers\` and `E:\source\Animated Visuals\` when they are missing. It preserves the existing descriptor, media, catalog, manifests, programming metadata, playlists, and history. Visualizers are full-song static or lightly animated graphical presentations; animated visuals are animated, narrative, cinematic, anime/movie-style, AI-animated, or other extended song presentations. Both are song-based and must share the catalog `contentGroupId` with every other presentation of the same recording.
+After upgrading NZYTE TV, rerun `nzytetv media init "E:\"` on an existing drive to add any missing layout directories. It preserves the existing descriptor, media, catalog, manifests, programming metadata, playlists, and history. Visualizers and animated visuals are song-based and must share the catalog `contentGroupId` with every other presentation of the same recording.
 
 After safe ejection and mounting at `/srv/nzyte-tv/media`, the Pi may consume the already-normalized `library/`. A drive-letter or mount-path change is not asset identity and does not by itself require another encode. The repository and `/opt/nzyte-tv/app` executable stay on the Pi; they are not required on the USB drive. The SD-card catalog/playlists layout below remains a supported deployment alternative because commands accept explicit paths. See [Prepare and use a portable media drive](workstation-setup.md#prepare-and-use-a-portable-media-drive) for the complete novice workflow and directory tree.
 
@@ -399,7 +375,7 @@ The deployed layout separates source, published application files, mutable worki
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
 |   |-- library/                   normalized and verified assets
-|   `-- System Volume Information/ Windows/NTFS metadata; ignore
+|   `-- System Volume Information/ Windows filesystem metadata; ignore
 |-- source -> /srv/nzyte-tv/media/source
 `-- library -> /srv/nzyte-tv/media/library
 ```
@@ -417,7 +393,7 @@ sudo ln -s /srv/nzyte-tv/media/source /srv/nzyte-tv/source
 sudo ln -s /srv/nzyte-tv/media/library /srv/nzyte-tv/library
 ```
 
-The ownership of `/srv/nzyte-tv/media` comes from the NTFS mount options and should not be changed recursively. The `ln -s` commands are for a blank deployment; if either convenience path already exists, inspect it with `ls -ld` instead of replacing it blindly.
+The ownership of `/srv/nzyte-tv/media` comes from the portable-drive mount options and should not be changed recursively. The `ln -s` commands are for a blank deployment; if either convenience path already exists, inspect it with `ls -ld` instead of replacing it blindly.
 
 Maintenance commands do not always follow directory symlinks by default. Use `-L` when inspecting content through the convenience paths:
 
@@ -430,13 +406,13 @@ find -L /srv/nzyte-tv/source -type f
 
 The stable release workflow below is recommended for a production Pi. The [workstation setup guide](workstation-setup.md#choose-a-release-checkout-or-a-development-checkout) explains the difference between a reproducible tag and the moving `main` branch.
 
-Clone into the source directory, fetch tags, and select the current documented release:
+Clone into the source directory, fetch tags, and select a real release tag in place of `vX.Y.Z`:
 
 ```bash
 git clone https://github.com/Philrichardson85/nzyte-tv.git /opt/nzyte-tv/src
 cd /opt/nzyte-tv/src
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 ```
 
 Verify the tag before building:
@@ -447,7 +423,7 @@ git rev-parse --short HEAD
 git status --short
 ```
 
-Release `v0.2.0` currently reports commit `ae615eb`; the tag is the authoritative release identifier. `git status --short` should print nothing on a clean production checkout. See [Updating NZYTE TV](workstation-setup.md#updating-nzyte-tv) when deliberately changing releases or tracking `main`.
+The tag is the authoritative release identifier. `git status --short` should print nothing on a clean production checkout. See [Updating NZYTE TV](workstation-setup.md#updating-nzyte-tv) when deliberately changing releases or tracking `main`.
 
 Restore, build, and test the solution:
 
@@ -457,7 +433,7 @@ dotnet build NzyteTv.slnx --configuration Release --no-restore
 dotnet test NzyteTv.slnx --configuration Release --no-build --no-restore
 ```
 
-Publish only the CLI project to the production application directory:
+For a first installation, publish only the CLI project to the production application directory:
 
 ```bash
 dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj \
@@ -479,36 +455,37 @@ It is not named `NzyteTv.Cli`.
 
 For the first install, publishing directly to `/opt/nzyte-tv/app` is appropriate. For an update to an application already serving production, first publish and verify a separate candidate. This avoids replacing the known-working application before the new files have passed a basic check.
 
-The example uses a versioned candidate directory. Replace `v0.2.0` with the release actually being deployed. Before creating it, run `ls -ld /opt/nzyte-tv/releases/v0.2.0`; the expected result is that the path does not exist. If it already exists, inspect it and choose a new, empty candidate name rather than publishing over unknown files.
+For updates, use the fixed candidate path below. Before removing it, verify that the exact path is `/opt/nzyte-tv/app-candidate`; never broaden the removal to `/opt/nzyte-tv` or delete rollback folders.
 
 ```bash
-sudo mkdir -p /opt/nzyte-tv/releases/v0.2.0
-sudo chown -R "$USER":"$USER" /opt/nzyte-tv/releases
+ls -ld /opt/nzyte-tv/app-candidate 2>/dev/null || true
+rm -rf /opt/nzyte-tv/app-candidate
 
 cd /opt/nzyte-tv/src
 dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj \
   -c Release \
   -r linux-arm64 \
   --self-contained true \
-  -o /opt/nzyte-tv/releases/v0.2.0
+  -o /opt/nzyte-tv/app-candidate
 
-/opt/nzyte-tv/releases/v0.2.0/nzytetv --help
+/opt/nzyte-tv/app-candidate/nzytetv --help
+file /opt/nzyte-tv/app-candidate/nzytetv
 ```
 
-Before promotion, stop any process using the application. Confirm that the candidate exists and that the proposed rollback name does not already exist:
+Before promotion, stop any process using the application. Replace `vX.Y.Z` below with the real deployed release/build label. Confirm that the candidate exists and that the proposed rollback name does not already exist:
 
 ```bash
 ls -ld /opt/nzyte-tv/app
-ls -ld /opt/nzyte-tv/releases/v0.2.0
-ls -ld /opt/nzyte-tv/app-rollback-before-v0.2.0
+ls -ld /opt/nzyte-tv/app-candidate
+ls -ld /opt/nzyte-tv/app-vX.Y.Z-rollback 2>/dev/null || true
 ```
 
 It is expected for the last command to report that the rollback path does not exist. Promote by renaming directories; these commands preserve the previous application rather than deleting it:
 
 ```bash
 cd /opt/nzyte-tv
-mv app app-rollback-before-v0.2.0
-mv releases/v0.2.0 app
+mv app app-vX.Y.Z-rollback
+mv app-candidate app
 ./app/nzytetv --help
 ```
 
@@ -516,8 +493,8 @@ If final validation fails, keep the failed candidate for inspection and restore 
 
 ```bash
 cd /opt/nzyte-tv
-mv app releases/v0.2.0-failed
-mv app-rollback-before-v0.2.0 app
+mv app app-candidate-failed
+mv app-vX.Y.Z-rollback app
 ./app/nzytetv --help
 ```
 
@@ -614,7 +591,11 @@ Use `--overwrite` only when all existing destinations should be deliberately reg
 
 Ctrl+C cancels the active conversion. The active temporary file is removed instead of being published as its final destination. Previously completed files remain in place and will be verified and skipped on the next run.
 
-### Recorded 39-file production run
+### Recorded 232-file portable-library acceptance
+
+A later production-shaped acceptance normalized 232 source files with 0 failures. An unchanged integrity run normalized 0, skipped all 232, and independently verified all 232 ready. Metadata initialization then resolved the production inventory without errors. These figures are a historical acceptance example, not a required or permanent library size.
+
+### Earlier recorded 39-file production run
 
 The full source set occupies approximately 7.3 GB and has a combined runtime of 1:17:09 (4,630 seconds). Production results were:
 
@@ -677,13 +658,13 @@ Failed to update header with correct duration.
 Failed to update header with correct filesize.
 ```
 
-A future broadcaster command may suppress them with:
+The current broadcaster suppresses them with:
 
 ```text
 -flvflags no_duration_filesize
 ```
 
-This is acceptance-test documentation only. NZYTE TV v0.1 does not implement streaming or retain a YouTube stream key.
+The current broadcaster automates this stream-copy path and still never stores or displays a YouTube stream key. See [Broadcasting generated playlists](broadcasting.md) and the [operations runbook](operations-runbook.md).
 
 ## Not yet tested
 
@@ -691,4 +672,4 @@ This is acceptance-test documentation only. NZYTE TV v0.1 does not implement str
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
-- Continuous production operation, scheduling, streaming, or service supervision.
+- Automatic playlist queue regeneration, systemd supervision, restart recovery, and remote stream-health monitoring.

@@ -1,6 +1,6 @@
 # Content catalog and asset metadata
 
-NZYTE TV v0.2A adds the catalog foundation for future playlist scheduling. It does not generate playlists or broadcast media.
+The catalog and programming sidecars provide stable content identity for playlist scheduling. Metadata commands do not generate playlists, broadcast, or encode media. For the complete novice operating sequence, see the [operations runbook](operations-runbook.md).
 
 The governing rule is:
 
@@ -39,7 +39,7 @@ free-fallin-animated-visual
 
 Both IDs are stable. Filenames help discover relationships during initialization, but metadata becomes authoritative afterward. Once a song relationship resolves, the catalog is authoritative for canonical song `title` and `artist`; `assetId`, type/subtype, and other programming fields remain asset metadata. Renaming a file must not create a new identity for an initialized asset.
 
-Alternate visuals of the same recording—music videos, lyric videos, visualizers, animated visuals, performances, and short-form clips—share one `contentGroupId`. A substantially different recording or remix may have its own `contentGroupId`; that is an editorial catalog decision and is never inferred automatically from a filename. Non-song programming such as vlogs, bumpers, album teasers, montages, medleys, promos, advertisements, and specials does not receive a fake song group. Multi-song relationships are outside v0.2A, so those assets may keep `contentGroupId: null`.
+Alternate visuals of the same recording—music videos, lyric videos, visualizers, animated visuals, performances, and short-form clips—share one `contentGroupId`. A substantially different recording or remix may have its own `contentGroupId`; that is an editorial catalog decision and is never inferred automatically from a filename. Non-song programming such as vlogs, bumpers, album teasers, montages, medleys, promos, advertisements, and specials does not receive a fake song group. Multi-song relationships are not modeled, so those assets may keep `contentGroupId: null`.
 
 ## Master song catalog schema
 
@@ -180,6 +180,8 @@ special
 
 Directory-to-type mappings are centralized in the application. `Visualizers` maps to `visualizer`, and `Animated Visuals` maps to `animated-visual`; both require song resolution just like music videos, lyric videos, performances, and short-form song content. The remaining directory-backed mappings include `Music Videos`, `Lyric Videos`, `Performance Videos`, `Vlog Episodes`, `Bumpers`, `Promos`, `Interstitials`, `Advertisements`, and `Specials`. `short-form` remains supported without a dedicated directory created by `media init`. A recognized short-form descriptor prefix may refine a new song/video or vlog asset to `short-form`; it does not override explicit existing metadata or non-song promo/special categories.
 
+`Performance Videos` remains top-level type `performance`. Filename descriptors such as `Lipsync`, `Lip Sync`, `MicDrop`, and `Mic Drop` may initialize the subtype as `lipsync` or `mic-drop`; they do not replace the top-level type with `short-form`. Existing explicit metadata remains authoritative.
+
 A visualizer is a full-song static or lightly animated graphical presentation. An animated visual is an animated, narrative, cinematic, anime/movie-style, AI-animated, or similar full-song/extended song presentation. The folder selects the programming type, not the song identity: catalog matching must still resolve the filename or alias, and ambiguous or unresolved assets remain subject to metadata review.
 
 ## Initialize metadata
@@ -215,7 +217,7 @@ Initialization:
 - writes source metadata atomically;
 - copies programming metadata to the corresponding normalized library asset when that asset exists;
 - reports resolved groups, assets needing review, unresolved assets, errors, and orphaned sidecars;
-- reports encoding, metadata, and future playlist-eligibility status.
+- reports encoding, metadata, and playlist-eligibility status.
 
 Repeated initialization is safe. A valid resolved relationship is not inferred again; initialization reconciles its `title` and `artist` to the referenced catalog entry while preserving `assetId`, type/subtype, and other programming fields. A valid unresolved sidecar may gain a relationship later when a catalog change makes exactly one match possible; its canonical title and artist then come from the catalog without changing its asset identity.
 
@@ -285,11 +287,11 @@ Synchronization copies valid source programming metadata only when the correspon
 
 If multiple source files would map to the same normalized `.mp4` path, synchronization reports an error for each source and writes no library sidecar for that destination.
 
-The future station will consume playable assets and programming metadata from `/srv/nzyte-tv/library`, not `/srv/nzyte-tv/source`.
+Playlist generation and broadcasting consume playable assets and programming metadata from `/srv/nzyte-tv/library`, not `/srv/nzyte-tv/source`.
 
 ## Eligibility
 
-Eligibility is domain status for future playlist use; v0.2A does not build a playlist.
+Eligibility determines whether the current playlist generator may schedule an asset.
 
 A song asset is eligible only when:
 
@@ -340,8 +342,8 @@ Folder category is a strong initialization default, not permanent truth. For exa
 
 The edit preserves `assetId` and all unrelated fields. Changing to a non-song type clears `contentGroupId` so the sidecar remains structurally valid. A short-form or performance override may also pass an extensible subtype with `--subtype`; for example, `performance / lipsync` or `performance / mic-drop`. The command writes only the source `.nzytetv.meta.json`; run `metadata sync` to propagate it to an existing library asset. It does not move media, invoke FFmpeg, modify `.nzytetv.json`, or re-encode anything.
 
-## v0.2A boundaries
+## Scope boundary
 
-This milestone does not implement playlist generation, rotation percentages, cooldowns, release weighting, schedules, broadcasting, filesystem watching, live reload, a database, a GUI, the YouTube API, or a broadcaster service.
+Metadata commands do not normalize, schedule, broadcast, watch the filesystem, call the YouTube API, or provide a GUI.
 
 Most importantly: encoding never waits for metadata questions.

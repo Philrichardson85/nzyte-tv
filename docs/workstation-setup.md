@@ -1,6 +1,6 @@
 # NZYTE TV workstation setup
 
-This guide walks a first-time user through installing the required tools, obtaining a stable NZYTE TV release, publishing the command-line application, and preparing a portable media drive. It covers Windows x64, Linux x64, and Linux ARM64, including Raspberry Pi.
+This focused guide covers installing tools, obtaining NZYTE TV source, publishing the command-line application, and preparing a portable media drive. For the complete operating sequence through live broadcast and tmux, start with the [operations runbook](operations-runbook.md).
 
 For Raspberry Pi mounting and deployment details, see [Raspberry Pi setup](raspberry-pi-setup.md). For the complete media layout and ingest rules, see [Media library](media-library.md).
 
@@ -13,7 +13,7 @@ NZYTE TV targets:
 - Linux ARM64
 - Raspberry Pi 4 running Ubuntu 24.04 ARM64
 
-Release `v0.2.0` has been successfully:
+NZYTE TV has been successfully:
 
 - published as a self-contained Windows x64 application;
 - published as a self-contained Linux ARM64 application;
@@ -38,11 +38,11 @@ The continuation character must be the last character on its line. If copying a 
 
 ## Choose a release checkout or a development checkout
 
-A **tagged release** is a frozen, named version of the source. Use a tagged release for a production machine or a repeatable media-conversion workstation. The current documented release is `v0.2.0`.
+A **tagged release** is a frozen, named version of the source. Use a tagged release for a production machine or a repeatable media-conversion workstation. In commands below, replace `vX.Y.Z` with an actual available tag.
 
 The `main` branch is the latest development and integration state. Use it only when you intentionally want newer, potentially unreleased work.
 
-Release `v0.2.0` currently points to commit `ae615eb`. The tag name is authoritative; future release tags will point to different commits.
+The tag name is authoritative. Do not assume a version mentioned in an older guide is permanently the latest release.
 
 ## Windows x64 setup
 
@@ -88,7 +88,7 @@ If a package identifier changes or winget cannot find .NET 10, use Microsoft's [
 
 ### 3. Clone the repository and select the stable release
 
-The following commands create `C:\_Code`, clone NZYTE TV, download release tags, and select `v0.2.0`.
+The following commands create `C:\_Code`, clone NZYTE TV, download release tags, and select a chosen release.
 
 PowerShell:
 
@@ -100,7 +100,7 @@ git clone https://github.com/Philrichardson85/nzyte-tv.git
 Set-Location C:\_Code\nzyte-tv
 
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 ```
 
 `--detach` is expected for a release checkout: it prevents the local checkout from silently moving when a branch changes.
@@ -115,7 +115,7 @@ git rev-parse --short HEAD
 git status --short
 ```
 
-For the current release, the first two commands should report `v0.2.0` and `ae615eb`. An empty result from `git status --short` means there are no local file changes.
+The first command should report the chosen tag. An empty result from `git status --short` means there are no local file changes.
 
 ### 4. Build and test the checkout
 
@@ -138,14 +138,14 @@ Create a versioned destination and publish for the `win-x64` runtime.
 PowerShell:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\Tools\NzyteTv\v0.2.0 | Out-Null
+New-Item -ItemType Directory -Force C:\Tools\NzyteTv\candidate | Out-Null
 
 dotnet publish `
   src\NzyteTv.Cli\NzyteTv.Cli.csproj `
   -c Release `
   -r win-x64 `
   --self-contained true `
-  -o C:\Tools\NzyteTv\v0.2.0
+  -o C:\Tools\NzyteTv\candidate
 ```
 
 Verify the published application.
@@ -153,7 +153,7 @@ Verify the published application.
 PowerShell:
 
 ```powershell
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe --help
+C:\Tools\NzyteTv\candidate\nzytetv.exe --help
 ```
 
 **Self-contained** means the published application includes the .NET runtime needed to **run** NZYTE TV. The computer that performs the build and publish still needs the .NET 10 SDK. FFmpeg and FFprobe remain external dependencies and must still be installed and discoverable through `PATH` when media commands run.
@@ -224,7 +224,7 @@ git clone https://github.com/Philrichardson85/nzyte-tv.git src
 
 cd /opt/nzyte-tv/src
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 ```
 
 Verify the release checkout.
@@ -237,7 +237,7 @@ git rev-parse --short HEAD
 git status --short
 ```
 
-For the current release, the first two commands should report `v0.2.0` and `ae615eb`. No output from `git status --short` means the checkout is clean.
+The first command should report the chosen tag. No output from `git status --short` means the checkout is clean.
 
 ### 4. Build and test the checkout
 
@@ -336,7 +336,7 @@ PowerShell:
 ```powershell
 Set-Location C:\_Code\nzyte-tv
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 ```
 
 On Linux:
@@ -346,10 +346,10 @@ Bash:
 ```bash
 cd /opt/nzyte-tv/src
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 ```
 
-When a newer stable release exists, replace `v0.2.0` with that release's tag. A workstation pinned to `v0.2.0` does not receive a newer release automatically.
+Replace `vX.Y.Z` with the chosen release tag. A workstation pinned to a tag does not receive a newer release automatically.
 
 ### Republish after changing source versions
 
@@ -365,7 +365,7 @@ dotnet publish `
   -c Release `
   -r win-x64 `
   --self-contained true `
-  -o C:\Tools\NzyteTv\v0.2.0
+  -o C:\Tools\NzyteTv\candidate
 ```
 
 Linux ARM64 example:
@@ -396,7 +396,7 @@ Windows example:
 PowerShell:
 
 ```powershell
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe media init D:\
+C:\Tools\NzyteTv\candidate\nzytetv.exe media init D:\
 ```
 
 Linux example:
@@ -449,7 +449,7 @@ The directories have distinct purposes:
 - `playlists` can hold generated playlists and history.
 - `work` is available for media-root working data.
 
-`media init` is safe and idempotent: running it again adds missing structure without deleting media or overwriting a valid existing catalog. After upgrading the NZYTE TV executable, rerunning it against a v0.2.0 portable root adds the missing `Visualizers` and `Animated Visuals` directories while preserving the existing descriptor, source/library media, catalog, manifests, metadata sidecars, playlists, and history. It never formats the drive. Do not alter or attempt to ingest Windows filesystem directories such as `System Volume Information`.
+`media init` is safe and idempotent: running it again adds missing structure without deleting media or overwriting a valid existing catalog. After upgrading the NZYTE TV executable, rerunning it against an existing portable root adds any missing category directories while preserving the descriptor, source/library media, catalog, manifests, metadata sidecars, playlists, and history. It never formats the drive. Do not alter or attempt to ingest Windows filesystem directories such as `System Volume Information`.
 
 Both new categories are song-based. Their files receive distinct `assetId` values, but every presentation of the same recording must resolve to the same catalog `contentGroupId`. A folder name supplies the programming type only; unresolved or ambiguous song filenames still require metadata review.
 
@@ -462,7 +462,7 @@ This Windows example applies the explicit portrait treatment while normalizing t
 PowerShell:
 
 ```powershell
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe normalize-library `
+C:\Tools\NzyteTv\candidate\nzytetv.exe normalize-library `
   "D:\source" `
   "D:\library" `
   --vertical-layout blurred-background
@@ -498,19 +498,19 @@ After normalization, initialize programming metadata against the catalog that tr
 PowerShell:
 
 ```powershell
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe metadata initialize `
+C:\Tools\NzyteTv\candidate\nzytetv.exe metadata initialize `
   "D:\source" `
   "D:\library" `
   --catalog "D:\catalog\song-catalog.json"
 
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe metadata review `
+C:\Tools\NzyteTv\candidate\nzytetv.exe metadata review `
   "D:\source" `
   "D:\library" `
   --catalog "D:\catalog\song-catalog.json"
 
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe metadata sync "D:\source" "D:\library"
+C:\Tools\NzyteTv\candidate\nzytetv.exe metadata sync "D:\source" "D:\library"
 
-C:\Tools\NzyteTv\v0.2.0\nzytetv.exe build-playlist `
+C:\Tools\NzyteTv\candidate\nzytetv.exe build-playlist `
   "D:\library" `
   --catalog "D:\catalog\song-catalog.json" `
   --output "D:\playlists\current.json" `
@@ -689,7 +689,7 @@ PowerShell:
 
 ```powershell
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 git describe --tags --exact-match
 ```
 
@@ -697,7 +697,7 @@ Bash:
 
 ```bash
 git fetch --tags
-git switch --detach v0.2.0
+git switch --detach vX.Y.Z
 git describe --tags --exact-match
 ```
 

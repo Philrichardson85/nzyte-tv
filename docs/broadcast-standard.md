@@ -164,7 +164,7 @@ Production source
 -> Excellent stream health
 ```
 
-It does not make live broadcasting part of the v0.1 application.
+That direct acceptance test established the stream-copy path before the playlist broadcaster was added. The current `broadcast` command automates the same path for generated playlist files; it does not change the normalization standard.
 
 ### Expected live FLV shutdown warning
 
@@ -175,4 +175,4 @@ Failed to update header with correct duration.
 Failed to update header with correct filesize.
 ```
 
-These warnings are harmless for this manually stopped live output. Future broadcaster commands may use `-flvflags no_duration_filesize` to suppress them. This flag is not part of normalization and no broadcaster command is currently implemented.
+These warnings are harmless for this manually stopped live output. The current broadcaster uses `-flvflags no_duration_filesize` to suppress them. This flag is part of live FLV output, not normalization. See [Broadcasting generated playlists](broadcasting.md).

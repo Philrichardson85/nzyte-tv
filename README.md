@@ -2,9 +2,22 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-v0.3.0 adds basic broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, and an environment-supplied RTMP/RTMPS destination. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes basic broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, and an environment-supplied RTMP/RTMPS destination. Encoding remains independent from metadata, scheduling, and playback.
 
 YouTube API integration, services, live playlist watching, queue regeneration, health polling, and automatic restarts remain out of scope.
+
+## Operating NZYTE TV
+
+Start with the [complete operations runbook](docs/operations-runbook.md). It takes a novice from a new Windows computer through portable-drive preparation, normalization, metadata, playlists, Raspberry Pi deployment, RTMPS broadcast, tmux operation, safe stopping, and troubleshooting.
+
+Focused references:
+
+- [Workstation setup](docs/workstation-setup.md)
+- [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
+- [Media library and portable-drive workflow](docs/media-library.md)
+- [Content catalog and asset metadata](docs/content-catalog.md)
+- [Playlist and programming engine](docs/playlists.md)
+- [Broadcasting generated playlists](docs/broadcasting.md)
 
 ## Setup
 
@@ -26,9 +39,9 @@ Related guides:
 
 - [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
 - [Media library and portable-drive workflow](docs/media-library.md)
-- [Broadcasting generated playlists](docs/broadcasting.md)
+- [Complete operations runbook](docs/operations-runbook.md)
 
-The current documented release is `v0.3.0`. A tagged release is recommended for a reproducible production workstation; `main` is the latest development and integration state.
+A tagged `vX.Y.Z` release is recommended for a reproducible production workstation; `main` is the latest development and integration state. Check the repository's available tags rather than assuming a version named in documentation is permanently latest.
 
 ## Verified Raspberry Pi deployment
 
@@ -41,7 +54,7 @@ The media-normalization workflow has been run successfully on:
 - .NET SDK `10.0.112`, host/runtime `10.0.12`;
 - .NET RID `ubuntu.24.04-arm64`;
 - OS storage at `/dev/mmcblk0p2`, ext4, approximately 29 GB;
-- external media storage at `/dev/sda1`, NTFS3, approximately 30 GB, mounted through systemd automount at `/srv/nzyte-tv/media`.
+- portable exFAT USB media mounted by UUID through systemd automount at `/srv/nzyte-tv/media`.
 
 The verified deployment uses Xorg/X11 for incoming AnyDesk sessions. In the tested setup, an active physical monitor connected through the Raspberry Pi's micro-HDMI port is required for AnyDesk to display the desktop. A dummy HDMI adapter has not been tested.
 
@@ -86,7 +99,7 @@ Portrait and 9:16 sources can be normalized explicitly with `--vertical-layout b
 
 ### Initialize a portable media root
 
-`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders, including `Visualizers` and `Animated Visuals`, plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned. Rerunning it on an existing v0.2.0 media root safely adds only missing category directories and preserves the descriptor, catalogs, media, manifests, metadata, playlists, and history.
+`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders, including `Visualizers` and `Animated Visuals`, plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned. Rerunning it on an existing portable root safely adds only missing category directories and preserves the descriptor, catalogs, media, manifests, metadata, playlists, and history.
 
 ```powershell
 nzytetv media init "E:\"
@@ -169,7 +182,7 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
 |   |-- library/                   normalized and verified assets
-|   `-- System Volume Information/ Windows/NTFS metadata; ignore
+|   `-- System Volume Information/ Windows filesystem metadata; ignore
 |-- source -> /srv/nzyte-tv/media/source
 `-- library -> /srv/nzyte-tv/media/library
 ```
@@ -243,3 +256,4 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
+- [Complete operations runbook](docs/operations-runbook.md)

@@ -1,16 +1,16 @@
 # Media library and normalization workflow
 
-This document records the production media layout established on the Raspberry Pi and defines safe handling rules for normalization and future media-scanning work.
+This document records the production media layout and defines safe handling rules for normalization and media scanning. For the complete novice sequence through live operation, start with the [operations runbook](operations-runbook.md).
 
 ## Storage architecture
 
-The permanent media location is a SanDisk Cruzer Glide USB drive:
+The current portable acceptance used an exFAT USB drive moved from Windows to the Raspberry Pi. Physical device names can change; applications use the stable mount:
 
 | Property | Production value |
 |---|---|
-| Device | `/dev/sda1` |
-| Filesystem | NTFS3 |
-| Approximate capacity | 30 GB |
+| Device | Discover with `lsblk -f`; do not assume `/dev/sda1` |
+| Filesystem | exFAT in the current portable acceptance |
+| Identity | Mount by the drive's actual UUID |
 | Mount point | `/srv/nzyte-tv/media` |
 | Mount behavior | systemd automount |
 
@@ -22,7 +22,7 @@ The permanent physical layout is:
 /srv/nzyte-tv/media/
 |-- source/                    original/master media
 |-- library/                   normalized and verified broadcast assets
-`-- System Volume Information/ Windows/NTFS metadata; ignore
+`-- System Volume Information/ Windows filesystem metadata; ignore
 ```
 
 Application and operator commands should use these convenience symlinks:
@@ -80,7 +80,7 @@ The descriptor contains only `{ "schemaVersion": 1 }`; it stores no drive letter
 
 The source folders come from the authoritative directory/category mapping used by metadata discovery. `Visualizers` maps to the song-based `visualizer` type, and `Animated Visuals` maps to the song-based `animated-visual` type. `short-form` remains a supported programming type, but `media init` does not create a dedicated `Short Form` directory.
 
-`media init` is also the safe layout-upgrade command. When it is rerun on a valid v0.2.0 media root, it creates `source/Visualizers/` and `source/Animated Visuals/` if they are missing. It does not bump or replace the schema-version-1 descriptor, and it does not overwrite existing source media, library media, catalog files, manifests, programming sidecars, playlists, or history.
+`media init` is also the safe layout-upgrade command. When it is rerun on a valid existing media root, it creates missing layout directories. It does not bump or replace the schema-version-1 descriptor, and it does not overwrite existing source media, library media, catalog files, manifests, programming sidecars, playlists, or history.
 
 ### New-drive workstation-to-Pi workflow
 
@@ -127,7 +127,7 @@ The source folders come from the authoritative directory/category mapping used b
 
 The portrait path creates no intermediate H.264 file: visual treatment, canonical broadcast normalization, verification, publication, and technical-manifest writing remain one pipeline. Landscape files continue through ordinary normalization. A drive-letter or mount-path change does not change `assetId`, `contentGroupId`, source-relative technical fingerprints, or media-root identity, so the Pi does not need to re-encode assets that are already current and verified.
 
-### Upgrade an existing v0.2.0 portable drive
+### Upgrade an existing portable drive
 
 An existing portable drive can be extended without rebuilding it. After installing the upgraded NZYTE TV executable:
 
@@ -174,7 +174,7 @@ The catalog, `.nzytetv.meta.json` programming sidecars, `.nzytetv.json` technica
 
 `/srv/nzyte-tv/source` contains original/master media. Normalization must never modify or replace these files.
 
-`/srv/nzyte-tv/library` contains only NZYTE TV-normalized assets that passed automatic independent verification. Future broadcaster and playlist components must consume media from `/srv/nzyte-tv/library`, never from `/srv/nzyte-tv/source`.
+`/srv/nzyte-tv/library` contains only NZYTE TV-normalized assets that passed automatic independent verification. Playlist and broadcaster components consume media from `/srv/nzyte-tv/library`, never from `/srv/nzyte-tv/source`.
 
 The category folders are:
 
@@ -198,31 +198,56 @@ Folder names, spaces, and capitalization are intentional. Preserve them exactly.
 
 `Performance Videos` always initializes new metadata with the top-level `performance` type. Filename descriptors such as `Lipsync`, `Lip Sync`, `MicDrop`, and `Mic Drop` are retained as `lipsync` or `mic-drop` subtypes; they never silently turn a directory-backed performance into `short-form`. There is intentionally no `Short Form` source folder: short-form may be assigned through explicit metadata. Existing explicit programming sidecars are authoritative and are not rewritten merely because inference rules change.
 
-`System Volume Information` is Windows/NTFS filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
+`System Volume Information` is Windows filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
 
-## Current source inventory
+## Adding media during station operation
 
-The production source library currently contains 39 video files:
+> **Preparing new content does not always require stopping the station. Physically removing or disrupting the USB that FFmpeg is reading does.**
 
-| Category group | Count |
-|---|---:|
-| Lyric Videos | 14 |
-| Music Videos | 5 |
-| Vlog-related videos | 20 |
-| **Total** | **39** |
+The running broadcaster uses the normalized files named by the playlist queue supplied at startup. It does not watch the source, library, or playlist directories. Work on another computer or drive can continue without affecting that queue, but new assets will not appear in it automatically.
 
-The source library occupies approximately 7.3 GB. Its combined runtime is 1:17:09, or 4,630 seconds.
+For a production USB that remains mounted on the Pi:
 
-The earlier format inventory found:
+- adding a brand-new source or library path does not change the active queue;
+- changing a source master alone does not change the normalized file already in the queue, but rerunning normalization may replace that stale destination;
+- replacing, renaming, or removing an existing library file referenced by that queue is unsafe—stop the broadcaster first; and
+- normalization alone never rewrites an existing playlist JSON.
 
-- all 39 inspected files used H.264 video and `yuv420p`;
-- 31 files were 24 fps;
-- 8 files were 30 fps;
-- 17 files were 1920x1080;
-- 21 files were 2560x1440;
-- 1 file was 2628x1440.
+The current single-USB workflow stores source, library, catalog, playlists, and history on the drive mounted at `/srv/nzyte-tv/media`. Before taking that physical drive to Windows:
 
-The 2628x1440 file is `Vlog 2 episode 3.mp4`. It is a useful future scale-and-pad regression case because its aspect ratio does not exactly match 1920x1080. That specific regression test has not yet been automated.
+Bash:
+
+```bash
+tmux attach -t nzyte-tv
+# Press Ctrl+C inside tmux, then run:
+pgrep -a ffmpeg
+sudo umount /srv/nzyte-tv/media
+findmnt /srv/nzyte-tv/media
+```
+
+`pgrep` should print nothing. With systemd automount, `findmnt` may still show an `autofs`/`systemd-1` trigger, but the real exFAT filesystem must not remain actively mounted. Do not access the mountpoint again before removal because doing so may remount it. Never unplug a mounted or in-use production USB.
+
+On Windows, find the current drive letter, copy masters into `<drive>:\source\<category>\`, and normalize through NZYTE TV rather than manually populating `library/`:
+
+PowerShell template:
+
+```powershell
+Get-Volume
+nzytetv.exe normalize-library `
+  "<drive>:\source" `
+  "<drive>:\library" `
+  --vertical-layout blurred-background
+```
+
+Current verified outputs skip; new, stale, or invalid outputs normalize. Complete catalog and metadata processing and safely eject the drive. After returning it to the Pi, verify it with `lsblk -f`, `ls /srv/nzyte-tv/media`, and `findmnt /srv/nzyte-tv/media`. Running `nzytetv media init /srv/nzyte-tv/media` is an optional safe layout check, not a required step for every content addition.
+
+Build future playlist blocks with the current history file if the new asset should enter rotation. History records planned scheduling when playlists are generated; it is not a live playback-position database. Prefer a deliberate maintenance boundary before replacing planned blocks. See [Adding media while NZYTE TV is running](operations-runbook.md#adding-media-while-nzyte-tv-is-running) for the complete stop, move, return, playlist, and restart procedure.
+
+## Production inventory acceptance example
+
+At one recorded acceptance point, the portable production library contained 232 assets spanning animated visuals, promos, vlogs, short-form presentations, lyric videos, visualizers, performances, and music videos. All 232 normalized with 0 failures; an unchanged integrity pass skipped and independently verified all 232. Metadata initialization resolved the complete inventory without errors.
+
+This is historical test context, not a permanent inventory contract. Operators should trust the current discovery, normalization, metadata, and dry-run summaries rather than expecting a fixed asset count.
 
 ## Media-file filtering
 
@@ -321,7 +346,11 @@ That reference command does not replace NZYTE TV normalization or verification. 
 
 Do not use `--overwrite` unless deliberate regeneration of existing destinations is required. It replaces destinations only and never authorizes replacement of source masters.
 
-### Completed production run
+### Completed production acceptance examples
+
+A later portable-library acceptance discovered and normalized 232 source files with 0 failures. An unchanged integrity run normalized 0, skipped all 232, and independently verified all 232 ready. These figures demonstrate the workflow at that point in time; 232 is not a permanent station size.
+
+An earlier 39-file production run recorded detailed Raspberry Pi timings:
 
 The full 39-file production normalization completed successfully on the Raspberry Pi 4:
 
@@ -341,7 +370,7 @@ After normalization, the external drive reported 30 GB total, 11 GB used, 19 GB 
 
 These results complete the v0.1 media-normalization and verification milestone and production-validate it on the Raspberry Pi 4 / `linux-arm64` deployment.
 
-A separate representative acceptance batch of nine production files previously completed normalization and verification successfully. That result validates the batch workflow but is not a result for the current 39-file run.
+A separate representative acceptance batch of nine production files previously completed normalization and verification successfully. These older results are retained as historical evidence, not as current inventory requirements.
 
 ## Work-directory cleanup
 
@@ -365,7 +394,7 @@ ls -ld /srv/nzyte-tv/source /srv/nzyte-tv/library
 findmnt /srv/nzyte-tv/media
 ```
 
-Because the drive uses `x-systemd.automount`, access to `/srv/nzyte-tv/media` can be required before `findmnt` shows the real NTFS3 mount instead of `systemd-1`/`autofs`.
+Because the drive uses `x-systemd.automount`, access to `/srv/nzyte-tv/media` can be required before `findmnt` shows the real portable filesystem instead of `systemd-1`/`autofs`.
 
 ## Quoting paths on Linux
 
