@@ -340,6 +340,10 @@ public sealed class PlaylistGeneratorTests
             $"airtime {string.Join(", ", playlist.Summary.AirtimePercentages.Select(item => $"{item.Key}={item.Value}"))}; " +
             $"efficiency substitutions {playlist.Summary.LongMusicAirtimeEfficiencySubstitutions}.");
         Assert.True(playlist.Summary.MusicFirstCategorySubstitutions > 0);
+        Assert.Equal(5, playlist.Summary.ConfiguredAirtimeTargetPercentages[AssetTypes.ShortForm]);
+        Assert.Equal(0, playlist.Summary.EffectiveAirtimeTargetPercentages[AssetTypes.ShortForm]);
+        Assert.Contains(AssetTypes.ShortForm, playlist.Summary.CapacityLimitedCategories);
+        Assert.Equal(100, playlist.Summary.EffectiveAirtimeTargetPercentages.Values.Sum(), precision: 2);
     }
 
     [Fact]
@@ -455,7 +459,10 @@ public sealed class PlaylistGeneratorTests
             ShortPresentationPolicy(
                 TimeSpan.FromSeconds(210),
                 (fullType, 0.5),
-                (AssetTypes.AnimatedVisual, 0.5)),
+                (AssetTypes.AnimatedVisual, 0.5)) with
+            {
+                ExactAssetCooldown = TimeSpan.Zero,
+            },
             seed: 205,
             history: history).Playlist;
 
@@ -589,6 +596,7 @@ public sealed class PlaylistGeneratorTests
             (AssetTypes.AnimatedVisual, 0.05),
             (AssetTypes.Vlog, 0.80)) with
         {
+            ExactAssetCooldown = TimeSpan.Zero,
             ProjectedVlogOvershootTolerance = 0.50,
         };
         PlaylistDocument playlist = Generate(

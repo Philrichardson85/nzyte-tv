@@ -82,6 +82,19 @@ public sealed class PlaylistSummary
 
     public int InterstitialInsertions { get; init; }
 
+    public IReadOnlyDictionary<string, double> ConfiguredAirtimeTargetPercentages { get; init; } =
+        new Dictionary<string, double>(StringComparer.Ordinal);
+
+    public IReadOnlyDictionary<string, double> EffectiveAirtimeTargetPercentages { get; init; } =
+        new Dictionary<string, double>(StringComparer.Ordinal);
+
+    public IReadOnlyDictionary<string, double> PracticalCategoryCapacitySeconds { get; init; } =
+        new Dictionary<string, double>(StringComparer.Ordinal);
+
+    public IReadOnlyList<string> CapacityLimitedCategories { get; init; } = [];
+
+    public double RedistributedTargetAirtimeSeconds { get; init; }
+
     public IReadOnlyDictionary<string, double> AirtimePercentages { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal);
 }

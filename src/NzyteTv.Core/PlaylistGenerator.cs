@@ -54,14 +54,24 @@ public sealed class PlaylistGenerator
         var items = new List<PlaylistItem>();
         var relaxation = new RelaxationCounts();
         double targetSeconds = policy.TargetDuration.TotalSeconds;
+        PlaylistTargetPlan targetPlan = PlaylistTargetPlanner.Calculate(assets, policy);
+        IReadOnlyDictionary<string, double> effectiveTargets = targetPlan.EffectiveTargets;
         double offsetSeconds = 0;
 
         while (offsetSeconds < targetSeconds)
         {
             DateTimeOffset playTime = scheduleStart.AddSeconds(offsetSeconds);
-            IReadOnlySet<string> preferredTypes = GetPreferredTypes(assets, state, policy, playTime);
-            bool vlogAtOrAboveTarget = IsCategoryAtOrAboveTarget(AssetTypes.Vlog, state, policy);
-            bool musicBelowCombinedTarget = IsMusicBelowCombinedTarget(state, policy);
+            IReadOnlySet<string> preferredTypes = GetPreferredTypes(
+                assets,
+                state,
+                policy,
+                effectiveTargets,
+                playTime);
+            bool vlogAtOrAboveTarget = IsCategoryAtOrAboveTarget(
+                AssetTypes.Vlog,
+                state,
+                effectiveTargets);
+            bool musicBelowCombinedTarget = IsMusicBelowCombinedTarget(state, policy, effectiveTargets);
             CandidateEvaluation[] evaluated = assets
                 .Where(asset => IsCadenceEligible(asset.Type, state, policy, playTime))
                 .Select(asset => new CandidateEvaluation(
@@ -77,10 +87,10 @@ public sealed class PlaylistGenerator
                     state.GetLastAssetPlay(asset.AssetId),
                     policy.MusicOrientedNormalTypes.Contains(asset.Type),
                     IsShortSongPresentation(asset, policy),
-                    IsCategoryBelowTarget(asset.Type, state, policy),
-                    GetCategoryDeficitImprovement(asset, state, policy),
+                    IsCategoryBelowTarget(asset.Type, state, effectiveTargets),
+                    GetCategoryDeficitImprovement(asset, state, effectiveTargets),
                     state.GetLastContentGroupPlay(asset.ContentGroupId),
-                    WouldMateriallyOvershootVlogTarget(asset, state, policy),
+                    WouldMateriallyOvershootVlogTarget(asset, state, policy, effectiveTargets),
                     policy.GetRotationWeight(
                         asset.RotationStartDate,
                         DateOnly.FromDateTime(playTime.UtcDateTime))))
@@ -219,6 +229,11 @@ public sealed class PlaylistGenerator
             BumperInsertions = items.Count(item => item.Type == AssetTypes.Bumper),
             PromoInsertions = items.Count(item => item.Type == AssetTypes.Promo),
             InterstitialInsertions = items.Count(item => item.Type == AssetTypes.Interstitial),
+            ConfiguredAirtimeTargetPercentages = ToPercentages(targetPlan.ConfiguredTargets),
+            EffectiveAirtimeTargetPercentages = ToPercentages(targetPlan.EffectiveTargets),
+            PracticalCategoryCapacitySeconds = targetPlan.PracticalCapacitySeconds,
+            CapacityLimitedCategories = targetPlan.CapacityLimitedCategories,
+            RedistributedTargetAirtimeSeconds = RoundSeconds(targetPlan.RedistributedTargetAirtimeSeconds),
             AirtimePercentages = airtime,
         };
         var playlist = new PlaylistDocument
@@ -589,6 +604,7 @@ public sealed class PlaylistGenerator
         IReadOnlyCollection<PlaylistAsset> assets,
         SchedulerState state,
         PlaylistPolicy policy,
+        IReadOnlyDictionary<string, double> effectiveTargets,
         DateTimeOffset playTime)
     {
         HashSet<string> availableTypes = assets.Select(asset => asset.Type).ToHashSet(StringComparer.Ordinal);
@@ -620,7 +636,7 @@ public sealed class PlaylistGenerator
         }
 
         var preferred = new HashSet<string>(StringComparer.Ordinal);
-        Dictionary<string, double> availableTargets = policy.CategoryAirtimeTargets
+        Dictionary<string, double> availableTargets = effectiveTargets
             .Where(item => item.Value > 0 && availableTypes.Contains(item.Key))
             .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         double targetTotal = availableTargets.Values.Sum();
@@ -673,15 +689,15 @@ public sealed class PlaylistGenerator
     private static bool IsCategoryBelowTarget(
         string type,
         SchedulerState state,
-        PlaylistPolicy policy)
+        IReadOnlyDictionary<string, double> targets)
     {
-        if (!policy.CategoryAirtimeTargets.TryGetValue(type, out double target) || target <= 0)
+        if (!targets.TryGetValue(type, out double target) || target <= 0)
         {
             return false;
         }
 
-        double totalTarget = GetTotalTargetWeight(policy);
-        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        double totalTarget = GetTotalTargetWeight(targets);
+        double totalAirtime = GetTotalTargetedAirtime(state, targets);
         if (totalTarget <= 0 || totalAirtime <= 0)
         {
             return true;
@@ -695,15 +711,15 @@ public sealed class PlaylistGenerator
     private static double GetCategoryDeficitImprovement(
         PlaylistAsset asset,
         SchedulerState state,
-        PlaylistPolicy policy)
+        IReadOnlyDictionary<string, double> targets)
     {
-        if (!policy.CategoryAirtimeTargets.TryGetValue(asset.Type, out double target) || target <= 0)
+        if (!targets.TryGetValue(asset.Type, out double target) || target <= 0)
         {
             return 0;
         }
 
-        double totalTarget = GetTotalTargetWeight(policy);
-        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        double totalTarget = GetTotalTargetWeight(targets);
+        double totalAirtime = GetTotalTargetedAirtime(state, targets);
         if (totalTarget <= 0)
         {
             return 0;
@@ -719,16 +735,19 @@ public sealed class PlaylistGenerator
             - Math.Max(0, desiredShare - projectedShare);
     }
 
-    private static bool IsMusicBelowCombinedTarget(SchedulerState state, PlaylistPolicy policy)
+    private static bool IsMusicBelowCombinedTarget(
+        SchedulerState state,
+        PlaylistPolicy policy,
+        IReadOnlyDictionary<string, double> targets)
     {
-        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        double totalAirtime = GetTotalTargetedAirtime(state, targets);
         if (totalAirtime <= 0)
         {
             return true;
         }
 
-        double totalTarget = GetTotalTargetWeight(policy);
-        double musicTarget = policy.CategoryAirtimeTargets
+        double totalTarget = GetTotalTargetWeight(targets);
+        double musicTarget = targets
             .Where(item => policy.MusicOrientedNormalTypes.Contains(item.Key))
             .Sum(item => item.Value);
         double musicAirtime = policy.MusicOrientedNormalTypes.Sum(state.GetAirtimeSeconds);
@@ -739,17 +758,18 @@ public sealed class PlaylistGenerator
     private static bool WouldMateriallyOvershootVlogTarget(
         PlaylistAsset asset,
         SchedulerState state,
-        PlaylistPolicy policy)
+        PlaylistPolicy policy,
+        IReadOnlyDictionary<string, double> targets)
     {
         if (asset.Type != AssetTypes.Vlog
-            || !policy.CategoryAirtimeTargets.TryGetValue(AssetTypes.Vlog, out double target)
+            || !targets.TryGetValue(AssetTypes.Vlog, out double target)
             || target <= 0)
         {
             return false;
         }
 
-        double totalTarget = GetTotalTargetWeight(policy);
-        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        double totalTarget = GetTotalTargetWeight(targets);
+        double totalAirtime = GetTotalTargetedAirtime(state, targets);
         if (totalTarget <= 0)
         {
             return false;
@@ -765,20 +785,22 @@ public sealed class PlaylistGenerator
             && projectedShare > desiredShare + policy.ProjectedVlogOvershootTolerance;
     }
 
-    private static double GetTotalTargetWeight(PlaylistPolicy policy) =>
-        policy.CategoryAirtimeTargets.Values.Where(value => value > 0).Sum();
+    private static double GetTotalTargetWeight(IReadOnlyDictionary<string, double> targets) =>
+        targets.Values.Where(value => value > 0).Sum();
 
-    private static double GetTotalTargetedAirtime(SchedulerState state, PlaylistPolicy policy) =>
-        policy.CategoryAirtimeTargets.Keys.Sum(state.GetAirtimeSeconds);
+    private static double GetTotalTargetedAirtime(
+        SchedulerState state,
+        IReadOnlyDictionary<string, double> targets) =>
+        targets.Keys.Sum(state.GetAirtimeSeconds);
 
     private static bool IsCategoryAtOrAboveTarget(
         string type,
         SchedulerState state,
-        PlaylistPolicy policy) =>
-        policy.CategoryAirtimeTargets.TryGetValue(type, out double target)
+        IReadOnlyDictionary<string, double> targets) =>
+        targets.TryGetValue(type, out double target)
         && target > 0
-        && GetTotalTargetedAirtime(state, policy) > 0
-        && !IsCategoryBelowTarget(type, state, policy);
+        && GetTotalTargetedAirtime(state, targets) > 0
+        && !IsCategoryBelowTarget(type, state, targets);
 
     private static bool IsExactAssetAllowed(
         PlaylistAsset asset,
@@ -949,6 +971,13 @@ public sealed class PlaylistGenerator
                     ? 0
                     : Math.Round(group.Sum(item => item.DurationSeconds) / totalSeconds * 100, 2),
                 StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<string, double> ToPercentages(
+        IReadOnlyDictionary<string, double> targets) =>
+        targets.ToDictionary(
+            item => item.Key,
+            item => item.Value * 100,
+            StringComparer.Ordinal);
 
     private static void ValidateAssets(IReadOnlyCollection<PlaylistAsset> assets)
     {

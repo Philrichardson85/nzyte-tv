@@ -61,12 +61,13 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The provisional norm
 | Rule | Default |
 |---|---:|
 | Target duration | 6 hours |
-| Music-video airtime | 25% |
+| Music-video airtime | 20% |
 | Lyric-video airtime | 15% |
 | Visualizer airtime | 15% |
-| Animated-visual airtime | 15% |
+| Animated-visual airtime | 20% |
 | Performance airtime | 10% |
-| Vlog airtime | 20% |
+| Short-form airtime | 5% |
+| Vlog airtime | 15% |
 | Exact asset cooldown | 2 hours |
 | Same `contentGroupId` preferred cooldown | 90 minutes |
 | Same `contentGroupId` normal floor | 60 minutes |
@@ -77,6 +78,10 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The provisional norm
 | Promo cadence | every 30–45 minutes |
 
 Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. The default normal-program mix is 20% music-video, 15% lyric-video, 15% visualizer, 20% animated-visual, 10% performance, 5% short-form, and 15% vlog. Music/artist-oriented types therefore total 85%; short-form is ordinary eligible programming, while advertisement and special assets still require an explicit policy target. Bumpers, promos, and interstitials remain outside the normal-program target mix and participate only when eligible inventory exists; their absence never prevents generation.
+
+Configured targets remain the desired station mix. For each generation, the scheduler also calculates availability-aware effective targets from eligible duration, the requested horizon, and the two-hour exact-asset preference. Practical capacity is the category's unique eligible duration multiplied by the normal appearance budget (`ceiling(horizon / exact-asset cooldown)`); this is target planning, not a hard replay limit. An unavailable category therefore has a zero effective target, while an inventory-limited category is not treated as capable of supplying impossible airtime.
+
+Unavailable target airtime is redistributed by duration to music-oriented normal categories with remaining practical capacity before vlog. The scheduler uses these effective targets for category-deficit ranking without changing the configured percentages. The playlist summary and CLI show both target sets, capacity-limited categories, practical capacity by category in JSON, and redistributed target airtime. If fallback is necessary, scheduling may still exceed practical capacity and relax the exact-asset preference through the existing counted path.
 
 For song pacing, short-form is always a short presentation. Other song-based normal programming is short when its measured duration is 60 seconds or less; longer assets are full presentations. Full-to-full repeats retain the 90-minute preferred, 60-minute normal floor, and 45-minute music-rescue behavior. Directional short pacing is short-to-short 15/10 minutes, full-to-short 30/20 minutes, and short-to-full 30/15 minutes (preferred/floor). Any necessary floor crossing is an explicit, separately reported emergency; exact-asset cooldowns continue to apply.
 
@@ -171,19 +176,40 @@ Playlist schema version 1 is JSON with camel-case property names:
     "bumperInsertions": 0,
     "promoInsertions": 8,
     "interstitialInsertions": 0,
-    "airtimePercentages": {
-      "animated-visual": 15.0,
+    "configuredAirtimeTargetPercentages": {
+      "animated-visual": 20.0,
       "lyric-video": 15.0,
-      "music-video": 25.0,
+      "music-video": 20.0,
       "performance": 10.0,
+      "short-form": 5.0,
       "visualizer": 15.0,
-      "vlog": 20.0
+      "vlog": 15.0
+    },
+    "effectiveAirtimeTargetPercentages": {
+      "animated-visual": 28.9,
+      "lyric-video": 21.68,
+      "music-video": 8.58,
+      "performance": 4.27,
+      "short-form": 0.0,
+      "visualizer": 21.57,
+      "vlog": 15.0
+    },
+    "capacityLimitedCategories": ["music-video", "performance", "short-form"],
+    "redistributedTargetAirtimeSeconds": 4784.4,
+    "airtimePercentages": {
+      "animated-visual": 20.0,
+      "lyric-video": 15.0,
+      "music-video": 20.0,
+      "performance": 10.0,
+      "short-form": 5.0,
+      "visualizer": 15.0,
+      "vlog": 15.0
     }
   }
 }
 ```
 
-Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. The music-first rescue, cadence insertion, and emergency-violation counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
+Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. Target-planning diagnostics, the music-first rescue, cadence insertion, and emergency-violation counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
 
 ## History schema and playlist boundaries
 

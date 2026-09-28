@@ -399,6 +399,22 @@ public static class CliApplication
         Console.WriteLine($"Eligible assets:            {summary.EligibleAssets}");
         Console.WriteLine($"Excluded assets:            {summary.ExcludedAssets}");
         Console.WriteLine();
+        Console.WriteLine("Configured targets:");
+        foreach ((string type, double percentage) in summary.ConfiguredAirtimeTargetPercentages)
+        {
+            Console.WriteLine($"    {type,-24}{percentage,6:0.00}%");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Effective targets:");
+        foreach ((string type, double percentage) in summary.EffectiveAirtimeTargetPercentages)
+        {
+            Console.WriteLine($"    {type,-24}{percentage,6:0.00}%");
+        }
+
+        Console.WriteLine($"    capacity limited:       {(summary.CapacityLimitedCategories.Count == 0 ? "none" : string.Join(", ", summary.CapacityLimitedCategories))}");
+        Console.WriteLine($"    redistributed airtime:  {FormatScheduleDuration(summary.RedistributedTargetAirtimeSeconds)}");
+        Console.WriteLine();
         Console.WriteLine("Airtime:");
         foreach ((string type, double percentage) in summary.AirtimePercentages)
         {
