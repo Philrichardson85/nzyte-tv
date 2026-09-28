@@ -706,6 +706,7 @@ public static class CliApplication
                 Console.WriteLine("  nzytetv metadata sync <source-root> <library-root>");
                 Console.WriteLine("  nzytetv metadata rebind <old-source-path> <new-source-path>");
                 Console.WriteLine("  nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]");
+                Console.WriteLine("    --subtype is supported for short-form and performance.");
                 Console.WriteLine();
                 Console.WriteLine("Metadata commands never encode media or invoke FFmpeg.");
                 break;
@@ -729,6 +730,7 @@ public static class CliApplication
             case CommandKind.MetadataEdit:
                 Console.WriteLine("Usage: nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]");
                 Console.WriteLine("Override folder-derived programming type without moving or encoding media.");
+                Console.WriteLine("--subtype  Supported for short-form and performance.");
                 break;
             default:
                 break;

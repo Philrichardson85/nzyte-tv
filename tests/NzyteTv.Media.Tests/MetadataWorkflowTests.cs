@@ -389,6 +389,61 @@ public sealed class MetadataWorkflowTests
         Assert.Equal("cash-rules", updated.ContentGroupId);
     }
 
+    [Theory]
+    [InlineData("lipsync")]
+    [InlineData("mic-drop")]
+    public async Task Edit_PerformanceSubtypePreservesIdentityRelationshipAndSynchronizesWithoutEncoding(
+        string subtype)
+    {
+        using var fixture = new MetadataFixture();
+        string source = fixture.AddSource("Performance Videos", "Cash Rules performance.mp4", libraryExists: true);
+        string library = fixture.GetLibraryPath(source);
+        string technicalManifest = SourceManifestStore.GetManifestPath(library);
+        File.WriteAllText(technicalManifest, "technical normalization state");
+        await fixture.MetadataStore.WriteAsync(
+            source,
+            new AssetMetadata
+            {
+                AssetId = "cash-rules-performance-stable",
+                ContentGroupId = "cash-rules",
+                Title = "Cash Rules",
+                Artist = "Nzyte",
+                Type = AssetTypes.Performance,
+                RotationStartDate = new DateOnly(2026, 9, 27),
+                Enabled = false,
+                SeriesId = "performances",
+                EpisodeNumber = 4,
+                Tags = ["manual"],
+            },
+            CancellationToken.None);
+        string sourceMediaBefore = File.ReadAllText(source);
+        string libraryMediaBefore = File.ReadAllText(library);
+
+        AssetMetadata updated = await new MetadataEditor(fixture.MetadataStore).UpdateTypeAsync(
+            source, AssetTypes.Performance, subtype, CancellationToken.None);
+        MetadataSyncResult sync = await fixture.Synchronizer.SynchronizeAsync(
+            fixture.SourceRoot, fixture.LibraryRoot, dryRun: false, CancellationToken.None);
+        AssetMetadata libraryMetadata = fixture.MetadataStore.Read(library);
+
+        Assert.Equal("cash-rules-performance-stable", updated.AssetId);
+        Assert.Equal("cash-rules", updated.ContentGroupId);
+        Assert.Equal(AssetTypes.Performance, updated.Type);
+        Assert.Equal(subtype, updated.Subtype);
+        Assert.Equal(new DateOnly(2026, 9, 27), updated.RotationStartDate);
+        Assert.False(updated.Enabled);
+        Assert.Equal("performances", updated.SeriesId);
+        Assert.Equal(4, updated.EpisodeNumber);
+        Assert.Equal(["manual"], updated.Tags);
+        Assert.Equal(MetadataSyncStatus.Synchronized, Assert.Single(sync.Files).Status);
+        Assert.Equal(subtype, libraryMetadata.Subtype);
+        Assert.Equal(AssetTypes.Performance, libraryMetadata.Type);
+        Assert.Equal("cash-rules-performance-stable", libraryMetadata.AssetId);
+        Assert.Equal("cash-rules", libraryMetadata.ContentGroupId);
+        Assert.Equal(sourceMediaBefore, File.ReadAllText(source));
+        Assert.Equal(libraryMediaBefore, File.ReadAllText(library));
+        Assert.Equal("technical normalization state", File.ReadAllText(technicalManifest));
+    }
+
     [Fact]
     public async Task Initialize_ExistingResolvedRelationshipUsesCanonicalIdentityWithoutTouchingEncoding()
     {

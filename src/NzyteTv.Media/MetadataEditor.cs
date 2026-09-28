@@ -25,7 +25,7 @@ public sealed class MetadataEditor(IAssetMetadataStore metadataStore)
         }
 
         AssetMetadata existing = metadataStore.Read(fullMediaPath);
-        string? effectiveSubtype = type == AssetTypes.ShortForm
+        string? effectiveSubtype = type is AssetTypes.ShortForm or AssetTypes.Performance
             ? subtype ?? existing.Subtype
             : null;
         var updated = new AssetMetadata

@@ -338,7 +338,7 @@ Folder category is a strong initialization default, not permanent truth. For exa
   --type promo
 ```
 
-The edit preserves `assetId` and all unrelated fields. Changing to a non-song type clears `contentGroupId` so the sidecar remains structurally valid. A short-form override may also pass an extensible subtype with `--subtype`. The command writes only the source `.nzytetv.meta.json`; run `metadata sync` to propagate it to an existing library asset. It does not move media, invoke FFmpeg, modify `.nzytetv.json`, or re-encode anything.
+The edit preserves `assetId` and all unrelated fields. Changing to a non-song type clears `contentGroupId` so the sidecar remains structurally valid. A short-form or performance override may also pass an extensible subtype with `--subtype`; for example, `performance / lipsync` or `performance / mic-drop`. The command writes only the source `.nzytetv.meta.json`; run `metadata sync` to propagate it to an existing library asset. It does not move media, invoke FFmpeg, modify `.nzytetv.json`, or re-encode anything.
 
 ## v0.2A boundaries
 

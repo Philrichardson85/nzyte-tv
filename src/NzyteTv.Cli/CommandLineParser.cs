@@ -305,9 +305,10 @@ public static class CommandLineParser
                 return Failure($"Unknown asset type '{metadataType}'.");
             }
 
-            if (metadataSubtype is not null && metadataType != AssetTypes.ShortForm)
+            if (metadataSubtype is not null
+                && metadataType is not (AssetTypes.ShortForm or AssetTypes.Performance))
             {
-                return Failure("--subtype is valid only when --type is short-form.");
+                return Failure("--subtype is valid only when --type is short-form or performance.");
             }
         }
 

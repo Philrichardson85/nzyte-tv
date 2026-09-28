@@ -259,6 +259,43 @@ public sealed class CommandLineParserTests
         Assert.Equal("vertical-performance", result.Command.MetadataSubtype);
     }
 
+    [Theory]
+    [InlineData("lipsync")]
+    [InlineData("mic-drop")]
+    public void Parse_MetadataEdit_AcceptsPerformanceSubtype(string subtype)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "edit",
+            "source file.mp4",
+            "--type",
+            AssetTypes.Performance,
+            "--subtype",
+            subtype,
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AssetTypes.Performance, result.Command!.MetadataType);
+        Assert.Equal(subtype, result.Command.MetadataSubtype);
+    }
+
+    [Fact]
+    public void Parse_MetadataEdit_RejectsSubtypeForUnsupportedType()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "edit",
+            "source file.mp4",
+            "--type",
+            AssetTypes.Vlog,
+            "--subtype",
+            "lipsync",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("short-form or performance", result.Error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Parse_MetadataEditWithoutType_IsRejected()
     {
