@@ -12,6 +12,8 @@ public static class AssetCategoryMap
         new("Music Videos", AssetTypes.MusicVideo, true),
         new("Lyric Videos", AssetTypes.LyricVideo, true),
         new("Performance Videos", AssetTypes.Performance, true),
+        new("Visualizers", AssetTypes.Visualizer, true),
+        new("Animated Visuals", AssetTypes.AnimatedVisual, true),
         new("Short Form", AssetTypes.ShortForm, false),
         new("Vlog Episodes", AssetTypes.Vlog, true),
         new("Bumpers", AssetTypes.Bumper, true),

@@ -118,6 +118,52 @@ public sealed class PlaylistGeneratorTests
     }
 
     [Fact]
+    public void Policy_DefaultNormalProgramMixIncludesNewMusicCategoriesAndTotalsOneHundredPercent()
+    {
+        IReadOnlyDictionary<string, double> targets = new PlaylistPolicy().CategoryAirtimeTargets;
+
+        Assert.Equal(0.25, targets[AssetTypes.MusicVideo]);
+        Assert.Equal(0.15, targets[AssetTypes.LyricVideo]);
+        Assert.Equal(0.15, targets[AssetTypes.Visualizer]);
+        Assert.Equal(0.15, targets[AssetTypes.AnimatedVisual]);
+        Assert.Equal(0.10, targets[AssetTypes.Performance]);
+        Assert.Equal(0.20, targets[AssetTypes.Vlog]);
+        Assert.Equal(1.0, targets.Values.Sum(), precision: 10);
+        Assert.DoesNotContain(AssetTypes.Promo, targets.Keys);
+        Assert.DoesNotContain(AssetTypes.Bumper, targets.Keys);
+        Assert.DoesNotContain(AssetTypes.Interstitial, targets.Keys);
+    }
+
+    [Fact]
+    public void Generate_NewMusicCategoriesReceiveTargetedAndSeparatelyReportedAirtime()
+    {
+        PlaylistDocument playlist = Generate(
+            [
+                Asset("visualizer-a", AssetTypes.Visualizer, 60, "visualizer-a"),
+                Asset("visualizer-b", AssetTypes.Visualizer, 60, "visualizer-b"),
+                Asset("animated-a", AssetTypes.AnimatedVisual, 60, "animated-a"),
+                Asset("animated-b", AssetTypes.AnimatedVisual, 60, "animated-b"),
+            ],
+            Policy(
+                TimeSpan.FromMinutes(4),
+                (AssetTypes.Visualizer, 0.5),
+                (AssetTypes.AnimatedVisual, 0.5)) with
+            {
+                ExactAssetCooldown = TimeSpan.Zero,
+                ContentGroupCooldown = TimeSpan.Zero,
+                ContentGroupMinimumCooldown = TimeSpan.Zero,
+                ContentGroupMusicFirstRescueCooldown = TimeSpan.Zero,
+            },
+            seed: 41).Playlist;
+
+        Assert.Contains(playlist.Items, item => item.Type == AssetTypes.Visualizer);
+        Assert.Contains(playlist.Items, item => item.Type == AssetTypes.AnimatedVisual);
+        Assert.True(playlist.Summary.AirtimePercentages.ContainsKey(AssetTypes.Visualizer));
+        Assert.True(playlist.Summary.AirtimePercentages.ContainsKey(AssetTypes.AnimatedVisual));
+        Assert.Equal(100.0, playlist.Summary.AirtimePercentages.Values.Sum(), precision: 2);
+    }
+
+    [Fact]
     public void Generate_AvoidsImmediateExactDuplicateAndRespectsTwoHourCooldownWhenPossible()
     {
         PlaylistAsset[] assets =
@@ -502,13 +548,18 @@ public sealed class PlaylistGeneratorTests
     }
 
     [Theory]
-    [InlineData(AssetTypes.Performance)]
-    [InlineData(AssetTypes.ShortForm)]
-    public void Generate_AlternateVisualCannotBypassSharedContentGroupClock(string alternateType)
+    [InlineData(AssetTypes.MusicVideo, AssetTypes.Performance)]
+    [InlineData(AssetTypes.MusicVideo, AssetTypes.ShortForm)]
+    [InlineData(AssetTypes.MusicVideo, AssetTypes.Visualizer)]
+    [InlineData(AssetTypes.LyricVideo, AssetTypes.AnimatedVisual)]
+    [InlineData(AssetTypes.Visualizer, AssetTypes.AnimatedVisual)]
+    public void Generate_AlternateVisualCannotBypassSharedContentGroupClock(
+        string priorType,
+        string alternateType)
     {
         PlaylistHistoryDocument history = History(
             Now,
-            new PlaylistHistoryEntry("cash-music", "cash", AssetTypes.MusicVideo, Now.AddMinutes(-30)));
+            new PlaylistHistoryEntry("cash-prior", "cash", priorType, Now.AddMinutes(-30)));
 
         PlaylistDocument playlist = Generate(
             [

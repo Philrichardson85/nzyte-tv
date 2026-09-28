@@ -52,16 +52,21 @@ Generation scans the normalized library once. An asset is schedulable only when 
 
 Missing, disabled, invalid, unresolved, duration-less, duplicate-identity, or policy-disabled assets are excluded with visible reasons. Schedule generation never repairs or mutates them. Zero participating eligible assets is a clear failure.
 
+`visualizer` represents a full-song static or lightly animated graphical presentation. `animated-visual` represents an animated, narrative, cinematic, anime/movie-style, AI-animated, or similar extended song presentation. Both are normal music programming, require a valid catalog relationship, and are never treated as promo, bumper, interstitial, advertisement, or vlog cadence content.
+
 ## Default policy
 
-The strongly typed policy is centralized in `NzyteTv.Core`. The v0.2B current-library defaults are:
+The strongly typed policy is centralized in `NzyteTv.Core`. The provisional normal-program defaults are:
 
 | Rule | Default |
 |---|---:|
 | Target duration | 6 hours |
-| Music-video airtime | 50% |
-| Lyric-video airtime | 25% |
-| Vlog airtime | 25% |
+| Music-video airtime | 25% |
+| Lyric-video airtime | 15% |
+| Visualizer airtime | 15% |
+| Animated-visual airtime | 15% |
+| Performance airtime | 10% |
+| Vlog airtime | 20% |
 | Exact asset cooldown | 2 hours |
 | Same `contentGroupId` preferred cooldown | 90 minutes |
 | Same `contentGroupId` normal floor | 60 minutes |
@@ -71,7 +76,7 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The v0.2B current-li
 | Interstitial cadence | every 20–30 minutes |
 | Promo cadence | every 30–45 minutes |
 
-Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. Performance, short-form, advertisement, and special assets remain supported but require a future policy target/cadence before they participate. Bumpers, promos, and interstitials participate only when eligible inventory exists; their absence never prevents generation.
+Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. Music-video, lyric-video, visualizer, animated-visual, performance, and vlog total 100% of the default normal-program mix; the music-oriented types total 80%. Short-form, advertisement, and special assets remain supported but require an explicit policy target or cadence before they participate. Bumpers, promos, and interstitials remain outside the normal-program target mix and participate only when eligible inventory exists; their absence never prevents generation.
 
 Cadence windows have a minimum eligibility boundary as well as a preferred/overdue boundary:
 
@@ -83,7 +88,7 @@ A normal program is any scheduled type other than bumper, promo, or interstitial
 
 Minimum cadence eligibility is independent of the ordinary exact-asset cooldown and is not opened by the normal fallback ladder. When a cadence category is due, assets outside their exact cooldown are preferred. If every asset in an overdue cadence category is still inside its ordinary exact cooldown, that cooldown may be relaxed for the cadence insertion. This never permits an insertion before the cadence minimum. Multiple eligible cadence assets continue to use deterministic seeded selection.
 
-The future 40/20/20/20 music-video, lyric-video, performance, and vlog mix can be represented by another `PlaylistPolicy` without changing scheduler logic. External policy JSON is intentionally deferred.
+The mix is provisional and remains centralized in `PlaylistPolicy` so it can be tuned after the expanded production library is ingested and measured. External policy JSON is intentionally deferred.
 
 ## Hot rotation
 
@@ -100,7 +105,7 @@ Weights feed the seeded deterministic choice. Hot preference cannot bypass same-
 
 ## Cooldowns and relaxation
 
-Different visual assets with the same `contentGroupId` are one song family. A music video, lyric video, performance, and short-form clip for one song all share one cooldown clock. The preferred target is 90 minutes. A controlled relaxation may schedule the group from 60 through 90 minutes; ordinary fallback never schedules it below the 60-minute floor. Short-form has no special song-repeat escape hatch.
+Different visual assets with the same `contentGroupId` are one song family. A music video, lyric video, visualizer, animated visual, performance, and short-form clip for one song all share one cooldown clock. Changing presentation type never bypasses history or song spacing. The preferred target is 90 minutes. A controlled relaxation may schedule the group from 60 through 90 minutes; ordinary fallback never schedules it below the 60-minute floor. Visualizers, animated visuals, and short-form have no special song-repeat escape hatch.
 
 The 45-minute music-first rescue floor is not an ordinary candidate tier and cannot be used to improve category percentages. After two consecutive vlogs, if no candidate at or above the normal 60-minute floor is usable, the scheduler searches for song candidates whose shared content-group clock is at least 45 minutes old. A 45–60-minute song then replaces what would otherwise be vlog #3 or later. If no such song exists, the scheduler may record an emergency vlog-run violation. Song repeats below 45 minutes remain a later pathological forward-progress fallback.
 
@@ -161,9 +166,12 @@ Playlist schema version 1 is JSON with camel-case property names:
     "promoInsertions": 8,
     "interstitialInsertions": 0,
     "airtimePercentages": {
-      "music-video": 51.2,
-      "lyric-video": 24.0,
-      "vlog": 24.8
+      "animated-visual": 15.0,
+      "lyric-video": 15.0,
+      "music-video": 25.0,
+      "performance": 10.0,
+      "visualizer": 15.0,
+      "vlog": 20.0
     }
   }
 }

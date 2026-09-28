@@ -7,6 +7,8 @@ public static class AssetTypes
     public const string MusicVideo = "music-video";
     public const string LyricVideo = "lyric-video";
     public const string Performance = "performance";
+    public const string Visualizer = "visualizer";
+    public const string AnimatedVisual = "animated-visual";
     public const string ShortForm = "short-form";
     public const string Vlog = "vlog";
     public const string Bumper = "bumper";
@@ -20,6 +22,8 @@ public static class AssetTypes
         MusicVideo,
         LyricVideo,
         Performance,
+        Visualizer,
+        AnimatedVisual,
         ShortForm,
         Vlog,
         Bumper,
@@ -29,7 +33,13 @@ public static class AssetTypes
         Special,
     };
 
-    public static bool IsSongBased(string? type) => type is MusicVideo or LyricVideo or Performance or ShortForm;
+    public static bool IsSongBased(string? type) => type is
+        MusicVideo or
+        LyricVideo or
+        Performance or
+        Visualizer or
+        AnimatedVisual or
+        ShortForm;
 }
 
 public sealed class AssetMetadata

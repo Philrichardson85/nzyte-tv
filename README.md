@@ -1,12 +1,33 @@
 # NZYTE TV
 
-NZYTE TV v0.1.0 is the production-validated media-preparation foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, and independently verifies the result, including actual keyframe timestamps. The v0.1 media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
+NZYTE TV is the production-validated media-preparation and programming foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, and builds deterministic playlists. The media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
 
 v0.2A adds the content catalog and programming-metadata foundation. v0.2B adds deterministic, inspectable playlist generation with airtime targets, cooldown history, hot-rotation weighting, and observable rule relaxation. Encoding remains independent from metadata and scheduling: playlist generation uses FFprobe for duration only and never invokes FFmpeg or re-encodes video.
 
 Broadcasting/streaming, YouTube integration, services, live playlist watching, and automatic restarts remain out of scope.
 
-Windows x64 and Linux ARM64 remain first-class application targets; the verified production-style deployment is the Raspberry Pi environment below.
+## Setup
+
+Supported platforms:
+
+- Windows x64
+- Linux x64
+- Linux ARM64, including Raspberry Pi
+
+Prerequisites:
+
+- Git
+- .NET 10 SDK
+- FFmpeg and FFprobe
+
+New users should start with the [complete workstation setup guide](docs/workstation-setup.md). It includes Windows and Linux installation, stable release checkout, self-contained publishing, updates, portable media drives, and command-not-found troubleshooting.
+
+Related guides:
+
+- [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
+- [Media library and portable-drive workflow](docs/media-library.md)
+
+The current documented release is `v0.2.0`. A tagged release is recommended for a reproducible production or conversion workstation; `main` is the latest development and integration state.
 
 ## Verified Raspberry Pi deployment
 
@@ -63,7 +84,7 @@ Portrait and 9:16 sources can be normalized explicitly with `--vertical-layout b
 
 ### Initialize a portable media root
 
-`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned.
+`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders, including `Visualizers` and `Animated Visuals`, plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned. Rerunning it on an existing v0.2.0 media root safely adds only missing category directories and preserves the descriptor, catalogs, media, manifests, metadata, playlists, and history.
 
 ```powershell
 nzytetv media init "E:\"
@@ -101,11 +122,11 @@ The versioned master song catalog provides stable `contentGroupId` values for so
 
 `metadata initialize` detects asset types from source categories and known short-form filename descriptors, preserves existing metadata, creates new identities, conservatively matches song titles or aliases, reports ambiguous and unresolved assets, and synchronizes metadata to existing normalized library files. `--dry-run` writes nothing. `metadata review` records an explicit human choice without changing `assetId`; `metadata edit` overrides a folder-derived type without moving or encoding media; `metadata sync` propagates programming changes without encoding; `metadata rebind` preserves identity after an intentional source rename.
 
-Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; after resolution, the catalog supplies the canonical song `title` and `artist` while the sidecar remains authoritative for asset identity and programming fields. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
+Duplicate song titles are supported because relationships use `contentGroupId`, never title alone. Filenames help discovery; after resolution, the catalog supplies the canonical song `title` and `artist` while the sidecar remains authoritative for asset identity and programming fields. Visualizers (full-song static or lightly animated graphical presentations) and animated visuals (animated, narrative, or cinematic song presentations) are song-based assets and share the same `contentGroupId` clock as every other presentation of the recording. See [content-catalog.md](docs/content-catalog.md) for schemas, matching rules, review, synchronization, eligibility, and rename behavior.
 
 ### Playlist generation
 
-`build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The default policy targets a six-hour 50% music-video, 25% lyric-video, and 25% vlog mix by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files.
+`build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The provisional six-hour default mix is 25% music-video, 15% lyric-video, 15% visualizer, 15% animated-visual, 10% performance, and 20% vlog by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files.
 
 The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, and single-vlog pacing before relaxing the preferred 90-minute same-song target. A controlled song relaxation may use the 60–90-minute range. Before creating vlog #3, a music-first rescue may use a song in the 45–60-minute range; sub-45-minute repeats and still-unavoidable vlog runs longer than two are explicit emergency violations. Promo, interstitial, and bumper minimum cadence spacing remains a separate eligibility invariant, so these assets cannot become generic fallback filler. Every relaxation, cadence insertion, cadence miss, and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
 
@@ -147,96 +168,9 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 
 The verified executable is `/opt/nzyte-tv/app/nzytetv`. It is not named `NzyteTv.Cli`. The SD card should primarily hold Ubuntu, the application, repository, catalog, logs, playlists, and working data. Large source and broadcast media belong on the external USB drive. Application commands should use the convenience paths `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library`.
 
-## Raspberry Pi quick-start deployment
+## Raspberry Pi deployment
 
-This quick start assumes Ubuntu Desktop 24.04.5 ARM64 is already installed, SSH is configured, FFmpeg is installed, .NET 10 is installed, and the USB media drive is mounted. Use the [full Raspberry Pi setup guide](docs/raspberry-pi-setup.md) when starting from a blank Pi.
-
-Create the directory layout:
-
-```bash
-sudo mkdir -p /opt/nzyte-tv/src /opt/nzyte-tv/app
-sudo mkdir -p /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
-sudo chown -R "$USER":"$USER" /opt/nzyte-tv
-sudo chown -R "$USER":"$USER" /srv/nzyte-tv/work /srv/nzyte-tv/logs /srv/nzyte-tv/playlists /srv/nzyte-tv/catalog
-```
-
-After mounting the external drive at `/srv/nzyte-tv/media`, create the permanent media directories and convenience links on a blank deployment:
-
-```bash
-mkdir -p /srv/nzyte-tv/media/source /srv/nzyte-tv/media/library
-sudo ln -s /srv/nzyte-tv/media/source /srv/nzyte-tv/source
-sudo ln -s /srv/nzyte-tv/media/library /srv/nzyte-tv/library
-```
-
-Clone, restore, build, and test:
-
-```bash
-git clone https://github.com/Philrichardson85/nzyte-tv.git /opt/nzyte-tv/src
-cd /opt/nzyte-tv/src
-dotnet restore NzyteTv.slnx
-dotnet build NzyteTv.slnx --configuration Release --no-restore
-dotnet test NzyteTv.slnx --configuration Release --no-build --no-restore
-```
-
-Publish the CLI project only:
-
-```bash
-dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj \
-  -c Release \
-  -r linux-arm64 \
-  --self-contained true \
-  -o /opt/nzyte-tv/app
-```
-
-Do not publish the whole solution to a shared `-o` directory. That was observed to produce `NETSDK1194` and mix application and test outputs.
-
-Validate the application:
-
-```bash
-/opt/nzyte-tv/app/nzytetv --help
-/opt/nzyte-tv/app/nzytetv inspect \
-  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
-```
-
-Run normalization from the desired working directory:
-
-```bash
-cd /srv/nzyte-tv/work
-/opt/nzyte-tv/app/nzytetv normalize \
-  "/srv/nzyte-tv/source/Music Videos/Lady Lady - Nzyte (Official Music Video).mp4"
-/opt/nzyte-tv/app/nzytetv verify \
-  "/srv/nzyte-tv/work/BroadcastReady/Lady Lady - Nzyte (Official Music Video).mp4"
-```
-
-The verified normalization and automatic verification took 13 minutes 38 seconds on the Raspberry Pi 4. The independent verification reported `RESULT: BROADCAST READY`.
-
-That was a temporary acceptance-test output. The test media was later removed from `/srv/nzyte-tv/work`, which now contains only small reference/test metadata files. Permanent production outputs belong in `/srv/nzyte-tv/library` through the batch workflow below.
-
-For a complete library run, the production command is:
-
-```bash
-/opt/nzyte-tv/app/nzytetv normalize-library \
-  /srv/nzyte-tv/source \
-  /srv/nzyte-tv/library
-```
-
-The production source library contains 39 videos: 14 lyric videos, 5 music videos, and 20 vlog-related videos. Its source size is approximately 7.3 GB and its combined runtime is 1:17:09 (4,630 seconds). The other category folders intentionally remain empty for future station programming.
-
-The full 39-file production normalization completed successfully on the Raspberry Pi 4:
-
-| Result | First run | Unchanged second run |
-|---|---:|---:|
-| Discovered | 39 | 39 |
-| Normalized | 39 | 0 |
-| Skipped existing | 0 | 39 |
-| Failed | 0 | 0 |
-| Verified ready | 39 | 39 |
-| Manifests | 39 | 39 existing |
-| Elapsed | 06:21:07 | 00:04:42 |
-
-All 39 source files were normalized and independently verified. On the unchanged second run, all 39 matching destinations were re-verified and skipped, confirming resumability and manifest-based source matching for the production library. Final validation found 39 broadcast-ready videos and 39 matching source manifests in a 3.3 GB normalized library.
-
-After normalization, the 30 GB external drive reported 11 GB used, 19 GB available, and 36% utilization. The production source and normalized library remain permanently stored beneath `/srv/nzyte-tv/media`, with `/srv/nzyte-tv/source` and `/srv/nzyte-tv/library` as their stable convenience symlinks. This completes the v0.1 media-normalization and verification milestone as production-validated on Raspberry Pi 4 / `linux-arm64`.
+The [Raspberry Pi setup guide](docs/raspberry-pi-setup.md) contains the complete blank-device procedure, external-drive mount, stable release checkout, ARM64 publish, candidate/rollback deployment, and acceptance commands. Shared Git, .NET, FFmpeg, update, and publishing concepts live in the [workstation setup guide](docs/workstation-setup.md).
 
 ## Raspberry Pi acceptance results
 
@@ -280,59 +214,9 @@ These warnings are harmless in this live-stream shutdown context: a live, non-se
 
 No broadcaster command is implemented in v0.1.
 
-## Windows development setup
+## Build, update, and publish
 
-From a clean Windows x64 machine, run these commands in PowerShell or install the equivalent products from their official installers.
-
-1. Install Git, .NET 10, and FFmpeg:
-
-   ```powershell
-   winget install --id Git.Git -e
-   winget install --id Microsoft.DotNet.SDK.10 -e
-   winget install --id Gyan.FFmpeg -e
-   ```
-
-2. Close and reopen PowerShell, then verify every dependency:
-
-   ```powershell
-   git --version
-   dotnet --version
-   ffmpeg -version
-   ffprobe -version
-   ```
-
-   `dotnet --version` must begin with `10.`.
-
-3. Clone, restore, build, and test:
-
-   ```powershell
-   git clone https://github.com/Philrichardson85/nzyte-tv.git nzyte_tv
-   Set-Location nzyte_tv
-   dotnet restore NzyteTv.slnx
-   dotnet build NzyteTv.slnx --no-restore
-   dotnet test NzyteTv.slnx --no-build --no-restore
-   ```
-
-4. Exercise each command:
-
-   ```powershell
-   dotnet run --project src/NzyteTv.Cli -- inspect "C:\Media\video.mp4"
-   dotnet run --project src/NzyteTv.Cli -- normalize "C:\Media\video.mp4"
-   dotnet run --project src/NzyteTv.Cli -- normalize-library "C:\Media" "C:\NZYTE\BroadcastReady"
-   dotnet run --project src/NzyteTv.Cli -- verify ".\BroadcastReady\video.mp4"
-   ```
-
-## Publishing self-contained builds
-
-The release workflow produces self-contained builds for `win-x64`, `linux-x64`, and `linux-arm64`. Publish one project and one runtime per output directory:
-
-```powershell
-dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/win-x64
-dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/linux-x64
-dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj -c Release -r linux-arm64 --self-contained true -p:PublishSingleFile=true -o artifacts/linux-arm64
-```
-
-Self-contained publishing includes the .NET runtime. FFmpeg and FFprobe remain external dependencies.
+The [workstation setup guide](docs/workstation-setup.md) provides copy/paste PowerShell and Bash instructions for cloning a stable tag, tracking `main`, updating with `--ff-only`, and publishing self-contained `win-x64`, `linux-x64`, or `linux-arm64` applications. FFmpeg and FFprobe remain external dependencies even with a self-contained publish.
 
 ## Architecture and testing
 
@@ -344,6 +228,7 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 
 ## Further documentation
 
+- [Windows, Linux, and Raspberry Pi workstation setup](docs/workstation-setup.md)
 - [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
 - [Broadcast standard](docs/broadcast-standard.md)
 - [Media library and normalization workflow](docs/media-library.md)

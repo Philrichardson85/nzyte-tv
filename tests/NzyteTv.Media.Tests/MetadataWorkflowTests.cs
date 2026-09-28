@@ -6,6 +6,18 @@ namespace NzyteTv.Media.Tests;
 
 public sealed class MetadataWorkflowTests
 {
+    [Theory]
+    [InlineData("Visualizers", AssetTypes.Visualizer)]
+    [InlineData("Animated Visuals", AssetTypes.AnimatedVisual)]
+    public void CategoryMap_DetectsNewDirectoryBackedSongTypes(string directory, string expectedType)
+    {
+        string sourceRoot = Path.GetFullPath(Path.Combine("source", "root"));
+        string sourcePath = Path.Combine(sourceRoot, directory, "Song.mp4");
+
+        Assert.True(AssetCategoryMap.TryDetect(sourceRoot, sourcePath, out string? type));
+        Assert.Equal(expectedType, type);
+    }
+
     [Fact]
     public async Task Initialize_MusicLyricAndPerformanceResolveToOneGroupWithDistinctAssetIds()
     {
@@ -77,6 +89,69 @@ public sealed class MetadataWorkflowTests
         Assert.Equal("full-official-song", metadata.ContentGroupId);
         Assert.Equal("Some Full Official Song Title", metadata.Title);
         Assert.Equal("Nzyte", metadata.Artist);
+    }
+
+    [Theory]
+    [InlineData("Visualizers", "Pray MVV.mp4", "pray", "Pray", AssetTypes.Visualizer, "pray-visualizer")]
+    [InlineData(
+        "Animated Visuals",
+        "Beauty Sold Separately Content 11.mp4",
+        "beauty-sold-separately",
+        "Beauty Sold Separately",
+        AssetTypes.AnimatedVisual,
+        "beauty-sold-separately-animated-visual")]
+    public async Task Initialize_NewSongCategoriesUseCatalogMatchingAndCanonicalIdentity(
+        string category,
+        string fileName,
+        string contentGroupId,
+        string title,
+        string type,
+        string assetId)
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(Song(contentGroupId, title, artist: "Catalog Artist"));
+        string source = fixture.AddSource(category, fileName);
+
+        MetadataInitializationResult result = await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            dryRun: false,
+            CancellationToken.None);
+
+        MetadataAssetResult asset = Assert.Single(result.Assets);
+        Assert.Equal(MetadataInitializationStatus.Resolved, asset.Status);
+        Assert.Equal(type, asset.Type);
+        Assert.Equal(contentGroupId, asset.ContentGroupId);
+        Assert.Equal(assetId, asset.AssetId);
+        AssetMetadata metadata = fixture.MetadataStore.Read(source);
+        Assert.Equal(title, metadata.Title);
+        Assert.Equal("Catalog Artist", metadata.Artist);
+    }
+
+    [Theory]
+    [InlineData("Visualizers", AssetTypes.Visualizer)]
+    [InlineData("Animated Visuals", AssetTypes.AnimatedVisual)]
+    public async Task Initialize_UnresolvedNewSongCategoryRequiresReviewWithoutGuessing(
+        string category,
+        string type)
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(Song("known-song", "Known Song"));
+        string source = fixture.AddSource(category, "Completely Unknown Presentation.mp4");
+
+        MetadataInitializationResult result = await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            dryRun: false,
+            CancellationToken.None);
+
+        MetadataAssetResult asset = Assert.Single(result.Assets);
+        Assert.Equal(MetadataInitializationStatus.Unresolved, asset.Status);
+        Assert.Equal(type, asset.Type);
+        Assert.Null(asset.ContentGroupId);
+        Assert.Null(fixture.MetadataStore.Read(source).ContentGroupId);
     }
 
     [Fact]
@@ -231,6 +306,29 @@ public sealed class MetadataWorkflowTests
         Assert.Equal(libraryMediaBefore, File.ReadAllText(library));
         Assert.Equal(technicalManifestBefore, File.ReadAllText(technicalManifest));
         Assert.False(File.Exists(AssetMetadataStore.GetMetadataPath(library)));
+    }
+
+    [Theory]
+    [InlineData(AssetTypes.Visualizer)]
+    [InlineData(AssetTypes.AnimatedVisual)]
+    public async Task Edit_AcceptsNewSongBasedTypesAndPreservesRelationship(string type)
+    {
+        using var fixture = new MetadataFixture();
+        string source = fixture.AddSource("Music Videos", "Cash Rules.mp4");
+        await fixture.MetadataStore.WriteAsync(
+            source,
+            Metadata("cash-rules-presentation", "cash-rules", AssetTypes.MusicVideo),
+            CancellationToken.None);
+
+        AssetMetadata updated = await new MetadataEditor(fixture.MetadataStore).UpdateTypeAsync(
+            source,
+            type,
+            subtype: null,
+            CancellationToken.None);
+
+        Assert.Equal(type, updated.Type);
+        Assert.Equal("cash-rules-presentation", updated.AssetId);
+        Assert.Equal("cash-rules", updated.ContentGroupId);
     }
 
     [Fact]

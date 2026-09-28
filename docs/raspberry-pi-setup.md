@@ -2,6 +2,8 @@
 
 This guide reproduces the tested NZYTE TV deployment from a blank Raspberry Pi 4. It covers the operating system, remote administration, media storage, .NET, FFmpeg, application publishing, and the first real normalization run.
 
+For novice explanations of Git, .NET, FFmpeg/FFprobe, release tags, source updates, self-contained publishing, and command-not-found errors, read the [workstation setup guide](workstation-setup.md) first. This document focuses on Pi-specific installation, mounting, deployment, and validation.
+
 ## Status labels
 
 - **Verified** means the step or behavior was observed on the deployed Raspberry Pi.
@@ -208,6 +210,8 @@ Use a physical monitor connected through the Pi's micro-HDMI port for this deplo
 
 ## 5. Install and verify FFmpeg
 
+The [workstation setup guide](workstation-setup.md#linux-x64-and-linux-arm64-setup) explains what FFmpeg and FFprobe do and how to diagnose missing commands. The commands below are the verified Ubuntu ARM64 procedure.
+
 Install the Ubuntu package:
 
 ```bash
@@ -264,6 +268,8 @@ Therefore:
 - an encoder appearing in `ffmpeg -encoders` does not prove that it works correctly on this hardware or meets the broadcast standard.
 
 ## 6. Install .NET 10
+
+The [workstation setup guide](workstation-setup.md#linux-x64-and-linux-arm64-setup) explains the SDK requirement and why package availability varies between Linux distributions.
 
 Ubuntu 24.04 provides .NET packages through Ubuntu's package feeds. Install the SDK used to build and publish NZYTE TV, following [Microsoft's Ubuntu installation guidance](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-install):
 
@@ -372,7 +378,9 @@ nzytetv media init <media-root>
 
 For example, a Windows workstation can run `nzytetv media init "E:\"`, copy masters into `E:\source`, and normalize directly into `E:\library`. Portrait sources can use `--vertical-layout blurred-background` during that same normalization pass. The catalog can travel at `E:\catalog\song-catalog.json`, and programming sidecars, technical manifests, playlists, and history remain on the physical drive.
 
-After safe ejection and mounting at `/srv/nzyte-tv/media`, the Pi may consume the already-normalized `library/`. A drive-letter or mount-path change is not asset identity and does not by itself require another encode. The repository and `/opt/nzyte-tv/app` executable stay on the Pi; they are not required on the USB drive. The SD-card catalog/playlists layout below remains a supported deployment alternative because commands accept explicit paths.
+After upgrading NZYTE TV, rerun `nzytetv media init "E:\"` on an existing v0.2.0 drive to add only `E:\source\Visualizers\` and `E:\source\Animated Visuals\` when they are missing. It preserves the existing descriptor, media, catalog, manifests, programming metadata, playlists, and history. Visualizers are full-song static or lightly animated graphical presentations; animated visuals are animated, narrative, cinematic, anime/movie-style, AI-animated, or other extended song presentations. Both are song-based and must share the catalog `contentGroupId` with every other presentation of the same recording.
+
+After safe ejection and mounting at `/srv/nzyte-tv/media`, the Pi may consume the already-normalized `library/`. A drive-letter or mount-path change is not asset identity and does not by itself require another encode. The repository and `/opt/nzyte-tv/app` executable stay on the Pi; they are not required on the USB drive. The SD-card catalog/playlists layout below remains a supported deployment alternative because commands accept explicit paths. See [Prepare and use a portable media drive](workstation-setup.md#prepare-and-use-a-portable-media-drive) for the complete novice workflow and directory tree.
 
 ## 8. Create the deployment layout
 
@@ -420,12 +428,26 @@ find -L /srv/nzyte-tv/source -type f
 
 ## 9. Clone, test, and publish NZYTE TV
 
-Clone into the source directory:
+The stable release workflow below is recommended for a production Pi. The [workstation setup guide](workstation-setup.md#choose-a-release-checkout-or-a-development-checkout) explains the difference between a reproducible tag and the moving `main` branch.
+
+Clone into the source directory, fetch tags, and select the current documented release:
 
 ```bash
 git clone https://github.com/Philrichardson85/nzyte-tv.git /opt/nzyte-tv/src
 cd /opt/nzyte-tv/src
+git fetch --tags
+git switch --detach v0.2.0
 ```
+
+Verify the tag before building:
+
+```bash
+git describe --tags --exact-match
+git rev-parse --short HEAD
+git status --short
+```
+
+Release `v0.2.0` currently reports commit `ae615eb`; the tag is the authoritative release identifier. `git status --short` should print nothing on a clean production checkout. See [Updating NZYTE TV](workstation-setup.md#updating-nzyte-tv) when deliberately changing releases or tracking `main`.
 
 Restore, build, and test the solution:
 
@@ -453,6 +475,54 @@ Do not publish the whole solution with one `-o` output directory. That produced 
 
 It is not named `NzyteTv.Cli`.
 
+### Candidate and rollback deployment
+
+For the first install, publishing directly to `/opt/nzyte-tv/app` is appropriate. For an update to an application already serving production, first publish and verify a separate candidate. This avoids replacing the known-working application before the new files have passed a basic check.
+
+The example uses a versioned candidate directory. Replace `v0.2.0` with the release actually being deployed. Before creating it, run `ls -ld /opt/nzyte-tv/releases/v0.2.0`; the expected result is that the path does not exist. If it already exists, inspect it and choose a new, empty candidate name rather than publishing over unknown files.
+
+```bash
+sudo mkdir -p /opt/nzyte-tv/releases/v0.2.0
+sudo chown -R "$USER":"$USER" /opt/nzyte-tv/releases
+
+cd /opt/nzyte-tv/src
+dotnet publish src/NzyteTv.Cli/NzyteTv.Cli.csproj \
+  -c Release \
+  -r linux-arm64 \
+  --self-contained true \
+  -o /opt/nzyte-tv/releases/v0.2.0
+
+/opt/nzyte-tv/releases/v0.2.0/nzytetv --help
+```
+
+Before promotion, stop any process using the application. Confirm that the candidate exists and that the proposed rollback name does not already exist:
+
+```bash
+ls -ld /opt/nzyte-tv/app
+ls -ld /opt/nzyte-tv/releases/v0.2.0
+ls -ld /opt/nzyte-tv/app-rollback-before-v0.2.0
+```
+
+It is expected for the last command to report that the rollback path does not exist. Promote by renaming directories; these commands preserve the previous application rather than deleting it:
+
+```bash
+cd /opt/nzyte-tv
+mv app app-rollback-before-v0.2.0
+mv releases/v0.2.0 app
+./app/nzytetv --help
+```
+
+If final validation fails, keep the failed candidate for inspection and restore the saved application:
+
+```bash
+cd /opt/nzyte-tv
+mv app releases/v0.2.0-failed
+mv app-rollback-before-v0.2.0 app
+./app/nzytetv --help
+```
+
+Do not run the promotion commands if either destination name already exists; choose a unique release/rollback name and inspect the directories first. This workflow changes application files only. It does not touch media, catalog data, metadata, manifests, or playlists.
+
 ## 10. Validate the CLI
 
 Check executable help and each command's help without touching media:
@@ -474,7 +544,7 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv metadata edit --help
 ```
 
-The recommended master song catalog path is `/srv/nzyte-tv/catalog/songs.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. See [content-catalog.md](content-catalog.md) before initializing sidecars for production media.
+The recommended master song catalog path is `/srv/nzyte-tv/catalog/song-catalog.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. See [content-catalog.md](content-catalog.md) before initializing sidecars for production media.
 
 The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
 

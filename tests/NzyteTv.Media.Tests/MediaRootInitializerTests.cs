@@ -31,6 +31,8 @@ public sealed class MediaRootInitializerTests
                     "Music Videos",
                     "Lyric Videos",
                     "Performance Videos",
+                    "Visualizers",
+                    "Animated Visuals",
                     "Vlog Episodes",
                     "Bumpers",
                     "Promos",
@@ -41,8 +43,8 @@ public sealed class MediaRootInitializerTests
                 AssetCategoryMap.DirectoryBackedSourceCategories);
             Assert.DoesNotContain("Short Form", AssetCategoryMap.DirectoryBackedSourceCategories);
             Assert.False(Directory.Exists(Path.Combine(root, "source", "Short Form")));
-            Assert.False(Directory.Exists(Path.Combine(root, "source", "Visualizers")));
-            Assert.False(Directory.Exists(Path.Combine(root, "source", "Animated Visuals")));
+            Assert.True(Directory.Exists(Path.Combine(root, "source", "Visualizers")));
+            Assert.True(Directory.Exists(Path.Combine(root, "source", "Animated Visuals")));
             foreach (string directory in new[] { "library", "catalog", "playlists", "work" })
             {
                 Assert.True(Directory.Exists(Path.Combine(root, directory)), directory);
@@ -65,7 +67,7 @@ public sealed class MediaRootInitializerTests
     }
 
     [Fact]
-    public async Task InitializeAsync_SecondRunPreservesAllContentAndAddsOnlyMissingCategory()
+    public async Task InitializeAsync_ExistingV020RootAddsOnlyNewSongCategoriesAndPreservesAllContent()
     {
         string root = Directory.CreateTempSubdirectory("nzytetv-media-init-").FullName;
         try
@@ -101,8 +103,10 @@ public sealed class MediaRootInitializerTests
                 "library metadata");
             string playlist = WriteFile(root, "playlists/current.json", "playlist");
             string history = WriteFile(root, "playlists/history.json", "history");
-            string missingCategory = Path.Combine(root, "source", "Promos");
-            Directory.Delete(missingCategory);
+            string visualizers = Path.Combine(root, "source", "Visualizers");
+            string animatedVisuals = Path.Combine(root, "source", "Animated Visuals");
+            Directory.Delete(visualizers);
+            Directory.Delete(animatedVisuals);
             Dictionary<string, byte[]> before = new[]
             {
                 descriptorPath,
@@ -120,8 +124,11 @@ public sealed class MediaRootInitializerTests
                 root,
                 CancellationToken.None);
 
-            Assert.Equal(["source/Promos/"], result.Created);
-            Assert.True(Directory.Exists(missingCategory));
+            Assert.Equal(
+                ["source/Visualizers/", "source/Animated Visuals/"],
+                result.Created);
+            Assert.True(Directory.Exists(visualizers));
+            Assert.True(Directory.Exists(animatedVisuals));
             Assert.Equal(0, result.FilesOverwritten);
             foreach ((string path, byte[] contents) in before)
             {

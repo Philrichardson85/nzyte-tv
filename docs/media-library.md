@@ -61,6 +61,8 @@ The command uses platform-neutral filesystem APIs. It does not format or partiti
 |   |-- Music Videos/
 |   |-- Lyric Videos/
 |   |-- Performance Videos/
+|   |-- Visualizers/
+|   |-- Animated Visuals/
 |   |-- Vlog Episodes/
 |   |-- Bumpers/
 |   |-- Promos/
@@ -76,7 +78,9 @@ The command uses platform-neutral filesystem APIs. It does not format or partiti
 
 The descriptor contains only `{ "schemaVersion": 1 }`; it stores no drive letter, mount path, machine identity, or secret. A valid existing descriptor is preserved byte-for-byte. A corrupt or unsupported descriptor stops initialization before the root is changed. A missing song catalog is created as the existing schema-version-1 catalog with an empty `songs` array. Any existing catalog, including a populated one, is preserved exactly.
 
-The source folders come from the authoritative directory/category mapping used by metadata discovery. `short-form` remains a supported programming type and optional recognized folder, but `media init` does not create a dedicated `Short Form` directory. Visualizer and Animated Visual categories are not created in this version.
+The source folders come from the authoritative directory/category mapping used by metadata discovery. `Visualizers` maps to the song-based `visualizer` type, and `Animated Visuals` maps to the song-based `animated-visual` type. `short-form` remains a supported programming type, but `media init` does not create a dedicated `Short Form` directory.
+
+`media init` is also the safe layout-upgrade command. When it is rerun on a valid v0.2.0 media root, it creates `source/Visualizers/` and `source/Animated Visuals/` if they are missing. It does not bump or replace the schema-version-1 descriptor, and it does not overwrite existing source media, library media, catalog files, manifests, programming sidecars, playlists, or history.
 
 ### New-drive workstation-to-Pi workflow
 
@@ -123,6 +127,47 @@ The source folders come from the authoritative directory/category mapping used b
 
 The portrait path creates no intermediate H.264 file: visual treatment, canonical broadcast normalization, verification, publication, and technical-manifest writing remain one pipeline. Landscape files continue through ordinary normalization. A drive-letter or mount-path change does not change `assetId`, `contentGroupId`, source-relative technical fingerprints, or media-root identity, so the Pi does not need to re-encode assets that are already current and verified.
 
+### Upgrade an existing v0.2.0 portable drive
+
+An existing portable drive can be extended without rebuilding it. After installing the upgraded NZYTE TV executable:
+
+1. Run `nzytetv media init "E:\"`. Only missing layout paths are created, including `E:\source\Visualizers\` and `E:\source\Animated Visuals\`.
+2. Copy full-song static or lightly animated graphical presentations into `E:\source\Visualizers\`.
+3. Copy animated, narrative, cinematic, anime/movie-style, or AI-animated song presentations into `E:\source\Animated Visuals\`.
+4. Normalize the complete source tree. No category-specific encoding rule is used:
+
+   ```powershell
+   nzytetv normalize-library `
+     "E:\source" `
+     "E:\library" `
+     --vertical-layout blurred-background
+   ```
+
+5. Initialize and review metadata, synchronize reviewed changes, and build the playlist:
+
+   ```powershell
+   nzytetv metadata initialize `
+     "E:\source" `
+     "E:\library" `
+     --catalog "E:\catalog\song-catalog.json"
+
+   nzytetv metadata review `
+     "E:\source" `
+     "E:\library" `
+     --catalog "E:\catalog\song-catalog.json"
+
+   nzytetv metadata sync "E:\source" "E:\library"
+
+   nzytetv build-playlist `
+     "E:\library" `
+     --catalog "E:\catalog\song-catalog.json" `
+     --output "E:\playlists\current.json" `
+     --history "E:\playlists\history.json" `
+     --duration 6h
+   ```
+
+All visual forms of one recording use separate `assetId` values but the same catalog `contentGroupId`. Adding these directories does not provide song identity by itself; ambiguous or unresolved filenames still require metadata review.
+
 The catalog, `.nzytetv.meta.json` programming sidecars, `.nzytetv.json` technical manifests, and any playlist/history JSON can travel on the media drive. The application executable and repository do not need to. Keeping catalog/playlists on the Pi's SD card remains supported; all commands accept explicit paths.
 
 ## Source and library rules
@@ -135,6 +180,7 @@ The category folders are:
 
 ```text
 Advertisements/
+Animated Visuals/
 Bumpers/
 Interstitials/
 Lyric Videos/
@@ -142,10 +188,13 @@ Music Videos/
 Performance Videos/
 Promos/
 Specials/
+Visualizers/
 Vlog Episodes/
 ```
 
 Folder names, spaces, and capitalization are intentional. Preserve them exactly. The remaining empty categories also remain part of the production layout so future station programming can use them.
+
+`Visualizers` contains full-song still, static, or lightly animated graphical presentations. `Animated Visuals` contains animated, narrative, cinematic, anime/movie-style, AI-animated, or other extended song visuals. Both are ordinary song-based music programming, not cadence content, and must resolve through the song catalog before they are playlist eligible.
 
 `System Volume Information` is Windows/NTFS filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
 

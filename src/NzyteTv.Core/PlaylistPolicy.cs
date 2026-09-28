@@ -13,9 +13,12 @@ public sealed record PlaylistPolicy
     public IReadOnlyDictionary<string, double> CategoryAirtimeTargets { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal)
         {
-            [AssetTypes.MusicVideo] = 0.50,
-            [AssetTypes.LyricVideo] = 0.25,
-            [AssetTypes.Vlog] = 0.25,
+            [AssetTypes.MusicVideo] = 0.25,
+            [AssetTypes.LyricVideo] = 0.15,
+            [AssetTypes.Visualizer] = 0.15,
+            [AssetTypes.AnimatedVisual] = 0.15,
+            [AssetTypes.Performance] = 0.10,
+            [AssetTypes.Vlog] = 0.20,
         };
 
     public TimeSpan ExactAssetCooldown { get; init; } = TimeSpan.FromHours(2);

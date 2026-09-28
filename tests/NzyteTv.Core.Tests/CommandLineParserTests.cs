@@ -268,6 +268,23 @@ public sealed class CommandLineParserTests
         Assert.Contains("--type", result.Error, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(AssetTypes.Visualizer)]
+    [InlineData(AssetTypes.AnimatedVisual)]
+    public void Parse_MetadataEdit_AcceptsNewSongTypes(string type)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "metadata",
+            "edit",
+            "source.mp4",
+            "--type",
+            type,
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(type, result.Command!.MetadataType);
+    }
+
     [Fact]
     public void Parse_DryRunOnMetadataReview_IsRejected()
     {

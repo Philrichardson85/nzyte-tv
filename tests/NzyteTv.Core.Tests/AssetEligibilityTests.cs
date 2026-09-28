@@ -61,14 +61,44 @@ public sealed class AssetEligibilityTests
         Assert.False(result.IsPlaylistEligible);
     }
 
-    private static AssetMetadata Metadata(string? contentGroupId, bool enabled = true) => new()
+    [Theory]
+    [InlineData(AssetTypes.Visualizer)]
+    [InlineData(AssetTypes.AnimatedVisual)]
+    public void Evaluate_NewSongTypesRequireValidContentGroup(string type)
     {
-        AssetId = "free-fallin-performance",
-        ContentGroupId = contentGroupId,
-        Title = "Free Fallin",
-        Artist = "Nzyte",
-        Type = AssetTypes.Performance,
-        Enabled = enabled,
-        Tags = [],
-    };
+        SongCatalog catalog = SongMatcherTests.Catalog(SongMatcherTests.Song("free-fallin", "Free Fallin"));
+
+        AssetEligibilityResult unresolved = AssetEligibilityEvaluator.Evaluate(
+            Metadata(contentGroupId: null, type: type),
+            catalog,
+            normalizedLibraryFileExists: true,
+            technicalManifestExists: true,
+            programmingMetadataExists: true);
+        AssetEligibilityResult resolved = AssetEligibilityEvaluator.Evaluate(
+            Metadata("free-fallin", type: type),
+            catalog,
+            normalizedLibraryFileExists: true,
+            technicalManifestExists: true,
+            programmingMetadataExists: true);
+
+        Assert.Equal(AssetMetadataStatus.Unresolved, unresolved.MetadataStatus);
+        Assert.False(unresolved.IsPlaylistEligible);
+        Assert.Equal(AssetMetadataStatus.Resolved, resolved.MetadataStatus);
+        Assert.True(resolved.IsPlaylistEligible);
+    }
+
+    private static AssetMetadata Metadata(
+        string? contentGroupId,
+        bool enabled = true,
+        string type = AssetTypes.Performance) =>
+        new()
+        {
+            AssetId = "free-fallin-performance",
+            ContentGroupId = contentGroupId,
+            Title = "Free Fallin",
+            Artist = "Nzyte",
+            Type = type,
+            Enabled = enabled,
+            Tags = [],
+        };
 }

@@ -14,7 +14,7 @@ The recommended catalog directory is:
 
 ```text
 /srv/nzyte-tv/catalog/
-`-- songs.json
+`-- song-catalog.json
 ```
 
 The location is an operational convention, not a domain constant. Every command accepts the source, library, and catalog paths explicitly.
@@ -33,11 +33,13 @@ free-fallin
 free-fallin-music-video
 free-fallin-lyric-video
 free-fallin-performance-krog-street
+free-fallin-visualizer
+free-fallin-animated-visual
 ```
 
 Both IDs are stable. Filenames help discover relationships during initialization, but metadata becomes authoritative afterward. Once a song relationship resolves, the catalog is authoritative for canonical song `title` and `artist`; `assetId`, type/subtype, and other programming fields remain asset metadata. Renaming a file must not create a new identity for an initialized asset.
 
-Alternate visuals of the same recording—music videos, lyric videos, performances, and short-form clips—share one `contentGroupId`. A substantially different recording or remix may have its own `contentGroupId`; that is an editorial catalog decision and is never inferred automatically from a filename. Non-song programming such as vlogs, bumpers, album teasers, montages, medleys, promos, advertisements, and specials does not receive a fake song group. Multi-song relationships are outside v0.2A, so those assets may keep `contentGroupId: null`.
+Alternate visuals of the same recording—music videos, lyric videos, visualizers, animated visuals, performances, and short-form clips—share one `contentGroupId`. A substantially different recording or remix may have its own `contentGroupId`; that is an editorial catalog decision and is never inferred automatically from a filename. Non-song programming such as vlogs, bumpers, album teasers, montages, medleys, promos, advertisements, and specials does not receive a fake song group. Multi-song relationships are outside v0.2A, so those assets may keep `contentGroupId: null`.
 
 ## Master song catalog schema
 
@@ -165,6 +167,8 @@ Supported programming types are:
 music-video
 lyric-video
 performance
+visualizer
+animated-visual
 short-form
 vlog
 bumper
@@ -174,7 +178,9 @@ advertisement
 special
 ```
 
-Directory-to-type mappings are centralized in the application. They include `Music Videos`, `Lyric Videos`, `Performance Videos`, `Short Form`, `Vlog Episodes`, `Bumpers`, `Promos`, `Interstitials`, `Advertisements`, and `Specials`. A recognized short-form descriptor prefix may refine a new song/video or vlog asset to `short-form`; it does not override explicit existing metadata or non-song promo/special categories.
+Directory-to-type mappings are centralized in the application. `Visualizers` maps to `visualizer`, and `Animated Visuals` maps to `animated-visual`; both require song resolution just like music videos, lyric videos, performances, and short-form song content. The remaining directory-backed mappings include `Music Videos`, `Lyric Videos`, `Performance Videos`, `Vlog Episodes`, `Bumpers`, `Promos`, `Interstitials`, `Advertisements`, and `Specials`. `short-form` remains supported without a dedicated directory created by `media init`. A recognized short-form descriptor prefix may refine a new song/video or vlog asset to `short-form`; it does not override explicit existing metadata or non-song promo/special categories.
+
+A visualizer is a full-song static or lightly animated graphical presentation. An animated visual is an animated, narrative, cinematic, anime/movie-style, AI-animated, or similar full-song/extended song presentation. The folder selects the programming type, not the song identity: catalog matching must still resolve the filename or alias, and ambiguous or unresolved assets remain subject to metadata review.
 
 ## Initialize metadata
 
@@ -184,7 +190,7 @@ Preview a run first:
 /opt/nzyte-tv/app/nzytetv metadata initialize \
   /srv/nzyte-tv/source \
   /srv/nzyte-tv/library \
-  --catalog /srv/nzyte-tv/catalog/songs.json \
+  --catalog /srv/nzyte-tv/catalog/song-catalog.json \
   --dry-run
 ```
 
@@ -196,7 +202,7 @@ Apply initialization:
 /opt/nzyte-tv/app/nzytetv metadata initialize \
   /srv/nzyte-tv/source \
   /srv/nzyte-tv/library \
-  --catalog /srv/nzyte-tv/catalog/songs.json
+  --catalog /srv/nzyte-tv/catalog/song-catalog.json
 ```
 
 Initialization:
@@ -260,7 +266,7 @@ Run:
 /opt/nzyte-tv/app/nzytetv metadata review \
   /srv/nzyte-tv/source \
   /srv/nzyte-tv/library \
-  --catalog /srv/nzyte-tv/catalog/songs.json
+  --catalog /srv/nzyte-tv/catalog/song-catalog.json
 ```
 
 Review prompts only for song assets whose relationship is unresolved or references a group no longer present in the catalog. The user chooses from catalog candidates or leaves the asset unresolved. A confirmed relationship becomes authoritative. Review preserves `assetId`, type/subtype, and non-catalog programming fields; it writes the selected catalog entry's canonical `title` and `artist`, updates the source sidecar, and synchronizes the library sidecar when the normalized asset exists.
