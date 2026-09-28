@@ -8,6 +8,17 @@ public sealed record TimeCadence(TimeSpan MinimumInterval, TimeSpan MaximumInter
 
 public sealed record PlaylistPolicy
 {
+    public IReadOnlySet<string> MusicOrientedNormalTypes { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AssetTypes.MusicVideo,
+            AssetTypes.LyricVideo,
+            AssetTypes.Visualizer,
+            AssetTypes.AnimatedVisual,
+            AssetTypes.Performance,
+            AssetTypes.ShortForm,
+        };
+
     public TimeSpan TargetDuration { get; init; } = TimeSpan.FromHours(6);
 
     public IReadOnlyDictionary<string, double> CategoryAirtimeTargets { get; init; } =

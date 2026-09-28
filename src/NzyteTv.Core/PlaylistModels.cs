@@ -54,6 +54,12 @@ public sealed class PlaylistSummary
 
     public int EmergencyShortToFullFloorViolations { get; init; }
 
+    public int MusicFirstCategorySubstitutions { get; init; }
+
+    public int FullPresentationPrioritySubstitutions { get; init; }
+
+    public int VlogAboveTargetFallbacks { get; init; }
+
     public int ConsecutiveVlogViolations { get; init; }
 
     public int EmergencyVlogRunViolations { get; init; }

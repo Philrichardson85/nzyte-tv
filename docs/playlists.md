@@ -80,6 +80,8 @@ Airtime targets use scheduled seconds, not item counts. Only targets represented
 
 For song pacing, short-form is always a short presentation. Other song-based normal programming is short when its measured duration is 60 seconds or less; longer assets are full presentations. Full-to-full repeats retain the 90-minute preferred, 60-minute normal floor, and 45-minute music-rescue behavior. Directional short pacing is short-to-short 15/10 minutes, full-to-short 30/20 minutes, and short-to-full 30/15 minutes (preferred/floor). Any necessary floor crossing is an explicit, separately reported emergency; exact-asset cooldowns continue to apply.
 
+Normal category targets are airtime preferences. Once vlog is at or above its configured share, another legally eligible music-oriented normal program is preferred before additional vlog fallback, including when a configured music category such as short-form has no inventory. Eligible full presentations in under-target music categories also receive priority over short clips from categories already at target, and over same-song shorts that would reset their directional timer. These preferences never bypass exact-asset cooldown selection, song-spacing floors, hot-rotation restrictions, or cadence eligibility.
+
 Cadence windows have a minimum eligibility boundary as well as a preferred/overdue boundary:
 
 - a promo is ineligible before 30 minutes, preferred from 30 through 45 minutes, and overdue after 45 minutes;

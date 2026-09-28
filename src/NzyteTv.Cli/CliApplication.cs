@@ -419,6 +419,9 @@ public static class CliApplication
         Console.WriteLine($"    emergency short-short:  {summary.EmergencyShortToShortFloorViolations}");
         Console.WriteLine($"    emergency full-short:   {summary.EmergencyFullToShortFloorViolations}");
         Console.WriteLine($"    emergency short-full:   {summary.EmergencyShortToFullFloorViolations}");
+        Console.WriteLine($"    music-first category:   {summary.MusicFirstCategorySubstitutions}");
+        Console.WriteLine($"    full-presentation:      {summary.FullPresentationPrioritySubstitutions}");
+        Console.WriteLine($"    vlog above target:      {summary.VlogAboveTargetFallbacks}");
         Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
         Console.WriteLine($"    emergency vlog run:     {summary.EmergencyVlogRunViolations}");
         Console.WriteLine();

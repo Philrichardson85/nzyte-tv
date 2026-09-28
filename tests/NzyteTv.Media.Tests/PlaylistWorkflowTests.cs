@@ -117,6 +117,9 @@ public sealed class PlaylistWorkflowTests
         JsonElement summary = playlist.RootElement.GetProperty("summary");
         Assert.Equal(0, summary.GetProperty("musicFirstRescueRelaxations").GetInt32());
         Assert.Equal(0, summary.GetProperty("emergencyContentGroupFloorViolations").GetInt32());
+        Assert.Equal(0, summary.GetProperty("musicFirstCategorySubstitutions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("fullPresentationPrioritySubstitutions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("vlogAboveTargetFallbacks").GetInt32());
         Assert.Equal(0, summary.GetProperty("emergencyVlogRunViolations").GetInt32());
         Assert.Equal(0, summary.GetProperty("bumperInsertions").GetInt32());
         Assert.Equal(0, summary.GetProperty("promoInsertions").GetInt32());
