@@ -154,6 +154,44 @@ public sealed class MetadataWorkflowTests
         Assert.Null(fixture.MetadataStore.Read(source).ContentGroupId);
     }
 
+    [Theory]
+    [InlineData("Visualizers", AssetTypes.Visualizer)]
+    [InlineData("Animated Visuals", AssetTypes.AnimatedVisual)]
+    public async Task Review_UnresolvedNewSongCategoryOffersExistingCatalogChoices(
+        string category,
+        string type)
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(Song("known-song", "Known Song", artist: "Catalog Artist"));
+        string source = fixture.AddSource(category, "Completely Unknown Presentation.mp4");
+        await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            dryRun: false,
+            CancellationToken.None);
+        var reviewer = new MetadataReviewer(
+            new SongCatalogStore(),
+            fixture.Discovery,
+            fixture.MetadataStore,
+            fixture.Synchronizer,
+            new SelectingPrompt("known-song"));
+
+        MetadataReviewResult result = await reviewer.ReviewAsync(
+            fixture.SourceRoot,
+            fixture.LibraryRoot,
+            fixture.CatalogPath,
+            CancellationToken.None);
+
+        MetadataReviewFileResult reviewed = Assert.Single(result.Files);
+        Assert.True(reviewed.Resolved);
+        AssetMetadata metadata = fixture.MetadataStore.Read(source);
+        Assert.Equal(type, metadata.Type);
+        Assert.Equal("known-song", metadata.ContentGroupId);
+        Assert.Equal("Known Song", metadata.Title);
+        Assert.Equal("Catalog Artist", metadata.Artist);
+    }
+
     [Fact]
     public async Task Initialize_DuplicateTitlesRequireReviewAndOverlappingSpecificTitleResolves()
     {
