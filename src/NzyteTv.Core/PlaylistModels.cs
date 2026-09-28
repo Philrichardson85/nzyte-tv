@@ -42,6 +42,18 @@ public sealed class PlaylistSummary
 
     public int EmergencyContentGroupFloorViolations { get; init; }
 
+    public int ShortToShortPreferredRelaxations { get; init; }
+
+    public int FullToShortPreferredRelaxations { get; init; }
+
+    public int ShortToFullPreferredRelaxations { get; init; }
+
+    public int EmergencyShortToShortFloorViolations { get; init; }
+
+    public int EmergencyFullToShortFloorViolations { get; init; }
+
+    public int EmergencyShortToFullFloorViolations { get; init; }
+
     public int ConsecutiveVlogViolations { get; init; }
 
     public int EmergencyVlogRunViolations { get; init; }
@@ -91,7 +103,8 @@ public sealed record PlaylistHistoryEntry(
     string AssetId,
     string? ContentGroupId,
     string Type,
-    DateTimeOffset PlayedAtUtc);
+    DateTimeOffset PlayedAtUtc,
+    double? DurationSeconds = null);
 
 public sealed class PlaylistHistoryDocument
 {

@@ -39,7 +39,17 @@ public static partial class ShortFormDescriptorDetector
             return new ShortFormDescriptor("behind-the-scenes", null, 1);
         }
 
-        Match match = NumberedDescriptor().Match(tokens[descriptorIndex]);
+        string descriptorToken = tokens[descriptorIndex];
+        if (descriptorToken == "lip" && descriptorIndex + 1 < tokens.Length && tokens[descriptorIndex + 1].StartsWith("sync", StringComparison.Ordinal))
+        {
+            descriptorToken = $"lipsync{tokens[descriptorIndex + 1][4..]}";
+        }
+        else if (descriptorToken == "mic" && descriptorIndex + 1 < tokens.Length && tokens[descriptorIndex + 1].StartsWith("drop", StringComparison.Ordinal))
+        {
+            descriptorToken = $"micdrop{tokens[descriptorIndex + 1][4..]}";
+        }
+
+        Match match = NumberedDescriptor().Match(descriptorToken);
         if (!match.Success || !DescriptorSubtypes.TryGetValue(match.Groups["name"].Value, out string? subtype))
         {
             return null;

@@ -76,7 +76,9 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The provisional norm
 | Interstitial cadence | every 20–30 minutes |
 | Promo cadence | every 30–45 minutes |
 
-Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. Music-video, lyric-video, visualizer, animated-visual, performance, and vlog total 100% of the default normal-program mix; the music-oriented types total 80%. Short-form, advertisement, and special assets remain supported but require an explicit policy target or cadence before they participate. Bumpers, promos, and interstitials remain outside the normal-program target mix and participate only when eligible inventory exists; their absence never prevents generation.
+Airtime targets use scheduled seconds, not item counts. Only targets represented by eligible inventory are normalized into the active mix. The default normal-program mix is 20% music-video, 15% lyric-video, 15% visualizer, 20% animated-visual, 10% performance, 5% short-form, and 15% vlog. Music/artist-oriented types therefore total 85%; short-form is ordinary eligible programming, while advertisement and special assets still require an explicit policy target. Bumpers, promos, and interstitials remain outside the normal-program target mix and participate only when eligible inventory exists; their absence never prevents generation.
+
+For song pacing, short-form is always a short presentation. Other song-based normal programming is short when its measured duration is 60 seconds or less; longer assets are full presentations. Full-to-full repeats retain the 90-minute preferred, 60-minute normal floor, and 45-minute music-rescue behavior. Directional short pacing is short-to-short 15/10 minutes, full-to-short 30/20 minutes, and short-to-full 30/15 minutes (preferred/floor). Any necessary floor crossing is an explicit, separately reported emergency; exact-asset cooldowns continue to apply.
 
 Cadence windows have a minimum eligibility boundary as well as a preferred/overdue boundary:
 

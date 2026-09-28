@@ -413,6 +413,12 @@ public static class CliApplication
         Console.WriteLine($"    song cooldown 60-90m:   {summary.ContentGroupCooldownRelaxations}");
         Console.WriteLine($"    music rescue 45-60m:    {summary.MusicFirstRescueRelaxations}");
         Console.WriteLine($"    emergency song <45m:    {summary.EmergencyContentGroupFloorViolations}");
+        Console.WriteLine($"    short-short 10-15m:     {summary.ShortToShortPreferredRelaxations}");
+        Console.WriteLine($"    full-short 20-30m:      {summary.FullToShortPreferredRelaxations}");
+        Console.WriteLine($"    short-full 15-30m:      {summary.ShortToFullPreferredRelaxations}");
+        Console.WriteLine($"    emergency short-short:  {summary.EmergencyShortToShortFloorViolations}");
+        Console.WriteLine($"    emergency full-short:   {summary.EmergencyFullToShortFloorViolations}");
+        Console.WriteLine($"    emergency short-full:   {summary.EmergencyShortToFullFloorViolations}");
         Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
         Console.WriteLine($"    emergency vlog run:     {summary.EmergencyVlogRunViolations}");
         Console.WriteLine();

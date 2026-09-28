@@ -122,12 +122,13 @@ public sealed class PlaylistGeneratorTests
     {
         IReadOnlyDictionary<string, double> targets = new PlaylistPolicy().CategoryAirtimeTargets;
 
-        Assert.Equal(0.25, targets[AssetTypes.MusicVideo]);
+        Assert.Equal(0.20, targets[AssetTypes.MusicVideo]);
         Assert.Equal(0.15, targets[AssetTypes.LyricVideo]);
         Assert.Equal(0.15, targets[AssetTypes.Visualizer]);
-        Assert.Equal(0.15, targets[AssetTypes.AnimatedVisual]);
+        Assert.Equal(0.20, targets[AssetTypes.AnimatedVisual]);
         Assert.Equal(0.10, targets[AssetTypes.Performance]);
-        Assert.Equal(0.20, targets[AssetTypes.Vlog]);
+        Assert.Equal(0.05, targets[AssetTypes.ShortForm]);
+        Assert.Equal(0.15, targets[AssetTypes.Vlog]);
         Assert.Equal(1.0, targets.Values.Sum(), precision: 10);
         Assert.DoesNotContain(AssetTypes.Promo, targets.Keys);
         Assert.DoesNotContain(AssetTypes.Bumper, targets.Keys);
@@ -212,7 +213,102 @@ public sealed class PlaylistGeneratorTests
             .OrderBy(item => item.StartOffsetSeconds).ToArray();
         Assert.True(cash.Length >= 2);
         Assert.All(cash.Zip(cash.Skip(1)), pair =>
-            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds >= 5400));
+            Assert.True(pair.Second.StartOffsetSeconds - pair.First.StartOffsetSeconds >= 1800));
+    }
+
+    [Theory]
+    [InlineData(AssetTypes.AnimatedVisual, 60)]
+    [InlineData(AssetTypes.Visualizer, 60)]
+    public void Generate_ShortPresentationUsesControlledShortToShortWindow(string type, double duration)
+    {
+        PlaylistHistoryDocument history = History(Now,
+            new PlaylistHistoryEntry("prior", "song", type, Now.AddMinutes(-12), duration));
+        PlaylistDocument playlist = Generate(
+            [Asset("next", type, duration, "song")],
+            ShortPresentationPolicy(TimeSpan.FromSeconds(duration), (type, 1)),
+            seed: 101,
+            history: history).Playlist;
+
+        Assert.Single(playlist.Items);
+        Assert.Equal(1, playlist.Summary.ShortToShortPreferredRelaxations);
+        Assert.Equal(0, playlist.Summary.EmergencyShortToShortFloorViolations);
+    }
+
+    [Fact]
+    public void Generate_ShortPresentationFloorViolationIsSeparatelyReported()
+    {
+        PlaylistHistoryDocument history = History(Now,
+            new PlaylistHistoryEntry("prior", "song", AssetTypes.AnimatedVisual, Now.AddMinutes(-9), 30));
+        PlaylistDocument playlist = Generate(
+            [Asset("next", AssetTypes.AnimatedVisual, 30, "song")],
+            ShortPresentationPolicy(TimeSpan.FromSeconds(30), (AssetTypes.AnimatedVisual, 1)),
+            seed: 102,
+            history: history).Playlist;
+
+        Assert.Equal(1, playlist.Summary.EmergencyShortToShortFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
+    }
+
+    [Theory]
+    [InlineData(AssetTypes.MusicVideo, 180, AssetTypes.AnimatedVisual, 30, 25, 1, 0)]
+    [InlineData(AssetTypes.AnimatedVisual, 30, AssetTypes.MusicVideo, 180, 20, 0, 1)]
+    public void Generate_DirectionalShortPresentationWindowsAreReported(
+        string priorType,
+        double priorDuration,
+        string nextType,
+        double nextDuration,
+        int elapsedMinutes,
+        int expectedFullToShort,
+        int expectedShortToFull)
+    {
+        PlaylistHistoryDocument history = History(Now,
+            new PlaylistHistoryEntry("prior", "song", priorType, Now.AddMinutes(-elapsedMinutes), priorDuration));
+        PlaylistDocument playlist = Generate(
+            [Asset("next", nextType, nextDuration, "song")],
+            ShortPresentationPolicy(TimeSpan.FromSeconds(nextDuration), (nextType, 1)),
+            seed: 103,
+            history: history).Playlist;
+
+        Assert.Equal(expectedFullToShort, playlist.Summary.FullToShortPreferredRelaxations);
+        Assert.Equal(expectedShortToFull, playlist.Summary.ShortToFullPreferredRelaxations);
+        Assert.Equal(0, playlist.Summary.EmergencyFullToShortFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyShortToFullFloorViolations);
+    }
+
+    [Fact]
+    public void Generate_ProductionShapedShortVisualLibraryAvoidsPathologicalVlogFallback()
+    {
+        PlaylistAsset[] assets = Enumerable.Range(1, 13)
+            .SelectMany(group => Enumerable.Range(1, 11).Select(clip =>
+                Asset($"short-{group}-{clip}", AssetTypes.AnimatedVisual, 25, $"song-{group}")))
+            .Concat(Enumerable.Range(1, 13).SelectMany(group => Enumerable.Range(1, 3).SelectMany(variant => new[]
+            {
+                Asset($"full-{group}-{variant}-video", AssetTypes.MusicVideo, 240, $"song-{group}"),
+                Asset($"full-{group}-{variant}-visualizer", AssetTypes.Visualizer, 240, $"song-{group}"),
+                Asset($"full-{group}-{variant}-performance", AssetTypes.Performance, 240, $"song-{group}"),
+            })))
+            .Concat(Enumerable.Range(1, 19).Select(index => Asset($"vlog-{index}", AssetTypes.Vlog, 360)))
+            .Concat(Enumerable.Range(1, 4).Select(index => Asset($"promo-{index}", AssetTypes.Promo, 30)))
+            .ToArray();
+        PlaylistPolicy policy = new()
+        {
+            TargetDuration = TimeSpan.FromHours(3),
+            BumperCadence = null,
+            InterstitialCadence = null,
+            PromoCadence = null,
+        };
+
+        PlaylistDocument playlist = Generate(assets, policy, seed: 104).Playlist;
+
+        Assert.DoesNotContain(playlist.ExcludedAssets, exclusion => exclusion.RelativePath.StartsWith("short-", StringComparison.Ordinal));
+        Assert.Equal(0, playlist.Summary.EmergencyShortToShortFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyFullToShortFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyShortToFullFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
+        Assert.Equal(0, playlist.Summary.EmergencyVlogRunViolations);
+        Assert.True(playlist.ActualDurationSeconds >= policy.TargetDuration.TotalSeconds);
+        Assert.True(playlist.Summary.AirtimePercentages.GetValueOrDefault(AssetTypes.Vlog) < 60,
+            $"Vlog airtime was {playlist.Summary.AirtimePercentages.GetValueOrDefault(AssetTypes.Vlog)}%.");
     }
 
     [Fact]
@@ -573,7 +669,9 @@ public sealed class PlaylistGeneratorTests
             seed: 7,
             history: history).Playlist;
 
-        Assert.Equal("other-song", Assert.Single(playlist.Items).AssetId);
+        Assert.Equal(
+            alternateType == AssetTypes.ShortForm ? "cash-alternate" : "other-song",
+            Assert.Single(playlist.Items).AssetId);
         Assert.Equal(0, playlist.Summary.EmergencyContentGroupFloorViolations);
     }
 
@@ -978,7 +1076,17 @@ public sealed class PlaylistGeneratorTests
         BumperCadence = null,
         PromoCadence = null,
         InterstitialCadence = null,
+        // Legacy spacing tests exercise full-song rules explicitly. Dedicated
+        // short-presentation tests use the production threshold.
+        ShortSongPresentationMaximumDuration = TimeSpan.Zero,
     };
+
+    private static PlaylistPolicy ShortPresentationPolicy(
+        TimeSpan duration,
+        params (string Type, double Weight)[] targets) => Policy(duration, targets) with
+        {
+            ShortSongPresentationMaximumDuration = TimeSpan.FromSeconds(60),
+        };
 
     private static PlaylistAsset Asset(
         string id,

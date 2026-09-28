@@ -196,6 +196,8 @@ Folder names, spaces, and capitalization are intentional. Preserve them exactly.
 
 `Visualizers` contains full-song still, static, or lightly animated graphical presentations. `Animated Visuals` contains animated, narrative, cinematic, anime/movie-style, AI-animated, or other extended song visuals. Both are ordinary song-based music programming, not cadence content, and must resolve through the song catalog before they are playlist eligible.
 
+`Performance Videos` always initializes new metadata with the top-level `performance` type. Filename descriptors such as `Lipsync`, `Lip Sync`, `MicDrop`, and `Mic Drop` are retained as `lipsync` or `mic-drop` subtypes; they never silently turn a directory-backed performance into `short-form`. There is intentionally no `Short Form` source folder: short-form may be assigned through explicit metadata. Existing explicit programming sidecars are authoritative and are not rewritten merely because inference rules change.
+
 `System Volume Information` is Windows/NTFS filesystem metadata, not a media category. Ignore it; do not inspect, normalize, move, or delete it.
 
 ## Current source inventory

@@ -84,15 +84,14 @@ public sealed class MetadataInitializer
                 else if (AssetCategoryMap.TryDetect(source, file.SourcePath, out string? detectedType))
                 {
                     ShortFormDescriptor? shortFormDescriptor = ShortFormDescriptorDetector.Detect(file.SourcePath);
-                    string effectiveType = shortFormDescriptor is not null
-                        && CanInferShortFormFromFileName(detectedType!)
-                            ? AssetTypes.ShortForm
-                            : detectedType!;
+                    // A directory-backed type is authoritative for new metadata. Descriptors
+                    // such as Lipsync and MicDrop describe a performance subtype, not a type.
+                    string effectiveType = detectedType!;
                     result = await CreateAsync(
                         file,
                         source,
                         effectiveType,
-                        effectiveType == AssetTypes.ShortForm ? shortFormDescriptor : null,
+                        shortFormDescriptor,
                         catalog,
                         reservedIds,
                         collidingDestinations.Contains(file.DestinationPath),
@@ -364,9 +363,6 @@ public sealed class MetadataInitializer
         MetadataInitializationStatus.Error,
         reason,
         Subtype: metadata?.Subtype);
-
-    private static bool CanInferShortFormFromFileName(string detectedType) =>
-        detectedType == AssetTypes.Vlog || AssetTypes.IsSongBased(detectedType);
 
     private Dictionary<string, LoadedMetadata> LoadExistingMetadata(IReadOnlyList<LibraryMediaFile> files)
     {

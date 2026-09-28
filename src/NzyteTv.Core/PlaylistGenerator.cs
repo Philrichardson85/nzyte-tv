@@ -50,7 +50,7 @@ public sealed class PlaylistGenerator
             ? priorEnd.ToUniversalTime()
             : generated;
         var random = new StableRandom(seed);
-        var state = new SchedulerState(history, scheduleStart);
+        var state = new SchedulerState(history, scheduleStart, policy);
         var items = new List<PlaylistItem>();
         var relaxation = new RelaxationCounts();
         double targetSeconds = policy.TargetDuration.TotalSeconds;
@@ -92,11 +92,6 @@ public sealed class PlaylistGenerator
                 relaxation.HotPreference++;
             }
 
-            if (!selected.ContentGroupPreferred && selected.ContentGroupFloorAllowed)
-            {
-                relaxation.ContentGroup++;
-            }
-
             if (selection.MusicFirstRescueUsed)
             {
                 relaxation.MusicFirstRescue++;
@@ -104,7 +99,12 @@ public sealed class PlaylistGenerator
 
             if (!selected.ContentGroupRescueAllowed)
             {
-                relaxation.EmergencyContentGroupFloor++;
+                relaxation.CountEmergency(GetContentGroupPacing(selected.Asset, state, policy, playTime).Kind);
+            }
+
+            if (!selected.ContentGroupPreferred && selected.ContentGroupFloorAllowed)
+            {
+                relaxation.CountPreferred(GetContentGroupPacing(selected.Asset, state, policy, playTime).Kind);
             }
 
             if (!selected.VlogPreferred)
@@ -135,7 +135,7 @@ public sealed class PlaylistGenerator
                 asset.RelativePath,
                 RoundSeconds(asset.DurationSeconds),
                 RoundSeconds(offsetSeconds)));
-            state.Record(asset, playTime);
+            state.Record(asset, playTime, policy);
             offsetSeconds += asset.DurationSeconds;
 
         }
@@ -152,6 +152,12 @@ public sealed class PlaylistGenerator
             ContentGroupCooldownRelaxations = relaxation.ContentGroup,
             MusicFirstRescueRelaxations = relaxation.MusicFirstRescue,
             EmergencyContentGroupFloorViolations = relaxation.EmergencyContentGroupFloor,
+            ShortToShortPreferredRelaxations = relaxation.ShortToShortPreferred,
+            FullToShortPreferredRelaxations = relaxation.FullToShortPreferred,
+            ShortToFullPreferredRelaxations = relaxation.ShortToFullPreferred,
+            EmergencyShortToShortFloorViolations = relaxation.EmergencyShortToShortFloor,
+            EmergencyFullToShortFloorViolations = relaxation.EmergencyFullToShortFloor,
+            EmergencyShortToFullFloorViolations = relaxation.EmergencyShortToFullFloor,
             ConsecutiveVlogViolations = relaxation.ConsecutiveVlog,
             EmergencyVlogRunViolations = relaxation.EmergencyVlogRun,
             BumperCadenceMisses = relaxation.BumperCadence,
@@ -185,7 +191,8 @@ public sealed class PlaylistGenerator
                 item.AssetId,
                 item.ContentGroupId,
                 item.Type,
-                scheduleStart.AddSeconds(item.StartOffsetSeconds))))
+                scheduleStart.AddSeconds(item.StartOffsetSeconds),
+                item.DurationSeconds)))
             .Where(play => play.PlayedAtUtc >= cutoff && play.PlayedAtUtc <= scheduleEnd)
             .OrderBy(play => play.PlayedAtUtc)
             .ToArray();
@@ -436,28 +443,76 @@ public sealed class PlaylistGenerator
         PlaylistAsset asset,
         SchedulerState state,
         PlaylistPolicy policy,
-        DateTimeOffset playTime) =>
-        string.IsNullOrWhiteSpace(asset.ContentGroupId)
-        || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
-        || playTime - previous >= policy.ContentGroupCooldown;
+        DateTimeOffset playTime) => GetContentGroupPacing(asset, state, policy, playTime).Preferred;
 
     private static bool IsContentGroupFloorAllowed(
         PlaylistAsset asset,
         SchedulerState state,
         PlaylistPolicy policy,
-        DateTimeOffset playTime) =>
-        string.IsNullOrWhiteSpace(asset.ContentGroupId)
-        || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
-        || playTime - previous >= policy.ContentGroupMinimumCooldown;
+        DateTimeOffset playTime) => GetContentGroupPacing(asset, state, policy, playTime).FloorAllowed;
 
     private static bool IsContentGroupRescueAllowed(
         PlaylistAsset asset,
         SchedulerState state,
         PlaylistPolicy policy,
-        DateTimeOffset playTime) =>
-        string.IsNullOrWhiteSpace(asset.ContentGroupId)
-        || !state.LastContentGroupPlay.TryGetValue(asset.ContentGroupId, out DateTimeOffset previous)
-        || playTime - previous >= policy.ContentGroupMusicFirstRescueCooldown;
+        DateTimeOffset playTime) => GetContentGroupPacing(asset, state, policy, playTime).RescueAllowed;
+
+    private static ContentGroupPacing GetContentGroupPacing(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy,
+        DateTimeOffset playTime)
+    {
+        SongPresentation current = GetPresentation(asset.Type, asset.DurationSeconds, policy);
+        if (current == SongPresentation.None
+            || string.IsNullOrWhiteSpace(asset.ContentGroupId)
+            || !state.LastContentGroupPresentation.TryGetValue(asset.ContentGroupId, out PresentationPlay? previous))
+        {
+            return ContentGroupPacing.Unrestricted;
+        }
+
+        TimeSpan elapsed = playTime - previous.PlayedAtUtc;
+        if (current == SongPresentation.Full && previous.Presentation == SongPresentation.Full)
+        {
+            return new ContentGroupPacing(
+                elapsed >= policy.ContentGroupCooldown,
+                elapsed >= policy.ContentGroupMinimumCooldown,
+                elapsed >= policy.ContentGroupMusicFirstRescueCooldown,
+                GroupPacingKind.FullToFull);
+        }
+
+        (TimeSpan preferred, TimeSpan floor, GroupPacingKind kind) = (previous.Presentation, current) switch
+        {
+            (SongPresentation.Short, SongPresentation.Short) =>
+                (policy.ShortToShortPreferredCooldown, policy.ShortToShortMinimumCooldown, GroupPacingKind.ShortToShort),
+            (SongPresentation.Full, SongPresentation.Short) =>
+                (policy.FullToShortPreferredCooldown, policy.FullToShortMinimumCooldown, GroupPacingKind.FullToShort),
+            (SongPresentation.Short, SongPresentation.Full) =>
+                (policy.ShortToFullPreferredCooldown, policy.ShortToFullMinimumCooldown, GroupPacingKind.ShortToFull),
+            _ => throw new InvalidOperationException("Song presentation pacing is invalid."),
+        };
+        return new ContentGroupPacing(
+            elapsed >= preferred,
+            elapsed >= floor,
+            elapsed >= floor,
+            kind);
+    }
+
+    internal static bool IsShortSongPresentation(PlaylistAsset asset, PlaylistPolicy policy) =>
+        GetPresentation(asset.Type, asset.DurationSeconds, policy) == SongPresentation.Short;
+
+    private static SongPresentation GetPresentation(string type, double? durationSeconds, PlaylistPolicy policy)
+    {
+        if (!AssetTypes.IsSongBased(type))
+        {
+            return SongPresentation.None;
+        }
+
+        return type == AssetTypes.ShortForm
+            || durationSeconds is double duration && duration <= policy.ShortSongPresentationMaximumDuration.TotalSeconds
+                ? SongPresentation.Short
+                : SongPresentation.Full;
+    }
 
     private static bool IsVlogPreferred(PlaylistAsset asset, SchedulerState state, PlaylistPolicy policy) =>
         !policy.AvoidConsecutiveVlogs
@@ -596,6 +651,33 @@ public sealed class PlaylistGenerator
     private static double RoundSeconds(double seconds) =>
         Math.Round(seconds, 3, MidpointRounding.AwayFromZero);
 
+    private enum SongPresentation
+    {
+        None,
+        Short,
+        Full,
+    }
+
+    private enum GroupPacingKind
+    {
+        None,
+        FullToFull,
+        ShortToShort,
+        FullToShort,
+        ShortToFull,
+    }
+
+    private sealed record PresentationPlay(DateTimeOffset PlayedAtUtc, SongPresentation Presentation);
+
+    private sealed record ContentGroupPacing(
+        bool Preferred,
+        bool FloorAllowed,
+        bool RescueAllowed,
+        GroupPacingKind Kind)
+    {
+        public static ContentGroupPacing Unrestricted { get; } = new(true, true, true, GroupPacingKind.None);
+    }
+
     private sealed record CandidateEvaluation(
         PlaylistAsset Asset,
         bool CategoryPreferred,
@@ -627,6 +709,40 @@ public sealed class PlaylistGenerator
 
         public int EmergencyContentGroupFloor { get; set; }
 
+        public int ShortToShortPreferred { get; set; }
+
+        public int FullToShortPreferred { get; set; }
+
+        public int ShortToFullPreferred { get; set; }
+
+        public int EmergencyShortToShortFloor { get; set; }
+
+        public int EmergencyFullToShortFloor { get; set; }
+
+        public int EmergencyShortToFullFloor { get; set; }
+
+        public void CountPreferred(GroupPacingKind kind)
+        {
+            switch (kind)
+            {
+                case GroupPacingKind.FullToFull: ContentGroup++; break;
+                case GroupPacingKind.ShortToShort: ShortToShortPreferred++; break;
+                case GroupPacingKind.FullToShort: FullToShortPreferred++; break;
+                case GroupPacingKind.ShortToFull: ShortToFullPreferred++; break;
+            }
+        }
+
+        public void CountEmergency(GroupPacingKind kind)
+        {
+            switch (kind)
+            {
+                case GroupPacingKind.FullToFull: EmergencyContentGroupFloor++; break;
+                case GroupPacingKind.ShortToShort: EmergencyShortToShortFloor++; break;
+                case GroupPacingKind.FullToShort: EmergencyFullToShortFloor++; break;
+                case GroupPacingKind.ShortToFull: EmergencyShortToFullFloor++; break;
+            }
+        }
+
         public int ConsecutiveVlog { get; set; }
 
         public int EmergencyVlogRun { get; set; }
@@ -642,7 +758,7 @@ public sealed class PlaylistGenerator
     {
         private readonly Dictionary<string, double> _airtime = new(StringComparer.Ordinal);
 
-        public SchedulerState(PlaylistHistoryDocument history, DateTimeOffset scheduleStart)
+        public SchedulerState(PlaylistHistoryDocument history, DateTimeOffset scheduleStart, PlaylistPolicy policy)
         {
             PlaylistHistoryEntry[] prior = history.Plays
                 .Where(play => play.PlayedAtUtc <= scheduleStart)
@@ -653,7 +769,9 @@ public sealed class PlaylistGenerator
                 LastAssetPlay[play.AssetId] = play.PlayedAtUtc;
                 if (!string.IsNullOrWhiteSpace(play.ContentGroupId))
                 {
-                    LastContentGroupPlay[play.ContentGroupId] = play.PlayedAtUtc;
+                    LastContentGroupPresentation[play.ContentGroupId] = new PresentationPlay(
+                        play.PlayedAtUtc,
+                        GetPresentation(play.Type, play.DurationSeconds, policy));
                 }
             }
 
@@ -670,7 +788,7 @@ public sealed class PlaylistGenerator
 
         public Dictionary<string, DateTimeOffset> LastAssetPlay { get; } = new(StringComparer.Ordinal);
 
-        public Dictionary<string, DateTimeOffset> LastContentGroupPlay { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, PresentationPlay> LastContentGroupPresentation { get; } = new(StringComparer.Ordinal);
 
         public int ConsecutiveVlogCount { get; private set; }
 
@@ -685,12 +803,14 @@ public sealed class PlaylistGenerator
         public DateTimeOffset? GetLastAssetPlay(string assetId) =>
             LastAssetPlay.TryGetValue(assetId, out DateTimeOffset playedAt) ? playedAt : null;
 
-        public void Record(PlaylistAsset asset, DateTimeOffset playTime)
+        public void Record(PlaylistAsset asset, DateTimeOffset playTime, PlaylistPolicy policy)
         {
             LastAssetPlay[asset.AssetId] = playTime;
             if (!string.IsNullOrWhiteSpace(asset.ContentGroupId))
             {
-                LastContentGroupPlay[asset.ContentGroupId] = playTime;
+                LastContentGroupPresentation[asset.ContentGroupId] = new PresentationPlay(
+                    playTime,
+                    GetPresentation(asset.Type, asset.DurationSeconds, policy));
             }
 
             _airtime[asset.Type] = GetAirtimeSeconds(asset.Type) + asset.DurationSeconds;

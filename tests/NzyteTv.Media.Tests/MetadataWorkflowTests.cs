@@ -130,6 +130,30 @@ public sealed class MetadataWorkflowTests
     }
 
     [Theory]
+    [InlineData("Content Template Lipsync1 - I Did It For You.mp4", "lipsync", "i-did-it-for-you")]
+    [InlineData("Content Template Mic Drop1 - Cash Rules.mp4", "mic-drop", "cash-rules")]
+    public async Task Initialize_PerformanceDescriptorKeepsPerformanceType(
+        string fileName,
+        string expectedSubtype,
+        string expectedGroup)
+    {
+        using var fixture = new MetadataFixture();
+        fixture.WriteCatalog(
+            Song("i-did-it-for-you", "I Did It For You"),
+            Song("cash-rules", "Cash Rules"));
+        string source = fixture.AddSource("Performance Videos", fileName);
+
+        MetadataInitializationResult result = await fixture.CreateInitializer().InitializeAsync(
+            fixture.SourceRoot, fixture.LibraryRoot, fixture.CatalogPath, dryRun: false, CancellationToken.None);
+
+        MetadataAssetResult asset = Assert.Single(result.Assets);
+        Assert.Equal(AssetTypes.Performance, asset.Type);
+        Assert.Equal(expectedSubtype, asset.Subtype);
+        Assert.Equal(expectedGroup, asset.ContentGroupId);
+        Assert.Equal(AssetTypes.Performance, fixture.MetadataStore.Read(source).Type);
+    }
+
+    [Theory]
     [InlineData("Visualizers", AssetTypes.Visualizer)]
     [InlineData("Animated Visuals", AssetTypes.AnimatedVisual)]
     public async Task Initialize_UnresolvedNewSongCategoryRequiresReviewWithoutGuessing(
@@ -218,14 +242,13 @@ public sealed class MetadataWorkflowTests
     }
 
     [Theory]
-    [InlineData("Content Template POV1-Cash Rules.mp4", "pov", "cash-rules-pov-01")]
-    [InlineData("Content Template Stock10 - Cash Rules.mp4", "stock", "cash-rules-stock-10")]
-    [InlineData("Content Template MicDrop2 - Cash Rules.mp4", "mic-drop", "cash-rules-mic-drop-02")]
-    [InlineData("BTS Cash Rules.mp4", "behind-the-scenes", "cash-rules-behind-the-scenes")]
-    public async Task Initialize_KnownShortFormInVlogFolderOverridesDefaultAndResolves(
+    [InlineData("Content Template POV1-Cash Rules.mp4", "pov")]
+    [InlineData("Content Template Stock10 - Cash Rules.mp4", "stock")]
+    [InlineData("Content Template MicDrop2 - Cash Rules.mp4", "mic-drop")]
+    [InlineData("BTS Cash Rules.mp4", "behind-the-scenes")]
+    public async Task Initialize_DescriptorInVlogFolderKeepsDirectoryBackedType(
         string fileName,
-        string expectedSubtype,
-        string expectedAssetId)
+        string expectedSubtype)
     {
         using var fixture = new MetadataFixture();
         fixture.WriteCatalog(Song("cash-rules", "Cash Rules"));
@@ -239,16 +262,13 @@ public sealed class MetadataWorkflowTests
             CancellationToken.None);
 
         MetadataAssetResult asset = Assert.Single(result.Assets);
-        Assert.Equal(MetadataInitializationStatus.Resolved, asset.Status);
-        Assert.Equal(AssetTypes.ShortForm, asset.Type);
+        Assert.Equal(MetadataInitializationStatus.NonSong, asset.Status);
+        Assert.Equal(AssetTypes.Vlog, asset.Type);
         Assert.Equal(expectedSubtype, asset.Subtype);
-        Assert.Equal("cash-rules", asset.ContentGroupId);
-        Assert.Equal(expectedAssetId, asset.AssetId);
+        Assert.Null(asset.ContentGroupId);
         AssetMetadata metadata = fixture.MetadataStore.Read(source);
-        Assert.Equal(AssetTypes.ShortForm, metadata.Type);
+        Assert.Equal(AssetTypes.Vlog, metadata.Type);
         Assert.Equal(expectedSubtype, metadata.Subtype);
-        Assert.Equal("Cash Rules", metadata.Title);
-        Assert.Equal("Nzyte", metadata.Artist);
     }
 
     [Fact]

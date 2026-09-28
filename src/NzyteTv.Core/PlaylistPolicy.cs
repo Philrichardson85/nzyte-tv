@@ -13,12 +13,13 @@ public sealed record PlaylistPolicy
     public IReadOnlyDictionary<string, double> CategoryAirtimeTargets { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal)
         {
-            [AssetTypes.MusicVideo] = 0.25,
+            [AssetTypes.MusicVideo] = 0.20,
             [AssetTypes.LyricVideo] = 0.15,
             [AssetTypes.Visualizer] = 0.15,
-            [AssetTypes.AnimatedVisual] = 0.15,
+            [AssetTypes.AnimatedVisual] = 0.20,
             [AssetTypes.Performance] = 0.10,
-            [AssetTypes.Vlog] = 0.20,
+            [AssetTypes.ShortForm] = 0.05,
+            [AssetTypes.Vlog] = 0.15,
         };
 
     public TimeSpan ExactAssetCooldown { get; init; } = TimeSpan.FromHours(2);
@@ -28,6 +29,20 @@ public sealed record PlaylistPolicy
     public TimeSpan ContentGroupMinimumCooldown { get; init; } = TimeSpan.FromMinutes(60);
 
     public TimeSpan ContentGroupMusicFirstRescueCooldown { get; init; } = TimeSpan.FromMinutes(45);
+
+    public TimeSpan ShortSongPresentationMaximumDuration { get; init; } = TimeSpan.FromSeconds(60);
+
+    public TimeSpan ShortToShortPreferredCooldown { get; init; } = TimeSpan.FromMinutes(15);
+
+    public TimeSpan ShortToShortMinimumCooldown { get; init; } = TimeSpan.FromMinutes(10);
+
+    public TimeSpan FullToShortPreferredCooldown { get; init; } = TimeSpan.FromMinutes(30);
+
+    public TimeSpan FullToShortMinimumCooldown { get; init; } = TimeSpan.FromMinutes(20);
+
+    public TimeSpan ShortToFullPreferredCooldown { get; init; } = TimeSpan.FromMinutes(30);
+
+    public TimeSpan ShortToFullMinimumCooldown { get; init; } = TimeSpan.FromMinutes(15);
 
     public bool AvoidConsecutiveVlogs { get; init; } = true;
 
@@ -88,7 +103,14 @@ public sealed record PlaylistPolicy
         if (ExactAssetCooldown < TimeSpan.Zero
             || ContentGroupCooldown < TimeSpan.Zero
             || ContentGroupMinimumCooldown < TimeSpan.Zero
-            || ContentGroupMusicFirstRescueCooldown < TimeSpan.Zero)
+            || ContentGroupMusicFirstRescueCooldown < TimeSpan.Zero
+            || ShortSongPresentationMaximumDuration < TimeSpan.Zero
+            || ShortToShortPreferredCooldown < TimeSpan.Zero
+            || ShortToShortMinimumCooldown < TimeSpan.Zero
+            || FullToShortPreferredCooldown < TimeSpan.Zero
+            || FullToShortMinimumCooldown < TimeSpan.Zero
+            || ShortToFullPreferredCooldown < TimeSpan.Zero
+            || ShortToFullMinimumCooldown < TimeSpan.Zero)
         {
             errors.Add("Cooldowns must not be negative.");
         }
@@ -101,6 +123,13 @@ public sealed record PlaylistPolicy
         if (ContentGroupMusicFirstRescueCooldown > ContentGroupMinimumCooldown)
         {
             errors.Add("The content-group music-first rescue cooldown must not exceed the normal floor.");
+        }
+
+        if (ShortToShortMinimumCooldown > ShortToShortPreferredCooldown
+            || FullToShortMinimumCooldown > FullToShortPreferredCooldown
+            || ShortToFullMinimumCooldown > ShortToFullPreferredCooldown)
+        {
+            errors.Add("Short-presentation minimum cooldowns must not exceed their preferred cooldowns.");
         }
 
         if (MaximumConsecutiveVlogs < 1)
