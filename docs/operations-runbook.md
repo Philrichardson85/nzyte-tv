@@ -927,7 +927,7 @@ The current broadcaster:
 - does not automatically generate future playlist blocks;
 - does not run as a systemd service;
 - does not automatically restart after a Pi reboot;
-- does not automatically recover or requeue a failed broadcast session;
+- automatically reconnects transient RTMPS/FFmpeg output failures with bounded backoff, restarting the interrupted asset rather than the whole queue;
 - does not integrate with the YouTube API; and
 - does not monitor remote stream health.
 

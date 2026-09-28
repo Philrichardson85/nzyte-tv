@@ -414,17 +414,25 @@ public static class CliApplication
         Console.WriteLine("Broadcast starting. Press Ctrl+C to stop.");
         try
         {
-            BroadcastExecutionResult result = await new FfmpegBroadcaster(ffmpeg, new ProcessRunner())
-                .BroadcastAsync(
-                    plan,
-                    destination!,
-                    line => Console.Error.WriteLine(line),
-                    cancellationToken)
+            var recovery = new BroadcastRecoveryRunner(new FfmpegBroadcaster(ffmpeg, new ProcessRunner()));
+            BroadcastRecoveryResult result = await recovery.RunAsync(
+                plan, destination!, line => Console.Error.WriteLine(line), PrintBroadcastRecoveryUpdate, cancellationToken)
                 .ConfigureAwait(false);
             Console.WriteLine();
-            Console.WriteLine($"FFmpeg exit status:         {result.FfmpegExitCode}");
-            Console.WriteLine("Broadcast status:           COMPLETED");
-            return 0;
+            if (result.ExitCode == 0)
+            {
+                Console.WriteLine("Broadcast status:           COMPLETED");
+                return 0;
+            }
+
+            Console.Error.WriteLine("FAILED: Broadcast recovery attempts exhausted.");
+            Console.Error.WriteLine($"Attempts: {result.Attempts}");
+            if (result.LastItem is not null) PrintBroadcastItem("Last active item", result.LastItem);
+            if (!string.IsNullOrWhiteSpace(result.LastDiagnostic))
+            {
+                Console.Error.WriteLine($"Last FFmpeg failure: {result.LastDiagnostic.Split(Environment.NewLine)[0]}");
+            }
+            return 1;
         }
         catch (OperationCanceledException)
         {
@@ -433,6 +441,42 @@ public static class CliApplication
             throw;
         }
     }
+
+    private static void PrintBroadcastRecoveryUpdate(BroadcastRecoveryUpdate update)
+    {
+        Console.WriteLine();
+        if (update.Message == "Now playing")
+        {
+            PrintBroadcastItem("Now playing", update.Item);
+            return;
+        }
+        Console.WriteLine(update.Message);
+        if (update.Message == "Broadcast connection interrupted.")
+        {
+            PrintBroadcastItem("Last active item", update.Item);
+            Console.WriteLine($"Recovery attempt: {update.Attempt} of 10");
+            Console.WriteLine($"Retry delay: {update.Delay!.Value.TotalSeconds:0} seconds");
+            Console.WriteLine("Resume policy: restart interrupted item");
+        }
+        else if (update.Message == "Broadcast connection restored.")
+        {
+            Console.WriteLine($"Resuming from sequence {update.Item.Sequence}: {DisplayTitle(update.Item)}");
+        }
+    }
+
+    private static void PrintBroadcastItem(string heading, BroadcastPlanItem item)
+    {
+        Console.WriteLine($"{heading}:");
+        Console.WriteLine($"  Playlist: {Path.GetFileName(item.PlaylistPath)}");
+        Console.WriteLine($"  Sequence: {item.Sequence}");
+        Console.WriteLine($"  Asset ID: {item.AssetId}");
+        Console.WriteLine($"  Title: {DisplayTitle(item)}");
+        if (!string.IsNullOrWhiteSpace(item.Type)) Console.WriteLine($"  Type: {item.Type}");
+    }
+
+    private static string DisplayTitle(BroadcastPlanItem item) => string.IsNullOrWhiteSpace(item.Title)
+        ? Path.GetFileNameWithoutExtension(item.RelativePath)
+        : item.Title;
 
     private static void PrintPlaylistSummary(PlaylistBuildResult result)
     {

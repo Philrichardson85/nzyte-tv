@@ -74,7 +74,17 @@ nzytetv broadcast \
 
 Playlist files play in the supplied order. Items within each playlist play by their validated `sequence` value. FFmpeg reads one temporary concat input in real time and publishes FLV with `-c copy`; no video or audio encoder is used.
 
-Press Ctrl+C to cancel. NZYTE TV cancels the child process, terminates its process tree, removes the temporary concat file where practical, and exits nonzero. A nonzero FFmpeg exit also makes the command fail.
+Press Ctrl+C to cancel. NZYTE TV cancels the child process, terminates its process tree, removes temporary concat files, and exits nonzero.
+
+## RTMPS recovery
+
+NZYTE TV watches FFmpeg's machine-readable `-progress pipe:1` output while it streams. If FFmpeg exits unexpectedly because of an output/network problem (for example connection reset, broken pipe, timeout, refusal, or a temporary network failure), it creates a fresh concat file and reconnects automatically. The retry delays are 2, 5, 10, 20, 30, then 60 seconds, with at most 10 consecutive recovery attempts.
+
+Recovery starts at the beginning of the interrupted item. It does not attempt unsafe mid-GOP seeking, and it never restarts the entire supplied queue from item 1: items already reported complete are omitted from the retry concat input. This runtime position is held only in the broadcaster process; it never changes playlist JSON or `history.json`.
+
+This behavior was added after a Raspberry Pi 4 acceptance stream ran for approximately 2 hours 45 minutes at real-time speed before the remote RTMPS peer reset the connection. Post-failure Pi and external-media checks remained healthy. That is historical acceptance evidence, not a standing operational requirement.
+
+After an FFmpeg session streams for five minutes, the consecutive-retry budget resets. Ctrl+C stops either FFmpeg or an in-progress retry delay promptly. If the budget is exhausted, the command exits nonzero with the last active item and a sanitized FFmpeg diagnostic. The RTMP/RTMPS destination remains redacted in all forwarded diagnostics.
 
 Verify that FFmpeg stopped:
 
@@ -133,4 +143,4 @@ tmux ls
 tmux attach -t nzyte-tv
 ```
 
-Attach and press Ctrl+C to stop the broadcaster. tmux is the current manual bridge; the broadcaster does not yet run as a systemd service, generate future playlists, track live playback position, dynamically reload its queue, restart after reboot, requeue failures, call the YouTube API, or monitor remote stream health. A later unattended version may add automatic queue advancement, future-block generation, maintenance-friendly ingestion, runtime playback state, and systemd operation. The current v0.4-era broadcaster uses the fixed queue supplied at startup.
+Attach and press Ctrl+C to stop the broadcaster. tmux protects a manual session from an SSH disconnect; broadcaster recovery separately protects the active connection from transient RTMPS/FFmpeg failures. Neither survives a reboot or replaces supervision. The broadcaster does not generate future playlists, dynamically reload its queue, restart after reboot, call the YouTube API, or monitor remote stream health. The current v0.4-era broadcaster uses the fixed queue supplied at startup.

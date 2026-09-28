@@ -13,7 +13,8 @@ public static class BroadcastFfmpegArgumentBuilder
         [
             "-hide_banner",
             "-loglevel", "warning",
-            "-stats",
+            "-progress", "pipe:1",
+            "-nostats",
             "-re",
             "-f", "concat",
             "-safe", "0",
@@ -98,6 +99,61 @@ public static class BroadcastDestination
 
 public sealed record BroadcastExecutionResult(int FfmpegExitCode);
 
+public sealed record BroadcastAttemptResult(
+    int FfmpegExitCode,
+    TimeSpan? OutputTime,
+    string Diagnostic,
+    int StartItemIndex);
+
+public static class FfmpegProgressParser
+{
+    public static bool TryParseOutputTime(string line, out TimeSpan outputTime)
+    {
+        outputTime = default;
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        int separator = line.IndexOf('=');
+        if (separator <= 0) return false;
+        string key = line[..separator];
+        string value = line[(separator + 1)..];
+        if (key == "out_time_us" && long.TryParse(value, out long microseconds) && microseconds >= 0)
+        {
+            outputTime = TimeSpan.FromMicroseconds(microseconds);
+            return true;
+        }
+
+        if (key == "out_time" && TimeSpan.TryParse(value, out TimeSpan parsed) && parsed >= TimeSpan.Zero)
+        {
+            outputTime = parsed;
+            return true;
+        }
+
+        return false;
+    }
+}
+
+public enum BroadcastFailureKind { None, Cancelled, Transient, Permanent, Ambiguous }
+
+public static class BroadcastFailureClassifier
+{
+    private static readonly string[] TransientMarkers =
+    [
+        "connection reset", "broken pipe", "connection timed out", "connection refused",
+        "network is unreachable", "temporary failure", "network error", "i/o error",
+        "error muxing a packet", "error submitting a packet", "error writing trailer",
+    ];
+    private static readonly string[] PermanentMarkers =
+    ["no such file", "invalid data found", "invalid concat", "not found", "unknown encoder"];
+
+    public static BroadcastFailureKind Classify(int exitCode, string diagnostic, bool cancelled)
+    {
+        if (cancelled) return BroadcastFailureKind.Cancelled;
+        if (exitCode == 0) return BroadcastFailureKind.None;
+        if (TransientMarkers.Any(marker => diagnostic.Contains(marker, StringComparison.OrdinalIgnoreCase))) return BroadcastFailureKind.Transient;
+        if (PermanentMarkers.Any(marker => diagnostic.Contains(marker, StringComparison.OrdinalIgnoreCase))) return BroadcastFailureKind.Permanent;
+        return BroadcastFailureKind.Ambiguous;
+    }
+}
+
 public sealed class FfmpegBroadcaster
 {
     private readonly string _ffmpegPath;
@@ -124,36 +180,57 @@ public sealed class FfmpegBroadcaster
             throw new InvalidOperationException("Broadcast plan is not ready.");
         }
 
+        BroadcastAttemptResult result = await BroadcastAttemptAsync(
+            plan, destination, 0, onOutput, onProgress: null, cancellationToken).ConfigureAwait(false);
+        if (result.FfmpegExitCode != 0) throw new BroadcastProcessException(result.FfmpegExitCode);
+        return new BroadcastExecutionResult(result.FfmpegExitCode);
+    }
+
+    public async Task<BroadcastAttemptResult> BroadcastAttemptAsync(
+        BroadcastPlan plan,
+        string destination,
+        int startItemIndex,
+        Action<string>? onOutput,
+        Action<TimeSpan>? onProgress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        if (!plan.IsReady) throw new InvalidOperationException("Broadcast plan is not ready.");
+        if (startItemIndex < 0 || startItemIndex >= plan.Items.Count) throw new ArgumentOutOfRangeException(nameof(startItemIndex));
+
         string? concatPath = null;
+        TimeSpan? latestOutputTime = null;
+        var diagnostics = new List<string>();
         try
         {
             concatPath = await FfmpegConcatFile.CreateTemporaryAsync(
-                plan.Items.Select(item => item.MediaPath),
-                cancellationToken).ConfigureAwait(false);
+                plan.Items.Skip(startItemIndex).Select(item => item.MediaPath), cancellationToken).ConfigureAwait(false);
             IReadOnlyList<string> arguments = BroadcastFfmpegArgumentBuilder.Build(concatPath, destination);
-            Action<string>? safeOutput = onOutput is null
-                ? null
-                : line => onOutput(Redact(line, destination));
-            ProcessResult result = await _processRunner.RunAsync(
-                new ProcessRequest(
-                    _ffmpegPath,
-                    arguments,
-                    OnStandardOutput: safeOutput,
-                    OnStandardError: safeOutput),
-                cancellationToken).ConfigureAwait(false);
-            if (result.ExitCode != 0)
+            void HandleOutput(string line)
             {
-                throw new BroadcastProcessException(result.ExitCode);
+                string safe = Redact(line, destination);
+                if (FfmpegProgressParser.TryParseOutputTime(safe, out TimeSpan outputTime))
+                {
+                    latestOutputTime = outputTime;
+                    onProgress?.Invoke(outputTime);
+                    return;
+                }
+                if (!string.IsNullOrWhiteSpace(safe))
+                {
+                    if (diagnostics.Count < 12) diagnostics.Add(safe);
+                    onOutput?.Invoke(safe);
+                }
             }
-
-            return new BroadcastExecutionResult(result.ExitCode);
+            ProcessResult result = await _processRunner.RunAsync(new ProcessRequest(
+                _ffmpegPath, arguments, HandleOutput, HandleOutput), cancellationToken).ConfigureAwait(false);
+            string diagnostic = string.Join(Environment.NewLine, diagnostics);
+            if (string.IsNullOrWhiteSpace(diagnostic)) diagnostic = Redact(result.StandardError, destination);
+            return new BroadcastAttemptResult(result.ExitCode, latestOutputTime, diagnostic, startItemIndex);
         }
         finally
         {
-            if (concatPath is not null && File.Exists(concatPath))
-            {
-                File.Delete(concatPath);
-            }
+            if (concatPath is not null && File.Exists(concatPath)) File.Delete(concatPath);
         }
     }
 

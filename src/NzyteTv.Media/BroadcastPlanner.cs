@@ -224,7 +224,9 @@ public sealed class BroadcastPlanner
             item.AssetId ?? string.Empty,
             item.RelativePath,
             mediaPath,
-            item.DurationSeconds));
+            item.DurationSeconds,
+            item.Title ?? string.Empty,
+            item.Type ?? string.Empty));
     }
 
     private static bool StaysWithinResolvedLibraryRoot(string libraryRoot, string mediaPath)
@@ -279,5 +281,9 @@ public sealed class BroadcastPlanner
         public string? RelativePath { get; init; }
 
         public double DurationSeconds { get; init; }
+
+        public string? Title { get; init; }
+
+        public string? Type { get; init; }
     }
 }

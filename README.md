@@ -2,7 +2,7 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes basic broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, and an environment-supplied RTMP/RTMPS destination. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. Encoding remains independent from metadata, scheduling, and playback.
 
 YouTube API integration, services, live playlist watching, queue regeneration, health polling, and automatic restarts remain out of scope.
 
