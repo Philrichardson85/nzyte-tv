@@ -60,6 +60,12 @@ public sealed class PlaylistSummary
 
     public int VlogAboveTargetFallbacks { get; init; }
 
+    public int CooldownAgePreferenceSubstitutions { get; init; }
+
+    public int ProjectedVlogOvershootSubstitutions { get; init; }
+
+    public int LongMusicAirtimeEfficiencySubstitutions { get; init; }
+
     public int ConsecutiveVlogViolations { get; init; }
 
     public int EmergencyVlogRunViolations { get; init; }

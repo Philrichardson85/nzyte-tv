@@ -120,6 +120,9 @@ public sealed class PlaylistWorkflowTests
         Assert.Equal(0, summary.GetProperty("musicFirstCategorySubstitutions").GetInt32());
         Assert.Equal(0, summary.GetProperty("fullPresentationPrioritySubstitutions").GetInt32());
         Assert.Equal(0, summary.GetProperty("vlogAboveTargetFallbacks").GetInt32());
+        Assert.Equal(0, summary.GetProperty("cooldownAgePreferenceSubstitutions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("projectedVlogOvershootSubstitutions").GetInt32());
+        Assert.Equal(0, summary.GetProperty("longMusicAirtimeEfficiencySubstitutions").GetInt32());
         Assert.Equal(0, summary.GetProperty("emergencyVlogRunViolations").GetInt32());
         Assert.Equal(0, summary.GetProperty("bumperInsertions").GetInt32());
         Assert.Equal(0, summary.GetProperty("promoInsertions").GetInt32());

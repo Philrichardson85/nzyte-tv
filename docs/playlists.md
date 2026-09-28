@@ -82,6 +82,8 @@ For song pacing, short-form is always a short presentation. Other song-based nor
 
 Normal category targets are airtime preferences. Once vlog is at or above its configured share, another legally eligible music-oriented normal program is preferred before additional vlog fallback, including when a configured music category such as short-form has no inventory. Eligible full presentations in under-target music categories also receive priority over short clips from categories already at target, and over same-song shorts that would reset their directional timer. These preferences never bypass exact-asset cooldown selection, song-spacing floors, hot-rotation restrictions, or cadence eligibility.
 
+Candidate ranking also considers projected airtime after the candidate plays. A long vlog that would materially overshoot its target yields to legal music even when vlog is technically below target beforehand. When music is deficient, longer full presentations from under-target categories receive airtime-efficiency preference over lower-value short clips. Within otherwise comparable song candidates, the content group played least recently is preferred so short clips do not synchronize every group near the same cooldown boundary. These are ranking preferences only; they do not change or bypass any cooldown floor.
+
 Cadence windows have a minimum eligibility boundary as well as a preferred/overdue boundary:
 
 - a promo is ineligible before 30 minutes, preferred from 30 through 45 minutes, and overdue after 45 minutes;

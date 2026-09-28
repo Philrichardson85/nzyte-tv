@@ -422,6 +422,9 @@ public static class CliApplication
         Console.WriteLine($"    music-first category:   {summary.MusicFirstCategorySubstitutions}");
         Console.WriteLine($"    full-presentation:      {summary.FullPresentationPrioritySubstitutions}");
         Console.WriteLine($"    vlog above target:      {summary.VlogAboveTargetFallbacks}");
+        Console.WriteLine($"    cooldown-age:           {summary.CooldownAgePreferenceSubstitutions}");
+        Console.WriteLine($"    projected vlog:         {summary.ProjectedVlogOvershootSubstitutions}");
+        Console.WriteLine($"    long-music efficiency:  {summary.LongMusicAirtimeEfficiencySubstitutions}");
         Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
         Console.WriteLine($"    emergency vlog run:     {summary.EmergencyVlogRunViolations}");
         Console.WriteLine();

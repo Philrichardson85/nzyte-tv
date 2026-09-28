@@ -78,6 +78,8 @@ public sealed record PlaylistPolicy
 
     public TimeSpan HistorySafetyMargin { get; init; } = TimeSpan.FromMinutes(15);
 
+    public double ProjectedVlogOvershootTolerance { get; init; } = 0.02;
+
     public bool IsCategoryEnabled(string type) =>
         CategoryAirtimeTargets.TryGetValue(type, out double target) && target > 0
         || type == AssetTypes.Bumper && BumperCadence is not null
@@ -165,6 +167,11 @@ public sealed record PlaylistPolicy
             || HotRotationBands.Any(band => band.MaximumAgeDays < 0 || band.Weight <= 0))
         {
             errors.Add("Rotation weights and age bands must be positive.");
+        }
+
+        if (ProjectedVlogOvershootTolerance < 0 || ProjectedVlogOvershootTolerance >= 1)
+        {
+            errors.Add("The projected-vlog overshoot tolerance must be at least zero and less than one.");
         }
 
         ValidateCadence(BumperCadence, errors);

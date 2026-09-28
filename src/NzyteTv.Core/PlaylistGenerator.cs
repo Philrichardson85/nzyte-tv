@@ -61,6 +61,7 @@ public sealed class PlaylistGenerator
             DateTimeOffset playTime = scheduleStart.AddSeconds(offsetSeconds);
             IReadOnlySet<string> preferredTypes = GetPreferredTypes(assets, state, policy, playTime);
             bool vlogAtOrAboveTarget = IsCategoryAtOrAboveTarget(AssetTypes.Vlog, state, policy);
+            bool musicBelowCombinedTarget = IsMusicBelowCombinedTarget(state, policy);
             CandidateEvaluation[] evaluated = assets
                 .Where(asset => IsCadenceEligible(asset.Type, state, policy, playTime))
                 .Select(asset => new CandidateEvaluation(
@@ -76,7 +77,13 @@ public sealed class PlaylistGenerator
                     state.GetLastAssetPlay(asset.AssetId),
                     policy.MusicOrientedNormalTypes.Contains(asset.Type),
                     IsShortSongPresentation(asset, policy),
-                    IsCategoryBelowTarget(asset.Type, state, policy)))
+                    IsCategoryBelowTarget(asset.Type, state, policy),
+                    GetCategoryDeficitImprovement(asset, state, policy),
+                    state.GetLastContentGroupPlay(asset.ContentGroupId),
+                    WouldMateriallyOvershootVlogTarget(asset, state, policy),
+                    policy.GetRotationWeight(
+                        asset.RotationStartDate,
+                        DateOnly.FromDateTime(playTime.UtcDateTime))))
                 .ToArray();
 
             CandidateSelection selection = SelectCandidate(
@@ -84,6 +91,7 @@ public sealed class PlaylistGenerator
                 policy,
                 playTime,
                 vlogAtOrAboveTarget,
+                musicBelowCombinedTarget,
                 random);
             CandidateEvaluation selected = selection.Candidate;
             if (!selected.CategoryPreferred)
@@ -124,6 +132,21 @@ public sealed class PlaylistGenerator
             if (selection.VlogAboveTargetFallbackUsed)
             {
                 relaxation.VlogAboveTargetFallback++;
+            }
+
+            if (selection.CooldownAgePreferenceSubstitutionUsed)
+            {
+                relaxation.CooldownAgePreferenceSubstitution++;
+            }
+
+            if (selection.ProjectedVlogOvershootSubstitutionUsed)
+            {
+                relaxation.ProjectedVlogOvershootSubstitution++;
+            }
+
+            if (selection.LongMusicAirtimeEfficiencySubstitutionUsed)
+            {
+                relaxation.LongMusicAirtimeEfficiencySubstitution++;
             }
 
             if (!selected.ContentGroupPreferred && selected.ContentGroupFloorAllowed)
@@ -185,6 +208,9 @@ public sealed class PlaylistGenerator
             MusicFirstCategorySubstitutions = relaxation.MusicFirstCategorySubstitution,
             FullPresentationPrioritySubstitutions = relaxation.FullPresentationPrioritySubstitution,
             VlogAboveTargetFallbacks = relaxation.VlogAboveTargetFallback,
+            CooldownAgePreferenceSubstitutions = relaxation.CooldownAgePreferenceSubstitution,
+            ProjectedVlogOvershootSubstitutions = relaxation.ProjectedVlogOvershootSubstitution,
+            LongMusicAirtimeEfficiencySubstitutions = relaxation.LongMusicAirtimeEfficiencySubstitution,
             ConsecutiveVlogViolations = relaxation.ConsecutiveVlog,
             EmergencyVlogRunViolations = relaxation.EmergencyVlogRun,
             BumperCadenceMisses = relaxation.BumperCadence,
@@ -236,6 +262,7 @@ public sealed class PlaylistGenerator
         PlaylistPolicy policy,
         DateTimeOffset playTime,
         bool vlogAtOrAboveTarget,
+        bool musicBelowCombinedTarget,
         StableRandom random)
     {
         for (int stage = 0; stage <= 4; stage++)
@@ -284,7 +311,8 @@ public sealed class PlaylistGenerator
                 available,
                 candidates,
                 stage,
-                vlogAtOrAboveTarget);
+                vlogAtOrAboveTarget,
+                musicBelowCombinedTarget);
             CandidateEvaluation selected = WeightedChoice(preference.Candidates, policy, playTime, random);
             bool hotPreferenceBypassed = MaximumRotationWeight(baseCandidates, policy, playTime)
                 > MaximumRotationWeight(preference.Candidates, policy, playTime);
@@ -299,7 +327,14 @@ public sealed class PlaylistGenerator
                     && !selected.ShortPresentation
                     && selected.CategoryBelowTarget,
                 VlogAboveTargetFallbackUsed: vlogAtOrAboveTarget
-                    && selected.Asset.Type == AssetTypes.Vlog);
+                    && selected.Asset.Type == AssetTypes.Vlog,
+                CooldownAgePreferenceSubstitutionUsed:
+                    preference.CooldownAgePreferredCandidates.Contains(selected),
+                ProjectedVlogOvershootSubstitutionUsed: preference.ProjectedVlogOvershootSubstitutionAvailable
+                    && selected.MusicOriented,
+                LongMusicAirtimeEfficiencySubstitutionUsed:
+                    preference.LongMusicAirtimeEfficiencySubstitutionAvailable
+                    && preference.AirtimeEfficientFullCandidates.Contains(selected));
         }
 
         CandidateEvaluation[] emergencyVlogRun = candidates
@@ -360,37 +395,49 @@ public sealed class PlaylistGenerator
         IReadOnlyCollection<CandidateEvaluation> available,
         IReadOnlyCollection<CandidateEvaluation> allCandidates,
         int stage,
-        bool vlogAtOrAboveTarget)
+        bool vlogAtOrAboveTarget,
+        bool musicBelowCombinedTarget)
     {
         CandidateEvaluation[] preferred = [.. available];
         bool musicFirstSubstitutionAvailable = false;
-        if (vlogAtOrAboveTarget
+        bool projectedVlogSubstitutionAvailable = false;
+        HashSet<CandidateEvaluation> maturingFullResetCandidates = preferred
+            .Where(candidate => WouldDelayMaturingFullPresentation(candidate, allCandidates))
+            .ToHashSet();
+        if (maturingFullResetCandidates.Count > 0
             && preferred.Any(candidate => candidate.Asset.Type == AssetTypes.Vlog))
         {
-            CandidateEvaluation[] legalMusic = allCandidates
-                .Where(candidate => candidate.MusicOriented
-                    && (stage >= 2 || candidate.ExactAssetAllowed)
-                    && candidate.ContentGroupFloorAllowed
-                    && candidate.VlogWithinNormalLimit)
+            preferred = preferred
+                .Where(candidate => !maturingFullResetCandidates.Contains(candidate))
                 .ToArray();
-            if (legalMusic.Length > 0)
-            {
-                preferred = preferred
-                    .Where(candidate => candidate.Asset.Type != AssetTypes.Vlog)
-                    .Concat(legalMusic)
-                    .Distinct()
-                    .ToArray();
-                musicFirstSubstitutionAvailable = true;
-            }
+        }
+
+        CandidateEvaluation[] legalMusic = allCandidates
+            .Where(candidate => candidate.MusicOriented
+                && IsCandidateLegalAtStage(candidate, stage)
+                && !WouldDelayMaturingFullPresentation(candidate, allCandidates))
+            .ToArray();
+        CandidateEvaluation[] vlogCandidatesToDefer = preferred
+            .Where(candidate => candidate.Asset.Type == AssetTypes.Vlog
+                && (vlogAtOrAboveTarget || candidate.ProjectedVlogOvershoot))
+            .ToArray();
+        if (vlogCandidatesToDefer.Length > 0 && legalMusic.Length > 0)
+        {
+            preferred = preferred
+                .Except(vlogCandidatesToDefer)
+                .Concat(legalMusic)
+                .Distinct()
+                .ToArray();
+            musicFirstSubstitutionAvailable = vlogAtOrAboveTarget;
+            projectedVlogSubstitutionAvailable = !vlogAtOrAboveTarget
+                && vlogCandidatesToDefer.Any(candidate => candidate.ProjectedVlogOvershoot);
         }
 
         CandidateEvaluation[] underTargetFull = allCandidates
             .Where(candidate => candidate.MusicOriented
                 && !candidate.ShortPresentation
                 && candidate.CategoryBelowTarget
-                && (stage >= 2 || candidate.ExactAssetAllowed)
-                && candidate.ContentGroupFloorAllowed
-                && candidate.VlogWithinNormalLimit)
+                && IsCandidateLegalAtStage(candidate, stage))
             .ToArray();
         HashSet<CandidateEvaluation> shortCandidatesToDefer = preferred
             .Where(candidate => candidate.MusicOriented
@@ -398,20 +445,103 @@ public sealed class PlaylistGenerator
                 && (!candidate.CategoryBelowTarget
                     || underTargetFull.Any(full => HasSameContentGroup(full.Asset, candidate.Asset))))
             .ToHashSet();
-        if (underTargetFull.Length > 0 && shortCandidatesToDefer.Count > 0)
+        HashSet<CandidateEvaluation> efficientFullCandidates = [];
+        var efficiencyShortCandidatesToDefer = new HashSet<CandidateEvaluation>();
+        bool efficiencyActive = musicBelowCombinedTarget
+            || vlogAtOrAboveTarget
+            || projectedVlogSubstitutionAvailable;
+        if (efficiencyActive && underTargetFull.Length > 0)
+        {
+            double maximumImprovement = underTargetFull.Max(candidate => candidate.CategoryDeficitImprovement);
+            efficientFullCandidates = underTargetFull
+                .Where(candidate => candidate.CategoryDeficitImprovement >= maximumImprovement - 0.000001)
+                .ToHashSet();
+            foreach (CandidateEvaluation shortCandidate in preferred.Where(candidate =>
+                candidate.MusicOriented
+                && candidate.ShortPresentation
+                && candidate.CategoryDeficitImprovement < maximumImprovement - 0.000001))
+            {
+                shortCandidatesToDefer.Add(shortCandidate);
+                efficiencyShortCandidatesToDefer.Add(shortCandidate);
+            }
+        }
+
+        bool fullPriorityAvailable = underTargetFull.Length > 0 && shortCandidatesToDefer.Count > 0;
+        if (fullPriorityAvailable)
         {
             preferred = preferred
-                .Concat(underTargetFull)
+                .Concat(efficientFullCandidates.Count > 0 ? efficientFullCandidates : underTargetFull)
                 .Distinct()
                 .Where(candidate => !shortCandidatesToDefer.Contains(candidate))
+                .ToArray();
+        }
+
+        var cooldownAgePreferredCandidates = new HashSet<CandidateEvaluation>();
+        var ageRanked = new HashSet<CandidateEvaluation>();
+        foreach (IGrouping<
+            (string Type, bool ShortPresentation, bool CategoryBelowTarget, double RotationWeight),
+            CandidateEvaluation> group
+            in preferred
+                .Where(candidate => candidate.MusicOriented
+                    && !string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId))
+                .GroupBy(candidate => (
+                    candidate.Asset.Type,
+                    candidate.ShortPresentation,
+                    candidate.CategoryBelowTarget,
+                    candidate.RotationWeight)))
+        {
+            DateTimeOffset oldest = group.Min(candidate =>
+                candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue);
+            CandidateEvaluation[] oldestCandidates = group
+                .Where(candidate => (candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue) == oldest)
+                .ToArray();
+            foreach (CandidateEvaluation candidate in oldestCandidates)
+            {
+                ageRanked.Add(candidate);
+            }
+
+            if (oldestCandidates.Length < group.Count())
+            {
+                cooldownAgePreferredCandidates.UnionWith(oldestCandidates);
+            }
+        }
+
+        if (ageRanked.Count > 0)
+        {
+            preferred = preferred
+                .Where(candidate => !candidate.MusicOriented
+                    || string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId)
+                    || ageRanked.Contains(candidate))
                 .ToArray();
         }
 
         return new CandidatePreference(
             preferred,
             musicFirstSubstitutionAvailable,
-            underTargetFull.Length > 0 && shortCandidatesToDefer.Count > 0);
+            fullPriorityAvailable,
+            projectedVlogSubstitutionAvailable,
+            cooldownAgePreferredCandidates,
+            efficientFullCandidates,
+            efficientFullCandidates.Count > 0 && efficiencyShortCandidatesToDefer.Count > 0);
     }
+
+    private static bool IsCandidateLegalAtStage(CandidateEvaluation candidate, int stage) =>
+        (stage >= 2 || candidate.ExactAssetAllowed)
+        && candidate.ContentGroupFloorAllowed
+        && candidate.VlogWithinNormalLimit;
+
+    private static bool WouldDelayMaturingFullPresentation(
+        CandidateEvaluation candidate,
+        IReadOnlyCollection<CandidateEvaluation> allCandidates) =>
+        candidate.MusicOriented
+        && candidate.ShortPresentation
+        && !candidate.ContentGroupPreferred
+        && allCandidates.Any(full => full.MusicOriented
+            && !full.ShortPresentation
+            && full.CategoryBelowTarget
+            && full.ExactAssetAllowed
+            && !full.ContentGroupFloorAllowed
+            && HasSameContentGroup(full.Asset, candidate.Asset));
 
     private static bool HasSameContentGroup(PlaylistAsset first, PlaylistAsset second) =>
         !string.IsNullOrWhiteSpace(first.ContentGroupId)
@@ -550,8 +680,8 @@ public sealed class PlaylistGenerator
             return false;
         }
 
-        double totalTarget = policy.CategoryAirtimeTargets.Values.Where(value => value > 0).Sum();
-        double totalAirtime = policy.CategoryAirtimeTargets.Keys.Sum(state.GetAirtimeSeconds);
+        double totalTarget = GetTotalTargetWeight(policy);
+        double totalAirtime = GetTotalTargetedAirtime(state, policy);
         if (totalTarget <= 0 || totalAirtime <= 0)
         {
             return true;
@@ -562,13 +692,92 @@ public sealed class PlaylistGenerator
         return actualShare < desiredShare - 0.000001;
     }
 
+    private static double GetCategoryDeficitImprovement(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy)
+    {
+        if (!policy.CategoryAirtimeTargets.TryGetValue(asset.Type, out double target) || target <= 0)
+        {
+            return 0;
+        }
+
+        double totalTarget = GetTotalTargetWeight(policy);
+        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        if (totalTarget <= 0)
+        {
+            return 0;
+        }
+
+        double desiredShare = target / totalTarget;
+        double currentShare = totalAirtime <= 0
+            ? 0
+            : state.GetAirtimeSeconds(asset.Type) / totalAirtime;
+        double projectedShare = (state.GetAirtimeSeconds(asset.Type) + asset.DurationSeconds)
+            / (totalAirtime + asset.DurationSeconds);
+        return Math.Max(0, desiredShare - currentShare)
+            - Math.Max(0, desiredShare - projectedShare);
+    }
+
+    private static bool IsMusicBelowCombinedTarget(SchedulerState state, PlaylistPolicy policy)
+    {
+        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        if (totalAirtime <= 0)
+        {
+            return true;
+        }
+
+        double totalTarget = GetTotalTargetWeight(policy);
+        double musicTarget = policy.CategoryAirtimeTargets
+            .Where(item => policy.MusicOrientedNormalTypes.Contains(item.Key))
+            .Sum(item => item.Value);
+        double musicAirtime = policy.MusicOrientedNormalTypes.Sum(state.GetAirtimeSeconds);
+        return totalTarget > 0
+            && musicAirtime / totalAirtime < musicTarget / totalTarget - 0.000001;
+    }
+
+    private static bool WouldMateriallyOvershootVlogTarget(
+        PlaylistAsset asset,
+        SchedulerState state,
+        PlaylistPolicy policy)
+    {
+        if (asset.Type != AssetTypes.Vlog
+            || !policy.CategoryAirtimeTargets.TryGetValue(AssetTypes.Vlog, out double target)
+            || target <= 0)
+        {
+            return false;
+        }
+
+        double totalTarget = GetTotalTargetWeight(policy);
+        double totalAirtime = GetTotalTargetedAirtime(state, policy);
+        if (totalTarget <= 0)
+        {
+            return false;
+        }
+
+        double desiredShare = target / totalTarget;
+        double currentShare = totalAirtime <= 0
+            ? 0
+            : state.GetAirtimeSeconds(AssetTypes.Vlog) / totalAirtime;
+        double projectedShare = (state.GetAirtimeSeconds(AssetTypes.Vlog) + asset.DurationSeconds)
+            / (totalAirtime + asset.DurationSeconds);
+        return currentShare < desiredShare - 0.000001
+            && projectedShare > desiredShare + policy.ProjectedVlogOvershootTolerance;
+    }
+
+    private static double GetTotalTargetWeight(PlaylistPolicy policy) =>
+        policy.CategoryAirtimeTargets.Values.Where(value => value > 0).Sum();
+
+    private static double GetTotalTargetedAirtime(SchedulerState state, PlaylistPolicy policy) =>
+        policy.CategoryAirtimeTargets.Keys.Sum(state.GetAirtimeSeconds);
+
     private static bool IsCategoryAtOrAboveTarget(
         string type,
         SchedulerState state,
         PlaylistPolicy policy) =>
         policy.CategoryAirtimeTargets.TryGetValue(type, out double target)
         && target > 0
-        && policy.CategoryAirtimeTargets.Keys.Sum(state.GetAirtimeSeconds) > 0
+        && GetTotalTargetedAirtime(state, policy) > 0
         && !IsCategoryBelowTarget(type, state, policy);
 
     private static bool IsExactAssetAllowed(
@@ -831,12 +1040,20 @@ public sealed class PlaylistGenerator
         DateTimeOffset? LastAssetPlayedAt,
         bool MusicOriented,
         bool ShortPresentation,
-        bool CategoryBelowTarget);
+        bool CategoryBelowTarget,
+        double CategoryDeficitImprovement,
+        DateTimeOffset? LastContentGroupPlayedAt,
+        bool ProjectedVlogOvershoot,
+        double RotationWeight);
 
     private sealed record CandidatePreference(
         IReadOnlyList<CandidateEvaluation> Candidates,
         bool MusicFirstCategorySubstitutionAvailable,
-        bool FullPresentationPrioritySubstitutionAvailable);
+        bool FullPresentationPrioritySubstitutionAvailable,
+        bool ProjectedVlogOvershootSubstitutionAvailable,
+        IReadOnlySet<CandidateEvaluation> CooldownAgePreferredCandidates,
+        IReadOnlySet<CandidateEvaluation> AirtimeEfficientFullCandidates,
+        bool LongMusicAirtimeEfficiencySubstitutionAvailable);
 
     private sealed record CandidateSelection(
         CandidateEvaluation Candidate,
@@ -844,7 +1061,10 @@ public sealed class PlaylistGenerator
         bool MusicFirstRescueUsed,
         bool MusicFirstCategorySubstitutionUsed = false,
         bool FullPresentationPrioritySubstitutionUsed = false,
-        bool VlogAboveTargetFallbackUsed = false);
+        bool VlogAboveTargetFallbackUsed = false,
+        bool CooldownAgePreferenceSubstitutionUsed = false,
+        bool ProjectedVlogOvershootSubstitutionUsed = false,
+        bool LongMusicAirtimeEfficiencySubstitutionUsed = false);
 
     private sealed class RelaxationCounts
     {
@@ -877,6 +1097,12 @@ public sealed class PlaylistGenerator
         public int FullPresentationPrioritySubstitution { get; set; }
 
         public int VlogAboveTargetFallback { get; set; }
+
+        public int CooldownAgePreferenceSubstitution { get; set; }
+
+        public int ProjectedVlogOvershootSubstitution { get; set; }
+
+        public int LongMusicAirtimeEfficiencySubstitution { get; set; }
 
         public void CountPreferred(GroupPacingKind kind)
         {
@@ -959,6 +1185,12 @@ public sealed class PlaylistGenerator
 
         public DateTimeOffset? GetLastAssetPlay(string assetId) =>
             LastAssetPlay.TryGetValue(assetId, out DateTimeOffset playedAt) ? playedAt : null;
+
+        public DateTimeOffset? GetLastContentGroupPlay(string? contentGroupId) =>
+            !string.IsNullOrWhiteSpace(contentGroupId)
+            && LastContentGroupPresentation.TryGetValue(contentGroupId, out PresentationPlay? play)
+                ? play.PlayedAtUtc
+                : null;
 
         public void Record(PlaylistAsset asset, DateTimeOffset playTime, PlaylistPolicy policy)
         {
