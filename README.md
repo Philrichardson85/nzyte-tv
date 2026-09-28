@@ -1,10 +1,10 @@
 # NZYTE TV
 
-NZYTE TV is the production-validated media-preparation and programming foundation for a future 24/7 prerecorded YouTube broadcast system. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, and builds deterministic playlists. The media-normalization and verification milestone completed production acceptance on a Raspberry Pi 4 with the full 39-video library.
+NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-v0.2A adds the content catalog and programming-metadata foundation. v0.2B adds deterministic, inspectable playlist generation with airtime targets, cooldown history, hot-rotation weighting, and observable rule relaxation. Encoding remains independent from metadata and scheduling: playlist generation uses FFprobe for duration only and never invokes FFmpeg or re-encodes video.
+v0.3.0 adds basic broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, and an environment-supplied RTMP/RTMPS destination. Encoding remains independent from metadata, scheduling, and playback.
 
-Broadcasting/streaming, YouTube integration, services, live playlist watching, and automatic restarts remain out of scope.
+YouTube API integration, services, live playlist watching, queue regeneration, health polling, and automatic restarts remain out of scope.
 
 ## Setup
 
@@ -26,8 +26,9 @@ Related guides:
 
 - [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
 - [Media library and portable-drive workflow](docs/media-library.md)
+- [Broadcasting generated playlists](docs/broadcasting.md)
 
-The current documented release is `v0.2.0`. A tagged release is recommended for a reproducible production or conversion workstation; `main` is the latest development and integration state.
+The current documented release is `v0.3.0`. A tagged release is recommended for a reproducible production workstation; `main` is the latest development and integration state.
 
 ## Verified Raspberry Pi deployment
 
@@ -69,6 +70,7 @@ nzytetv normalize <input> [--overwrite] [--vertical-layout blurred-background]
 nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]
 nzytetv verify <input>
 nzytetv build-playlist <library-root> --catalog <catalog-path> --output <playlist-path> --duration <value> [--seed <integer>] [--history <history-path>] [--dry-run]
+nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]
 nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
 nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
 nzytetv metadata sync <source-root> <library-root>
@@ -129,6 +131,12 @@ Duplicate song titles are supported because relationships use `contentGroupId`, 
 `build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The provisional six-hour default mix is 20% music-video, 15% lyric-video, 15% visualizer, 20% animated-visual, 10% performance, 5% short-form, and 15% vlog by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files. Song-based normal assets at or below 60 seconds (and all short-form assets) use short-presentation pacing: short-to-short prefers 15 minutes with a 10-minute floor, full-to-short prefers 30 minutes with a 20-minute floor, and short-to-full prefers 30 minutes with a 15-minute floor. Full-to-full keeps its established 90/60/45-minute policy.
 
 The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, and single-vlog pacing before relaxing the preferred 90-minute same-song target. A controlled song relaxation may use the 60–90-minute range. Before creating vlog #3, a music-first rescue may use a song in the 45–60-minute range; sub-45-minute repeats and still-unavoidable vlog runs longer than two are explicit emergency violations. Promo, interstitial, and bumper minimum cadence spacing remains a separate eligibility invariant, so these assets cannot become generic fallback filler. Every relaxation, cadence insertion, cadence miss, and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
+
+### Broadcast playback
+
+`broadcast` validates one or more generated schema-version-1 playlists and plays them sequentially from the normalized library. It uses an FFmpeg concat input with real-time pacing, `-c copy`, and FLV output, so playback does not re-encode or filter media. Library-relative paths are resolved safely beneath the supplied root; missing MP4 files, missing technical manifests, traversal attempts, malformed playlists, and invalid sequences prevent broadcast startup.
+
+The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never displayed. `--dry-run` does not require the variable and does not launch FFmpeg. Pressing Ctrl+C cancels and terminates the FFmpeg child process. See [broadcasting.md](docs/broadcasting.md) for setup and usage.
 
 ## Broadcast standard
 
@@ -195,7 +203,7 @@ Three normalized files were then streamed manually from the Pi to YouTube Live w
 2. `Nzyte Vlog Episode 3.mp4`
 3. `Nzyte - American Dreams (Official Video).mp4`
 
-All three displayed with correct audio and aspect ratio, maintained A/V synchronization, ran at approximately `speed=1.00x`, and received YouTube **Excellent** stream health. This validates the prepared-media path through normalization, verification, Raspberry Pi stream-copy, and YouTube ingest. It does not add broadcasting or YouTube integration to the application.
+All three displayed with correct audio and aspect ratio, maintained A/V synchronization, ran at approximately `speed=1.00x`, and received YouTube **Excellent** stream health. This validates the prepared-media path through normalization, verification, Raspberry Pi stream-copy, and YouTube ingest. The `broadcast` command now automates that stream-copy path; YouTube API integration remains out of scope.
 
 ### Live FLV shutdown warning
 
@@ -206,13 +214,13 @@ Failed to update header with correct duration.
 Failed to update header with correct filesize.
 ```
 
-These warnings are harmless in this live-stream shutdown context: a live, non-seekable output cannot have its header rewritten like a completed local file. Future broadcaster commands may use this option to suppress the expected warnings:
+These warnings are harmless in this live-stream shutdown context: a live, non-seekable output cannot have its header rewritten like a completed local file. The broadcaster uses this option to suppress the expected warnings:
 
 ```text
 -flvflags no_duration_filesize
 ```
 
-No broadcaster command is implemented in v0.1.
+The current `broadcast` command automates this validated stream-copy path for generated playlists without adding YouTube API integration.
 
 ## Build, update, and publish
 
@@ -222,7 +230,7 @@ The [workstation setup guide](docs/workstation-setup.md) provides copy/paste Pow
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
 - `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, scheduling policy, cooldowns, relaxation, and playlist/history models. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, read-only playlist library snapshots, duration inspection, and JSON/filesystem adapters.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist library snapshots, duration inspection, and JSON/filesystem adapters.
 
 Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata idempotence, dry-run safety, review, synchronization, rename/rebind, orphan reporting, and playlist eligibility. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
@@ -234,3 +242,4 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Media library and normalization workflow](docs/media-library.md)
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
+- [Broadcasting generated playlists](docs/broadcasting.md)

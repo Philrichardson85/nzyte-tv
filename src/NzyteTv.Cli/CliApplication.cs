@@ -47,6 +47,11 @@ public static class CliApplication
                 return await RunBuildPlaylistAsync(command, playlistAnalyzer, cancellationToken).ConfigureAwait(false);
             }
 
+            if (command.Kind == CommandKind.Broadcast)
+            {
+                return await RunBroadcastAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             var locator = new MediaToolLocator();
             MediaToolPaths tools = await locator.LocateAsync(cancellationToken).ConfigureAwait(false);
             var runner = new ProcessRunner();
@@ -380,6 +385,55 @@ public static class CliApplication
         return 0;
     }
 
+    private static async Task<int> RunBroadcastAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        BroadcastPlan plan = new BroadcastPlanner().CreatePlan(command.PlaylistPaths!, command.Input!);
+        string? destination = BroadcastDestination.Resolve(
+            Environment.GetEnvironmentVariable(BroadcastDestination.DefaultEnvironmentVariable),
+            command.DryRun);
+        string ffmpeg = command.DryRun
+            ? MediaToolLocator.LocateFfmpegOnPath()
+            : await new MediaToolLocator().LocateFfmpegAsync(cancellationToken).ConfigureAwait(false);
+
+        Console.Write(BroadcastSummaryFormatter.Format(plan, destinationConfigured: !command.DryRun));
+        if (!plan.IsReady)
+        {
+            return 1;
+        }
+
+        if (command.DryRun)
+        {
+            Console.WriteLine();
+            Console.WriteLine("DRY RUN: FFmpeg was not launched and no broadcast state was written.");
+            return 0;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Broadcast starting. Press Ctrl+C to stop.");
+        try
+        {
+            BroadcastExecutionResult result = await new FfmpegBroadcaster(ffmpeg, new ProcessRunner())
+                .BroadcastAsync(
+                    plan,
+                    destination!,
+                    line => Console.Error.WriteLine(line),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            Console.WriteLine();
+            Console.WriteLine($"FFmpeg exit status:         {result.FfmpegExitCode}");
+            Console.WriteLine("Broadcast status:           COMPLETED");
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Broadcast status:           CANCELLED");
+            throw;
+        }
+    }
+
     private static void PrintPlaylistSummary(PlaylistBuildResult result)
     {
         PlaylistDocument playlist = result.Generation.Playlist;
@@ -661,7 +715,7 @@ public static class CliApplication
     {
         if (command == CommandKind.RootHelp)
         {
-            Console.WriteLine("NZYTE TV media preparation, programming metadata, and playlist generation");
+            Console.WriteLine("NZYTE TV media preparation, programming, and broadcast automation");
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  nzytetv inspect <input>");
@@ -669,6 +723,7 @@ public static class CliApplication
             Console.WriteLine("  nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]");
             Console.WriteLine("  nzytetv verify <input>");
             Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
+            Console.WriteLine("  nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
             Console.WriteLine();
@@ -705,6 +760,12 @@ public static class CliApplication
                 Console.WriteLine("--seed      Reproduce candidate ordering; omitted uses a UTC daily seed.");
                 Console.WriteLine("--history   Carry cooldown state across playlist boundaries.");
                 Console.WriteLine("--dry-run   Generate and report without writing playlist or history files.");
+                break;
+            case CommandKind.Broadcast:
+                Console.WriteLine("Usage: nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
+                Console.WriteLine("Stream generated playlists sequentially with FFmpeg concat and stream-copy.");
+                Console.WriteLine($"Destination is read from {BroadcastDestination.DefaultEnvironmentVariable} and is never displayed.");
+                Console.WriteLine("--dry-run  Validate playlists, media, manifests, and FFmpeg without requiring a destination or starting FFmpeg.");
                 break;
             case CommandKind.MediaHelp:
                 Console.WriteLine("NZYTE TV portable media-root tools");

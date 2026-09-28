@@ -17,6 +17,7 @@ public enum CommandKind
     MetadataRebind,
     MetadataEdit,
     BuildPlaylist,
+    Broadcast,
     MediaHelp,
     MediaInit,
 }
@@ -35,6 +36,7 @@ public sealed record ParsedCommand(
     TimeSpan? TargetDuration = null,
     int? Seed = null,
     string? HistoryPath = null,
+    IReadOnlyList<string>? PlaylistPaths = null,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
@@ -64,6 +66,11 @@ public static class CommandLineParser
         if (string.Equals(args[0], "build-playlist", StringComparison.OrdinalIgnoreCase))
         {
             return ParseBuildPlaylist(args);
+        }
+
+        if (string.Equals(args[0], "broadcast", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseBroadcast(args);
         }
 
         CommandKind? kind = args[0].ToLowerInvariant() switch
@@ -418,6 +425,66 @@ public static class CommandLineParser
             TargetDuration: targetDuration,
             Seed: seed,
             HistoryPath: historyPath));
+    }
+
+    private static CommandParseResult ParseBroadcast(IReadOnlyList<string> args)
+    {
+        if (args.Count == 2 && IsHelp(args[1]))
+        {
+            return Success(new ParsedCommand(CommandKind.Broadcast, ShowHelp: true));
+        }
+
+        string? libraryRoot = null;
+        bool dryRun = false;
+        bool optionsEnded = false;
+        var playlistPaths = new List<string>();
+        for (int index = 1; index < args.Count; index++)
+        {
+            string argument = args[index];
+            if (!optionsEnded && argument == "--")
+            {
+                optionsEnded = true;
+            }
+            else if (!optionsEnded && argument == "--dry-run")
+            {
+                dryRun = true;
+            }
+            else if (!optionsEnded && argument == "--library")
+            {
+                if (++index >= args.Count
+                    || string.IsNullOrWhiteSpace(args[index])
+                    || args[index].StartsWith("-", StringComparison.Ordinal))
+                {
+                    return Failure("--library requires a library root.");
+                }
+
+                libraryRoot = args[index];
+            }
+            else if (!optionsEnded && argument.StartsWith("-", StringComparison.Ordinal))
+            {
+                return Failure($"Unknown option '{argument}'.");
+            }
+            else
+            {
+                playlistPaths.Add(argument);
+            }
+        }
+
+        if (playlistPaths.Count == 0)
+        {
+            return Failure("The broadcast command requires at least one playlist file.");
+        }
+
+        if (string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            return Failure("The broadcast command requires --library <library-root>.");
+        }
+
+        return Success(new ParsedCommand(
+            CommandKind.Broadcast,
+            Input: libraryRoot,
+            DryRun: dryRun,
+            PlaylistPaths: playlistPaths));
     }
 
     private static bool TryParseDuration(string value, out TimeSpan duration)

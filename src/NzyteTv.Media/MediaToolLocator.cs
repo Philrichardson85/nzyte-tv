@@ -6,6 +6,8 @@ public interface IMediaToolLocator
 {
     Task<MediaToolPaths> LocateAsync(CancellationToken cancellationToken);
 
+    Task<string> LocateFfmpegAsync(CancellationToken cancellationToken);
+
     Task<string> LocateFfprobeAsync(CancellationToken cancellationToken);
 }
 
@@ -47,6 +49,17 @@ public sealed class MediaToolLocator : IMediaToolLocator
         await VerifyStartsAsync(ffprobe, cancellationToken).ConfigureAwait(false);
         return ffprobe;
     }
+
+    public async Task<string> LocateFfmpegAsync(CancellationToken cancellationToken)
+    {
+        string ffmpeg = LocateFfmpegOnPath();
+        await VerifyStartsAsync(ffmpeg, cancellationToken).ConfigureAwait(false);
+        return ffmpeg;
+    }
+
+    public static string LocateFfmpegOnPath() => FindOnPath("ffmpeg")
+        ?? throw new MediaToolNotFoundException(
+            "Required media tool not found on PATH: ffmpeg. Install FFmpeg, then verify with 'ffmpeg -version'.");
 
     public static string? FindOnPath(string executableName)
     {

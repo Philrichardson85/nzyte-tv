@@ -175,6 +175,69 @@ public sealed class CommandLineParserTests
     }
 
     [Fact]
+    public void Parse_BroadcastReturnsPlaylistsInSuppliedOrderAndOptions()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "broadcast",
+            "playlist-01.json",
+            "playlist-02.json",
+            "--library",
+            "/srv/nzyte-tv/library",
+            "--dry-run",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.Broadcast, result.Command!.Kind);
+        Assert.Equal(["playlist-01.json", "playlist-02.json"], result.Command.PlaylistPaths);
+        Assert.Equal("/srv/nzyte-tv/library", result.Command.Input);
+        Assert.True(result.Command.DryRun);
+    }
+
+    [Fact]
+    public void Parse_BroadcastRequiresPlaylistAndLibrary()
+    {
+        CommandParseResult noPlaylist = CommandLineParser.Parse([
+            "broadcast", "--library", "library",
+        ]);
+        CommandParseResult noLibrary = CommandLineParser.Parse([
+            "broadcast", "playlist.json",
+        ]);
+
+        Assert.False(noPlaylist.IsSuccess);
+        Assert.Contains("playlist", noPlaylist.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(noLibrary.IsSuccess);
+        Assert.Contains("--library", noLibrary.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_BroadcastHelpIsSupported()
+    {
+        CommandParseResult result = CommandLineParser.Parse(["broadcast", "--help"]);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Command!.ShowHelp);
+        Assert.Equal(CommandKind.Broadcast, result.Command.Kind);
+    }
+
+    [Fact]
+    public void BroadcastSummary_ReportsDestinationConfigurationWithoutSecretValue()
+    {
+        const string secretDestination = "rtmps://example.invalid/live2/SECRET-KEY";
+        var plan = new BroadcastPlan(
+            "/srv/nzyte-tv/library",
+            ["playlist.json"],
+            [new BroadcastPlanItem("playlist.json", 1, "asset", "asset.mp4", "/library/asset.mp4", 60)],
+            [],
+            1,
+            60);
+
+        string summary = BroadcastSummaryFormatter.Format(plan, destinationConfigured: true);
+
+        Assert.Contains("Destination configured:     YES", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretDestination, summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Parse_MetadataInitialize_ReturnsRootsCatalogAndDryRun()
     {
         CommandParseResult result = CommandLineParser.Parse([
