@@ -97,8 +97,6 @@ public static class BroadcastDestination
     }
 }
 
-public sealed record BroadcastExecutionResult(int FfmpegExitCode);
-
 public sealed record BroadcastAttemptResult(
     int FfmpegExitCode,
     TimeSpan? OutputTime,
@@ -167,25 +165,6 @@ public sealed class FfmpegBroadcaster
         _processRunner = processRunner;
     }
 
-    public async Task<BroadcastExecutionResult> BroadcastAsync(
-        BroadcastPlan plan,
-        string destination,
-        Action<string>? onOutput,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
-        if (!plan.IsReady)
-        {
-            throw new InvalidOperationException("Broadcast plan is not ready.");
-        }
-
-        BroadcastAttemptResult result = await BroadcastAttemptAsync(
-            plan, destination, 0, onOutput, onProgress: null, cancellationToken).ConfigureAwait(false);
-        if (result.FfmpegExitCode != 0) throw new BroadcastProcessException(result.FfmpegExitCode);
-        return new BroadcastExecutionResult(result.FfmpegExitCode);
-    }
-
     public async Task<BroadcastAttemptResult> BroadcastAttemptAsync(
         BroadcastPlan plan,
         string destination,
@@ -224,6 +203,9 @@ public sealed class FfmpegBroadcaster
             }
             ProcessResult result = await _processRunner.RunAsync(new ProcessRequest(
                 _ffmpegPath, arguments, HandleOutput, HandleOutput), cancellationToken).ConfigureAwait(false);
+            // Only the parent cancellation state makes this a cancellation. In particular,
+            // FFmpeg exit 255 without a requested token is an unexpected child failure.
+            cancellationToken.ThrowIfCancellationRequested();
             string diagnostic = string.Join(Environment.NewLine, diagnostics);
             if (string.IsNullOrWhiteSpace(diagnostic)) diagnostic = Redact(result.StandardError, destination);
             return new BroadcastAttemptResult(result.ExitCode, latestOutputTime, diagnostic, startItemIndex);
@@ -236,15 +218,4 @@ public sealed class FfmpegBroadcaster
 
     private static string Redact(string value, string secret) =>
         value.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
-}
-
-public sealed class BroadcastProcessException : InvalidOperationException
-{
-    public BroadcastProcessException(int exitCode)
-        : base($"FFmpeg broadcast exited with status {exitCode}.")
-    {
-        ExitCode = exitCode;
-    }
-
-    public int ExitCode { get; }
 }

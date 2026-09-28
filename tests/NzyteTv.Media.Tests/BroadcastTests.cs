@@ -219,35 +219,34 @@ public sealed class BroadcastTests
     }
 
     [Fact]
-    public async Task BroadcastAsync_NonzeroExitPropagatesCleansTempFileAndRedactsDestination()
+    public async Task BroadcastAttemptAsync_NonzeroExitReturnsAttemptCleansTempFileAndRedactsDestination()
     {
         using var fixture = new BroadcastFixture();
         BroadcastPlan plan = fixture.ReadyPlan();
         var runner = new RecordingRunner(exitCode: 7, emittedLine: $"Failed to connect to {Destination}");
         var output = new List<string>();
 
-        BroadcastProcessException exception = await Assert.ThrowsAsync<BroadcastProcessException>(() =>
-            new FfmpegBroadcaster("ffmpeg", runner).BroadcastAsync(
-                plan, Destination, output.Add, CancellationToken.None));
+        BroadcastAttemptResult result = await new FfmpegBroadcaster("ffmpeg", runner).BroadcastAttemptAsync(
+            plan, Destination, 0, output.Add, onProgress: null, CancellationToken.None);
 
-        Assert.Equal(7, exception.ExitCode);
+        Assert.Equal(7, result.FfmpegExitCode);
         Assert.NotNull(runner.ConcatPath);
         Assert.False(File.Exists(runner.ConcatPath));
         Assert.DoesNotContain(Destination, string.Join(Environment.NewLine, output), StringComparison.Ordinal);
         Assert.Contains(output, line => line.Contains("[REDACTED]", StringComparison.Ordinal));
-        Assert.DoesNotContain(Destination, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Destination, result.Diagnostic, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task BroadcastAsync_CancellationReachesRunnerAndCleansTempFile()
+    public async Task BroadcastAttemptAsync_CancellationReachesRunnerAndCleansTempFile()
     {
         using var fixture = new BroadcastFixture();
         BroadcastPlan plan = fixture.ReadyPlan();
         var runner = new CancelAwareRunner();
         using var cancellation = new CancellationTokenSource();
 
-        Task action = new FfmpegBroadcaster("ffmpeg", runner).BroadcastAsync(
-            plan, Destination, onOutput: null, cancellation.Token);
+        Task action = new FfmpegBroadcaster("ffmpeg", runner).BroadcastAttemptAsync(
+            plan, Destination, 0, onOutput: null, onProgress: null, cancellation.Token);
         await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 

@@ -1,3 +1,5 @@
+using NzyteTv.Core;
+
 namespace NzyteTv.Media.Tests;
 
 public sealed class BroadcastRecoveryTests
@@ -24,5 +26,141 @@ public sealed class BroadcastRecoveryTests
     public void FailureClassifier_NeverRetriesCancellation()
     {
         Assert.Equal(BroadcastFailureKind.Cancelled, BroadcastFailureClassifier.Classify(152, "Broken pipe", true));
+    }
+
+    [Fact]
+    public void FailureClassifier_Exit255DependsOnParentCancellationState()
+    {
+        Assert.Equal(BroadcastFailureKind.Ambiguous, BroadcastFailureClassifier.Classify(255, string.Empty, false));
+        Assert.Equal(BroadcastFailureKind.Cancelled, BroadcastFailureClassifier.Classify(255, string.Empty, true));
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_Exit255WithoutCancellationRestartsInterruptedItemOnce()
+    {
+        using var fixture = new RecoveryFixture();
+        var process = new SequencedRunner(
+            new Step(255, TimeSpan.FromSeconds(15), "Terminated"),
+            new Step(0, null, null));
+        var updates = new List<BroadcastRecoveryUpdate>();
+        var recovery = CreateRecovery(process, maxRetries: 10);
+
+        BroadcastRecoveryResult result = await recovery.RunAsync(
+            fixture.Plan, Destination, null, updates.Add, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(2, process.InvocationCount);
+        Assert.Contains(updates, update => update.Message == "Broadcast connection interrupted." && update.Attempt == 1);
+        Assert.Contains(updates, update => update.Message == "Broadcast connection restored.");
+        Assert.Contains(ConcatPath(fixture.Paths[0]), process.ConcatContents[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(ConcatPath(fixture.Paths[0]), process.ConcatContents[1], StringComparison.Ordinal);
+        Assert.Contains(ConcatPath(fixture.Paths[1]), process.ConcatContents[1], StringComparison.Ordinal);
+        Assert.Contains(ConcatPath(fixture.Paths[2]), process.ConcatContents[1], StringComparison.Ordinal);
+        Assert.Equal(2, result.LastItem!.Sequence);
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_Exit255WithCancellationDoesNotRetry()
+    {
+        using var fixture = new RecoveryFixture();
+        using var cancellation = new CancellationTokenSource();
+        var process = new SequencedRunner(new Step(255, TimeSpan.FromSeconds(1), null, cancellation.Cancel));
+        var recovery = CreateRecovery(process, maxRetries: 10);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recovery.RunAsync(
+            fixture.Plan, Destination, null, null, cancellation.Token));
+
+        Assert.Equal(1, process.InvocationCount);
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_AmbiguousExitOneUsesBoundedRetryBudget()
+    {
+        using var fixture = new RecoveryFixture();
+        var process = new SequencedRunner(new Step(1, null, "unexpected"), new Step(1, null, "unexpected"));
+        var recovery = CreateRecovery(process, maxRetries: 1);
+
+        BroadcastRecoveryResult result = await recovery.RunAsync(
+            fixture.Plan, Destination, null, null, CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, result.Attempts);
+        Assert.Equal(2, process.InvocationCount);
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_RedactsDestinationAcrossRetry()
+    {
+        using var fixture = new RecoveryFixture();
+        var process = new SequencedRunner(
+            new Step(255, TimeSpan.FromSeconds(1), $"output failed for {Destination}"),
+            new Step(0, null, null));
+        var output = new List<string>();
+
+        await CreateRecovery(process, maxRetries: 1).RunAsync(
+            fixture.Plan, Destination, output.Add, null, CancellationToken.None);
+
+        string combined = string.Join(Environment.NewLine, output);
+        Assert.DoesNotContain(Destination, combined, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", combined, StringComparison.Ordinal);
+    }
+
+    private const string Destination = "rtmps://example.invalid/live2/SECRET-KEY";
+
+    private static BroadcastRecoveryRunner CreateRecovery(IProcessRunner process, int maxRetries) => new(
+        new FfmpegBroadcaster("ffmpeg", process),
+        new BroadcastRecoveryPolicy(maxRetries, MaximumDelay: TimeSpan.Zero));
+
+    private static string ConcatPath(string path) => Path.GetFullPath(path).Replace('\\', '/');
+
+    private sealed record Step(int ExitCode, TimeSpan? Progress, string? Diagnostic, Action? BeforeReturn = null);
+
+    private sealed class SequencedRunner(params Step[] steps) : IProcessRunner
+    {
+        private readonly Queue<Step> _steps = new(steps);
+
+        public int InvocationCount { get; private set; }
+
+        public List<string> ConcatContents { get; } = [];
+
+        public Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InvocationCount++;
+            int inputIndex = request.Arguments.ToList().IndexOf("-i");
+            ConcatContents.Add(File.ReadAllText(request.Arguments[inputIndex + 1]));
+            Step step = _steps.Dequeue();
+            if (step.Progress is not null)
+            {
+                request.OnStandardOutput?.Invoke($"out_time_us={(long)(step.Progress.Value.TotalMilliseconds * 1000)}");
+            }
+            if (step.Diagnostic is not null) request.OnStandardError?.Invoke(step.Diagnostic);
+            step.BeforeReturn?.Invoke();
+            return Task.FromResult(new ProcessResult(step.ExitCode, string.Empty, step.Diagnostic ?? string.Empty));
+        }
+    }
+
+    private sealed class RecoveryFixture : IDisposable
+    {
+        private readonly string _root = Directory.CreateTempSubdirectory("nzytetv-recovery-").FullName;
+
+        public RecoveryFixture()
+        {
+            Paths = Enumerable.Range(1, 3).Select(index => Path.Combine(_root, $"item-{index}.mp4")).ToArray();
+            foreach (string path in Paths) File.WriteAllText(path, "media");
+            BroadcastPlanItem[] items =
+            [
+                new("playlist-01.json", 1, "asset-1", "item-1.mp4", Paths[0], 10, "One"),
+                new("playlist-01.json", 2, "asset-2", "item-2.mp4", Paths[1], 20, "Two"),
+                new("playlist-02.json", 1, "asset-3", "item-3.mp4", Paths[2], 30, "Three"),
+            ];
+            Plan = new BroadcastPlan(_root, ["playlist-01.json", "playlist-02.json"], items, [], 3, 60);
+        }
+
+        public string[] Paths { get; }
+
+        public BroadcastPlan Plan { get; }
+
+        public void Dispose() => Directory.Delete(_root, recursive: true);
     }
 }
