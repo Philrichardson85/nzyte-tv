@@ -41,7 +41,35 @@ else
 fi
 ```
 
-Never run `echo "$NZYTE_TV_RTMP_URL"`. The command reports only whether a destination is configured and never displays its value. Run `unset NZYTE_TV_RTMP_URL` when the manual session is finished. A future supervised service should use service-level secret handling.
+Never print the value of `NZYTE_TV_RTMP_URL`. The check above reports only whether a destination is configured. Run `unset NZYTE_TV_RTMP_URL` when the manual session is finished. A future supervised service should use service-level secret handling.
+
+### Process-list safety
+
+NZYTE TV redacts the RTMP/RTMPS destination from its application logs, but FFmpeg receives that destination as a process argument. A process command-line display can therefore expose the stream credential. Do not display FFmpeg command lines or print the destination variable while operating a live destination.
+
+Use these safe checks instead:
+
+```bash
+pgrep -x ffmpeg
+pgrep -x -c ffmpeg
+```
+
+`pgrep -x ffmpeg` prints only matching PID(s). `pgrep -x -c ffmpeg` prints only the count.
+
+### Refresh a changed YouTube destination
+
+Environment values are inherited when the broadcaster process starts. Changing `NZYTE_TV_RTMP_URL` in another shell does not update an already-running broadcaster. If YouTube changes the RTMPS destination or token, stop the broadcaster cleanly with Ctrl+C, then refresh the value in the shell that will start the replacement process:
+
+```bash
+unset NZYTE_TV_RTMP_URL
+read -rsp "Paste full YouTube RTMPS URL: " NZYTE_TV_RTMP_URL
+echo
+export NZYTE_TV_RTMP_URL
+
+/opt/nzyte-tv/app/nzytetv broadcast ...
+```
+
+Use `unset` when appropriate to clear an old shell value. Never include a real destination or stream key in a command, log, or screenshot.
 
 ## Validate without broadcasting
 
@@ -78,20 +106,20 @@ Press Ctrl+C to cancel. NZYTE TV cancels the child process, terminates its proce
 
 ## RTMPS recovery
 
-NZYTE TV watches FFmpeg's machine-readable `-progress pipe:1` output while it streams. If FFmpeg exits unexpectedly because of an output/network problem (for example connection reset, broken pipe, timeout, refusal, or a temporary network failure), it creates a fresh concat file and reconnects automatically. The retry delays are 2, 5, 10, 20, 30, then 60 seconds, with at most 10 consecutive recovery attempts.
+NZYTE TV watches FFmpeg's machine-readable `-progress pipe:1` output while it streams. An unexpected FFmpeg/RTMPS termination enters bounded recovery: it creates a fresh concat file and reconnects automatically. The retry delays are 2, 5, 10, 20, 30, then up to 60 seconds, with at most 10 consecutive recovery attempts.
 
 Recovery starts at the beginning of the interrupted item. It does not attempt unsafe mid-GOP seeking, and it never restarts the entire supplied queue from item 1: items already reported complete are omitted from the retry concat input. This runtime position is held only in the broadcaster process; it never changes playlist JSON or `history.json`.
 
 This behavior was added after a Raspberry Pi 4 acceptance stream ran for approximately 2 hours 45 minutes at real-time speed before the remote RTMPS peer reset the connection. Post-failure Pi and external-media checks remained healthy. That is historical acceptance evidence, not a standing operational requirement.
 
-After an FFmpeg session streams for five minutes, the consecutive-retry budget resets. Ctrl+C stops either FFmpeg or an in-progress retry delay promptly. If the budget is exhausted, the command exits nonzero with the last active item and a sanitized FFmpeg diagnostic. The RTMP/RTMPS destination remains redacted in all forwarded diagnostics.
+After five minutes of healthy streaming, the consecutive-recovery budget resets. Ctrl+C from the parent broadcaster is intentional cancellation, so it stops either FFmpeg or an in-progress retry delay promptly and does not trigger recovery. If the budget is exhausted, the command exits nonzero with the last active item and a sanitized FFmpeg diagnostic. The RTMP/RTMPS destination remains redacted in all forwarded diagnostics. Playlist history is not rewritten during broadcaster recovery.
 
 Verify that FFmpeg stopped:
 
 Bash:
 
 ```bash
-pgrep -a ffmpeg
+pgrep -x ffmpeg
 ```
 
 No output means no FFmpeg process remains. Do not use `kill -9` as the normal stop method.
@@ -107,7 +135,7 @@ At startup, `broadcast` validates the exact playlist files named on its command 
 - a newly generated playlist does not replace or extend the active queue; and
 - an active library file must not be replaced, moved, or removed while FFmpeg may read it.
 
-If the single production USB must leave the Pi, attach to tmux, press Ctrl+C, and verify `pgrep -a ffmpeg` prints nothing. Then unmount it with `sudo umount /srv/nzyte-tv/media` and check with `findmnt /srv/nzyte-tv/media`. An `autofs`/`systemd-1` trigger may remain visible, but the real exFAT filesystem must not remain mounted. Do not access the mountpoint again before unplugging it.
+If the single production USB must leave the Pi, attach to tmux, press Ctrl+C, and verify `pgrep -x ffmpeg` prints nothing. Then unmount it with `sudo umount /srv/nzyte-tv/media` and check with `findmnt /srv/nzyte-tv/media`. An `autofs`/`systemd-1` trigger may remain visible, but the real exFAT filesystem must not remain mounted. Do not access the mountpoint again before unplugging it.
 
 Normalization and metadata processing do not modify an existing playlist. Generate future playlist JSON with the current `history.json` when new assets should enter rotation. That history is updated during playlist generation and represents planned scheduling; the broadcaster does not update it as each item actually finishes. Stopping midway through planned blocks and regenerating can therefore diverge from what aired. Prefer finishing a block or choosing a deliberate maintenance boundary.
 
@@ -144,3 +172,19 @@ tmux attach -t nzyte-tv
 ```
 
 Attach and press Ctrl+C to stop the broadcaster. tmux protects a manual session from an SSH disconnect; broadcaster recovery separately protects the active connection from transient RTMPS/FFmpeg failures. Neither survives a reboot or replaces supervision. The broadcaster does not generate future playlists, dynamically reload its queue, restart after reboot, call the YouTube API, or monitor remote stream health. The current v0.4-era broadcaster uses the fixed queue supplied at startup.
+
+## Historical v0.4.1 live acceptance evidence
+
+This is historical acceptance evidence, not a permanent operating requirement or a guarantee that every future network failure is recoverable. The accepted Raspberry Pi candidate was freshly published as a self-contained `linux-arm64` build from commit `c23e461` ("Fix broadcast recovery bypass"). The Pi source checkout was explicitly verified at the full commit `c23e46168be883e4e857abda5ee23568dc3b7ba0`, and the candidate was demonstrably different from the previously deployed binary.
+
+During a YouTube RTMPS live run, FFmpeg was deliberately terminated externally twice. NZYTE TV automatically launched a replacement FFmpeg process after each termination. YouTube briefly displayed loading while reconnecting, then resumed playback. The broadcaster remained stable afterward, and the two-playlist queue ran overnight and completed.
+
+The final FFmpeg progress was approximately `out_time=12:00:43`, `bitrate=5833.5 kbits/s`, `speed=1x`, `dup_frames=0`, `drop_frames=0`, and `progress=end`. NZYTE TV reported `Broadcast status: COMPLETED`.
+
+This real-world test validated multi-playlist sequential playback, FFmpeg stream-copy, RTMPS recovery, interrupted-item restart behavior, continued operation after recovery, long-duration stability, and normal completion. The already-published `v0.4.0` tag remains historical at the earlier broadcaster state; the recovery-corrected release is planned as `v0.4.1` after acceptance and documentation are complete. This note does not change tags or rewrite release history.
+
+### Observed YouTube bitrate advisory
+
+During this long-duration test, YouTube Studio at one point displayed a low-bitrate advisory of about `2812 Kbps` and recommended a higher ingest bitrate. Playback remained operational; the later/final FFmpeg output averaged approximately `5833.5 kbits/s` at `speed=1x`, with zero duplicate and dropped frames. The approximately 12-hour queue completed normally, and visual inspection on a large television showed no obvious quality problem.
+
+The current decision is to **keep the existing normalization/broadcast profile for now**. This was an observed advisory, not a broadcaster failure; it does not establish that the current profile exactly meets every YouTube recommendation. Any future profile change should be evidence-driven by visible compression artifacts, sustained poor stream health, or another operational reason.

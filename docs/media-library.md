@@ -220,12 +220,12 @@ Bash:
 ```bash
 tmux attach -t nzyte-tv
 # Press Ctrl+C inside tmux, then run:
-pgrep -a ffmpeg
+pgrep -x ffmpeg
 sudo umount /srv/nzyte-tv/media
 findmnt /srv/nzyte-tv/media
 ```
 
-`pgrep` should print nothing. With systemd automount, `findmnt` may still show an `autofs`/`systemd-1` trigger, but the real exFAT filesystem must not remain actively mounted. Do not access the mountpoint again before removal because doing so may remount it. Never unplug a mounted or in-use production USB.
+`pgrep -x ffmpeg` should print nothing. It prints only matching PID(s), not FFmpeg command arguments that could contain the RTMPS destination credential. With systemd automount, `findmnt` may still show an `autofs`/`systemd-1` trigger, but the real exFAT filesystem must not remain actively mounted. Do not access the mountpoint again before removal because doing so may remount it. Never unplug a mounted or in-use production USB.
 
 On Windows, find the current drive letter, copy masters into `<drive>:\source\<category>\`, and normalize through NZYTE TV rather than manually populating `library/`:
 
