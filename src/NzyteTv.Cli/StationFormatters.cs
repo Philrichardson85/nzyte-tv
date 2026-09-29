@@ -106,6 +106,26 @@ public static class StationFormatters
         output.AppendLine($"  Playlists:          {state.TotalPlaylistCount}");
         output.AppendLine($"  Queued after current: {state.QueuedPlaylistCount}");
         output.AppendLine();
+        output.AppendLine("Persistence:");
+        output.AppendLine($"  State schema:       {state.SchemaVersion}");
+        if (state.SchemaVersion == StationRuntimeState.CurrentSchemaVersion)
+        {
+            output.AppendLine($"  Start mode:         {state.LastStartMode?.ToString().ToUpperInvariant() ?? "UNKNOWN"}");
+            output.AppendLine($"  Resume count:       {state.ResumeCount}");
+            if (state.LastResumeAtUtc is DateTimeOffset lastResumeAt)
+            {
+                output.AppendLine($"  Last resume:        {FormatTimestamp(lastResumeAt)}");
+            }
+
+            output.AppendLine($"  Last completed:     {FormatQueuePosition(state, state.LastCompletedGlobalIndex)}");
+            output.AppendLine($"  Resume position:    {FormatQueuePosition(state, state.ResumeGlobalIndex)}");
+        }
+        else
+        {
+            output.AppendLine("  Durable resume:     NOT AVAILABLE (schema 1)");
+        }
+
+        output.AppendLine();
         output.AppendLine("YouTube monitoring:   NOT CONFIGURED");
         if (!string.IsNullOrWhiteSpace(state.LastError))
         {
@@ -125,4 +145,21 @@ public static class StationFormatters
         BroadcastDestinationStatus.Invalid => "CONFIGURED / INVALID",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown destination status."),
     };
+
+    private static string FormatQueuePosition(StationRuntimeState state, int? globalIndex)
+    {
+        if (globalIndex is not int index)
+        {
+            return "NONE";
+        }
+
+        if (state.CurrentGlobalIndex == index
+            && state.CurrentSequence is int sequence
+            && !string.IsNullOrWhiteSpace(state.CurrentPlaylist))
+        {
+            return $"{Path.GetFileName(state.CurrentPlaylist)} sequence {sequence}";
+        }
+
+        return $"global item {index + 1}";
+    }
 }

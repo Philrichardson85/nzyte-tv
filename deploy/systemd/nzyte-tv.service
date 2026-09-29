@@ -12,6 +12,7 @@ EnvironmentFile=/etc/nzyte-tv/secrets.env
 ExecStart=/opt/nzyte-tv/app/nzytetv station run --config /etc/nzyte-tv/station.json
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=78
 StateDirectory=nzyte-tv
 StateDirectoryMode=0750
 UMask=0027

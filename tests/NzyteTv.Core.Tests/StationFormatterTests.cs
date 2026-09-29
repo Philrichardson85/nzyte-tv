@@ -99,6 +99,14 @@ public sealed class StationFormatterTests
             TotalPlaylistCount = 2,
             QueuedPlaylistCount = 1,
             LastError = $"output failed for {Secret}",
+            QueueId = new string('a', 64),
+            QueueItemCount = 325,
+            CurrentGlobalIndex = 136,
+            LastCompletedGlobalIndex = 135,
+            ResumeGlobalIndex = 136,
+            LastStartMode = StationStartMode.Resume,
+            ResumeCount = 1,
+            LastResumeAtUtc = now - TimeSpan.FromMinutes(2),
         };
         var snapshot = new StationStatusSnapshot(
             state,
@@ -116,9 +124,46 @@ public sealed class StationFormatterTests
         Assert.Contains("137 / 325", output, StringComparison.Ordinal);
         Assert.Contains("Pray", output, StringComparison.Ordinal);
         Assert.Contains("PID:                4219", output, StringComparison.Ordinal);
+        Assert.Contains("State schema:       2", output, StringComparison.Ordinal);
+        Assert.Contains("Start mode:         RESUME", output, StringComparison.Ordinal);
+        Assert.Contains("Resume count:       1", output, StringComparison.Ordinal);
+        Assert.Contains("Last completed:     global item 136", output, StringComparison.Ordinal);
+        Assert.Contains("Resume position:    production-01.json sequence 137", output, StringComparison.Ordinal);
         Assert.Contains("YouTube monitoring:   NOT CONFIGURED", output, StringComparison.Ordinal);
         Assert.Contains("Last error:           output failed for [REDACTED]", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(state.QueueId!, output, StringComparison.Ordinal);
         Assert.DoesNotContain(Secret, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Status_SchemaVersionOneExplainsThatDurableResumeIsUnavailable()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var state = new StationRuntimeState
+        {
+            SchemaVersion = StationRuntimeState.LegacySchemaVersion,
+            StationState = StationState.Stopped,
+            BroadcastState = StationBroadcastState.Stopped,
+            StationPid = 100,
+            StartedAtUtc = now,
+            LastHeartbeatUtc = now,
+            MediaRoot = "/media",
+            LibraryRoot = "/library",
+            TotalPlaylistCount = 1,
+            QueuedPlaylistCount = 1,
+        };
+
+        string output = StationFormatters.FormatStatus(new StationStatusSnapshot(
+            state,
+            StationStatusKind.Stopped,
+            false,
+            false,
+            true,
+            true,
+            now));
+
+        Assert.Contains("State schema:       1", output, StringComparison.Ordinal);
+        Assert.Contains("Durable resume:     NOT AVAILABLE (schema 1)", output, StringComparison.Ordinal);
     }
 
     [Fact]

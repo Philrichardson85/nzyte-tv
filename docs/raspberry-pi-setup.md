@@ -529,9 +529,11 @@ The recommended master song catalog path is `/srv/nzyte-tv/catalog/song-catalog.
 
 The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
 
-Checkpoint 1 includes a repository-owned systemd unit and examples under `deploy/`. Follow [Station supervisor and manual systemd operation](station-service.md) to install non-secret configuration, a root-controlled destination environment file, and the unit for manual start/stop. The service uses the current production user `u24` and `Restart=on-failure` so a successfully completed static queue is not replayed automatically.
+Checkpoint 2 uses the repository-owned systemd unit and examples under `deploy/`. Follow [Station supervisor, persistent resume, and systemd operation](station-service.md) to install non-secret configuration, a root-controlled destination environment file, and the unit. The service uses the current production user `u24`, `Restart=on-failure`, and `RestartPreventExitStatus=78`: unexpected runtime failure remains restartable, successful completion is not replayed, and permanent startup/resume-safety errors do not loop.
 
-> **Do not run `systemctl enable nzyte-tv` yet.** Persistent playback resume after a process restart or Pi reboot is not part of Checkpoint 1 and must be accepted in Checkpoint 2 before boot-time enablement.
+Schema-version-2 state preserves a deterministic queue identity and the first item not positively known to have completed. A matching stopped/interrupted queue resumes that item from its beginning; schema-version-1 state starts fresh, stopped state with changed programming starts fresh, and interrupted state with a changed queue refuses to guess.
+
+> **Do not run `systemctl enable nzyte-tv` until Checkpoint 2 Pi acceptance succeeds.** First perform the documented hard parent-crash, clean stop/start, and graceful reboot tests while the service remains disabled. Only then may the operator enable it and run the final automatic boot-resume test. No NZYTE TV code or install step enables the unit.
 
 Inspect a quoted source-master path through the convenience symlink:
 
@@ -680,6 +682,6 @@ The current broadcaster automates this stream-copy path and still never stores o
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
-- Raspberry Pi live acceptance of the new Checkpoint 1 station/systemd supervisor.
-- Persistent playback-position resume after a station-process restart or Pi reboot.
+- Raspberry Pi acceptance of Checkpoint 2 persistent resume: hard parent-process restart, clean stop/start, and graceful reboot while the unit remains disabled.
+- Final operator-controlled `systemctl enable nzyte-tv` and automatic boot-resume acceptance, only after the preceding Checkpoint 2 tests pass.
 - Automatic playlist queue regeneration and remote stream-health monitoring.

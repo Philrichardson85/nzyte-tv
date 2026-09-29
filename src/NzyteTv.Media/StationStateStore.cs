@@ -68,6 +68,8 @@ public interface IStationStateStore
     Task WriteAsync(string path, StationRuntimeState state, CancellationToken cancellationToken);
 
     StationRuntimeState Read(string path);
+
+    StationRuntimeState? ReadIfExists(string path);
 }
 
 public sealed class StationStateStore : IStationStateStore
@@ -130,13 +132,22 @@ public sealed class StationStateStore : IStationStateStore
         return state;
     }
 
+    public StationRuntimeState? ReadIfExists(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return File.Exists(Path.GetFullPath(path)) ? Read(path) : null;
+    }
+
     private static void Validate(StationRuntimeState state, string path)
     {
-        if (state.SchemaVersion != StationRuntimeState.CurrentSchemaVersion)
+        if (state.SchemaVersion is not (
+            StationRuntimeState.LegacySchemaVersion or
+            StationRuntimeState.CurrentSchemaVersion))
         {
             throw new InvalidDataException(
                 $"Unsupported station state schemaVersion {state.SchemaVersion} in '{path}'; " +
-                $"expected {StationRuntimeState.CurrentSchemaVersion}.");
+                $"supported versions are {StationRuntimeState.LegacySchemaVersion} and " +
+                $"{StationRuntimeState.CurrentSchemaVersion}.");
         }
 
         if (state.StationPid <= 0
@@ -152,5 +163,67 @@ public sealed class StationStateStore : IStationStateStore
         {
             throw new InvalidDataException($"Station state contains missing or invalid required values: {path}");
         }
+
+        if (state.SchemaVersion == StationRuntimeState.CurrentSchemaVersion)
+        {
+            ValidateVersionTwo(state, path);
+        }
     }
+
+    private static void ValidateVersionTwo(StationRuntimeState state, string path)
+    {
+        if (!IsSha256(state.QueueId)
+            || state.QueueItemCount is not int queueItemCount
+            || queueItemCount < 1
+            || state.LastStartMode is not StationStartMode startMode
+            || !Enum.IsDefined(startMode)
+            || state.ResumeCount < 0
+            || (startMode == StationStartMode.Resume
+                && (state.ResumeCount < 1 || state.LastResumeAtUtc is null)))
+        {
+            throw new InvalidDataException(
+                $"Station state schemaVersion 2 contains invalid resume metadata: {path}");
+        }
+
+        ValidateIndex(state.CurrentGlobalIndex, queueItemCount, nameof(state.CurrentGlobalIndex), path);
+        ValidateIndex(state.LastCompletedGlobalIndex, queueItemCount, nameof(state.LastCompletedGlobalIndex), path);
+        ValidateIndex(state.ResumeGlobalIndex, queueItemCount, nameof(state.ResumeGlobalIndex), path);
+
+        if (state.ResumeGlobalIndex is int resumeIndex)
+        {
+            int expectedResume = state.LastCompletedGlobalIndex is int lastCompleted
+                ? lastCompleted + 1
+                : 0;
+            if (resumeIndex != expectedResume)
+            {
+                throw new InvalidDataException(
+                    $"Station state contains inconsistent completion and resume positions: {path}");
+            }
+        }
+        else if (state.LastCompletedGlobalIndex != queueItemCount - 1)
+        {
+            throw new InvalidDataException(
+                $"Station state without a resume position must have completed its final queue item: {path}");
+        }
+
+        if (state.StationState == StationState.Completed
+            && (state.ResumeGlobalIndex is not null
+                || state.LastCompletedGlobalIndex != queueItemCount - 1))
+        {
+            throw new InvalidDataException(
+                $"Completed station state contains an incomplete resume position: {path}");
+        }
+    }
+
+    private static void ValidateIndex(int? index, int itemCount, string propertyName, string path)
+    {
+        if (index is < 0 || index >= itemCount)
+        {
+            throw new InvalidDataException(
+                $"Station state property '{propertyName}' is outside the queue bounds: {path}");
+        }
+    }
+
+    private static bool IsSha256(string? value) => value is { Length: 64 }
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }

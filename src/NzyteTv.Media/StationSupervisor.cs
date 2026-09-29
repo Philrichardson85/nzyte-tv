@@ -15,10 +15,33 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
         BroadcastPlan plan,
         int stationPid,
         TimeProvider? timeProvider = null)
+        : this(
+            configuration,
+            plan,
+            stationPid,
+            BroadcastQueueIdentity.Create(plan),
+            new StationStartDecision(StationStartMode.Fresh, 0, null, 0),
+            timeProvider)
+    {
+    }
+
+    public StationRuntimeTracker(
+        StationConfiguration configuration,
+        BroadcastPlan plan,
+        int stationPid,
+        string queueId,
+        StationStartDecision startDecision,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(plan);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queueId);
+        ArgumentNullException.ThrowIfNull(startDecision);
         if (stationPid <= 0) throw new ArgumentOutOfRangeException(nameof(stationPid));
+        if (startDecision.StartItemIndex < 0 || startDecision.StartItemIndex >= plan.Items.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startDecision));
+        }
 
         _plan = plan;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -34,6 +57,14 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
             LibraryRoot = configuration.LibraryRoot,
             QueuedPlaylistCount = configuration.Playlists.Count,
             TotalPlaylistCount = configuration.Playlists.Count,
+            QueueId = queueId,
+            QueueItemCount = plan.Items.Count,
+            CurrentGlobalIndex = startDecision.StartItemIndex,
+            LastCompletedGlobalIndex = startDecision.LastCompletedGlobalIndex,
+            ResumeGlobalIndex = startDecision.StartItemIndex,
+            LastStartMode = startDecision.StartMode,
+            ResumeCount = startDecision.ResumeCount,
+            LastResumeAtUtc = startDecision.StartMode == StationStartMode.Resume ? now : null,
         };
     }
 
@@ -52,8 +83,17 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
         ArgumentNullException.ThrowIfNull(runtimeEvent);
         Update(state => runtimeEvent.Kind switch
         {
-            BroadcastRuntimeEventKind.BroadcastStarted => ApplyItem(state, runtimeEvent.Item),
-            BroadcastRuntimeEventKind.ItemChanged => ApplyItem(state, runtimeEvent.Item),
+            BroadcastRuntimeEventKind.BroadcastStarted => ApplyItem(
+                state,
+                runtimeEvent.Item,
+                runtimeEvent.GlobalItemIndex),
+            BroadcastRuntimeEventKind.ItemChanged => ApplyItem(
+                state,
+                runtimeEvent.Item,
+                runtimeEvent.GlobalItemIndex),
+            BroadcastRuntimeEventKind.ItemCompleted => ApplyCompletion(
+                state,
+                runtimeEvent.GlobalItemIndex),
             BroadcastRuntimeEventKind.FfmpegProcessStarted => state with
             {
                 StationState = StationState.Broadcasting,
@@ -63,19 +103,28 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
             BroadcastRuntimeEventKind.FfmpegProcessStopped => state.FfmpegPid == runtimeEvent.FfmpegPid
                 ? state with { FfmpegPid = null }
                 : state,
-            BroadcastRuntimeEventKind.RecoveryStarted => ApplyItem(state, runtimeEvent.Item) with
+            BroadcastRuntimeEventKind.RecoveryStarted => ApplyItem(
+                state,
+                runtimeEvent.Item,
+                runtimeEvent.GlobalItemIndex) with
             {
                 StationState = StationState.Broadcasting,
                 BroadcastState = StationBroadcastState.Recovering,
                 RecoveryAttempts = runtimeEvent.RecoveryAttempts,
             },
             BroadcastRuntimeEventKind.RecoveryBudgetReset => state with { RecoveryAttempts = 0 },
-            BroadcastRuntimeEventKind.BroadcastCompleted => ApplyItem(state, runtimeEvent.Item) with
+            BroadcastRuntimeEventKind.BroadcastCompleted => ApplyItem(
+                state,
+                runtimeEvent.Item,
+                runtimeEvent.GlobalItemIndex) with
             {
                 FfmpegPid = null,
                 RecoveryAttempts = runtimeEvent.RecoveryAttempts,
             },
-            BroadcastRuntimeEventKind.BroadcastFailed => ApplyItem(state, runtimeEvent.Item) with
+            BroadcastRuntimeEventKind.BroadcastFailed => ApplyItem(
+                state,
+                runtimeEvent.Item,
+                runtimeEvent.GlobalItemIndex) with
             {
                 FfmpegPid = null,
                 RecoveryAttempts = runtimeEvent.RecoveryAttempts,
@@ -112,6 +161,9 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
         QueuedPlaylistCount = 0,
         LastHeartbeatUtc = _timeProvider.GetUtcNow(),
         CompletedAtUtc = _timeProvider.GetUtcNow(),
+        CurrentGlobalIndex = _plan.Items.Count - 1,
+        LastCompletedGlobalIndex = _plan.Items.Count - 1,
+        ResumeGlobalIndex = null,
     });
 
     public void SetFailed(string error) => Update(state => state with
@@ -123,7 +175,10 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
         LastError = error,
     });
 
-    private StationRuntimeState ApplyItem(StationRuntimeState state, BroadcastPlanItem? item)
+    private StationRuntimeState ApplyItem(
+        StationRuntimeState state,
+        BroadcastPlanItem? item,
+        int? globalItemIndex)
     {
         if (item is null)
         {
@@ -131,6 +186,7 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
         }
 
         int playlistIndex = FindPlaylistIndex(item.PlaylistPath);
+        int resolvedGlobalIndex = ResolveGlobalIndex(item, globalItemIndex);
         int itemCount = _plan.Items.Count(candidate => PathsEqual(
             candidate.PlaylistPath,
             item.PlaylistPath));
@@ -143,8 +199,51 @@ public sealed class StationRuntimeTracker : IBroadcastRuntimeObserver
             AssetId = string.IsNullOrWhiteSpace(item.AssetId) ? null : item.AssetId,
             Title = string.IsNullOrWhiteSpace(item.Title) ? null : item.Title,
             Type = string.IsNullOrWhiteSpace(item.Type) ? null : item.Type,
+            CurrentGlobalIndex = resolvedGlobalIndex,
             QueuedPlaylistCount = Math.Max(0, state.TotalPlaylistCount - playlistIndex - 1),
         };
+    }
+
+    private StationRuntimeState ApplyCompletion(StationRuntimeState state, int? globalItemIndex)
+    {
+        if (globalItemIndex is not int completedIndex
+            || completedIndex < 0
+            || completedIndex >= _plan.Items.Count
+            || state.ResumeGlobalIndex != completedIndex)
+        {
+            return state;
+        }
+
+        return state with
+        {
+            LastCompletedGlobalIndex = completedIndex,
+            ResumeGlobalIndex = completedIndex + 1 < _plan.Items.Count
+                ? completedIndex + 1
+                : null,
+        };
+    }
+
+    private int ResolveGlobalIndex(BroadcastPlanItem item, int? suppliedIndex)
+    {
+        if (suppliedIndex is int supplied
+            && supplied >= 0
+            && supplied < _plan.Items.Count
+            && _plan.Items[supplied] == item)
+        {
+            return supplied;
+        }
+
+        for (int index = 0; index < _plan.Items.Count; index++)
+        {
+            BroadcastPlanItem candidate = _plan.Items[index];
+            if (candidate.Sequence == item.Sequence
+                && PathsEqual(candidate.PlaylistPath, item.PlaylistPath))
+            {
+                return index;
+            }
+        }
+
+        throw new InvalidOperationException("Broadcast runtime event item is not in the station queue.");
     }
 
     private int FindPlaylistIndex(string path)
@@ -282,6 +381,7 @@ public interface IStationBroadcastRunner
     Task<BroadcastRecoveryResult> RunAsync(
         BroadcastPlan plan,
         string destination,
+        int startItemIndex,
         Action<string>? onFfmpegOutput,
         Action<BroadcastRecoveryUpdate>? onUpdate,
         IBroadcastRuntimeObserver observer,
@@ -301,12 +401,14 @@ public sealed class ResilientStationBroadcastRunner : IStationBroadcastRunner
     public Task<BroadcastRecoveryResult> RunAsync(
         BroadcastPlan plan,
         string destination,
+        int startItemIndex,
         Action<string>? onFfmpegOutput,
         Action<BroadcastRecoveryUpdate>? onUpdate,
         IBroadcastRuntimeObserver observer,
         CancellationToken cancellationToken) => _recoveryRunner.RunAsync(
             plan,
             destination,
+            startItemIndex,
             onFfmpegOutput,
             onUpdate,
             observer,
@@ -325,13 +427,15 @@ public sealed class StationSupervisor
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _heartbeatInterval;
     private readonly Func<int> _processId;
+    private readonly StationResumePlanner _resumePlanner;
 
     public StationSupervisor(
         IStationBroadcastRunner broadcastRunner,
         IStationStateStore stateStore,
         TimeProvider? timeProvider = null,
         TimeSpan? heartbeatInterval = null,
-        Func<int>? processId = null)
+        Func<int>? processId = null,
+        StationResumePlanner? resumePlanner = null)
     {
         ArgumentNullException.ThrowIfNull(broadcastRunner);
         ArgumentNullException.ThrowIfNull(stateStore);
@@ -345,6 +449,7 @@ public sealed class StationSupervisor
         }
 
         _processId = processId ?? (() => Environment.ProcessId);
+        _resumePlanner = resumePlanner ?? new StationResumePlanner(new ProcessExistence());
     }
 
     public async Task<StationRunResult> RunAsync(
@@ -360,10 +465,33 @@ public sealed class StationSupervisor
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (!plan.IsReady) throw new InvalidOperationException("Station broadcast plan is not ready.");
 
+        using FileStream stationLock = AcquireStationLock(configuration.StatePath);
+        string queueId = BroadcastQueueIdentity.Create(plan);
+        StationRuntimeState? persistedState;
+        try
+        {
+            persistedState = _stateStore.ReadIfExists(configuration.StatePath);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new StationStartupException(
+                $"Persisted station state is invalid and cannot be resumed safely: " +
+                $"{StationSecretRedactor.RedactRtmpUrls(exception.Message)}",
+                exception);
+        }
+
+        int currentProcessId = _processId();
+        StationStartDecision startDecision = _resumePlanner.Decide(
+            persistedState,
+            queueId,
+            plan.Items.Count,
+            currentProcessId);
         var tracker = new StationRuntimeTracker(
             configuration,
             plan,
-            _processId(),
+            currentProcessId,
+            queueId,
+            startDecision,
             _timeProvider);
         await _stateStore.WriteAsync(
             configuration.StatePath,
@@ -388,6 +516,7 @@ public sealed class StationSupervisor
         Task<BroadcastRecoveryResult> broadcastTask = _broadcastRunner.RunAsync(
             plan,
             destination,
+            startDecision.StartItemIndex,
             onFfmpegOutput,
             onUpdate,
             tracker,
@@ -499,4 +628,34 @@ public sealed class StationSupervisor
     private static string Redact(string value, string destination) =>
         StationSecretRedactor.RedactRtmpUrls(
             value.Replace(destination, "[REDACTED]", StringComparison.Ordinal))!;
+
+    private static FileStream AcquireStationLock(string statePath)
+    {
+        string fullStatePath = Path.GetFullPath(statePath);
+        string directory = Path.GetDirectoryName(fullStatePath)
+            ?? throw new StationStartupException("The station state path has no parent directory.");
+        string lockPath = fullStatePath + ".lock";
+        try
+        {
+            Directory.CreateDirectory(directory);
+            return new FileStream(
+                lockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None);
+        }
+        catch (IOException exception)
+        {
+            throw new StationStartupException(
+                "The station state lock is unavailable; another station supervisor may already be using this state path. " +
+                "A second station supervisor was not started.",
+                exception);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new StationStartupException(
+                "The station state lock could not be created with the current permissions.",
+                exception);
+        }
+    }
 }

@@ -52,6 +52,28 @@ public sealed class BroadcastTests
     }
 
     [Fact]
+    public void CreatePlan_QueueIdentityTracksPlaylistContentButNotFileTimestamp()
+    {
+        using var fixture = new BroadcastFixture();
+        fixture.AddReadyMedia("Music Videos/first.mp4");
+        string playlist = fixture.WritePlaylist(
+            "identity.json",
+            Item(1, "Music Videos/first.mp4", 10));
+        var planner = new BroadcastPlanner();
+        BroadcastPlan original = planner.CreatePlan([playlist], fixture.LibraryRoot);
+        string originalId = BroadcastQueueIdentity.Create(original);
+
+        File.SetLastWriteTimeUtc(playlist, DateTime.UtcNow.AddDays(1));
+        BroadcastPlan timestampOnly = planner.CreatePlan([playlist], fixture.LibraryRoot);
+        Assert.Equal(originalId, BroadcastQueueIdentity.Create(timestampOnly));
+
+        File.AppendAllText(playlist, " ");
+        BroadcastPlan contentChanged = planner.CreatePlan([playlist], fixture.LibraryRoot);
+        Assert.NotEqual(originalId, BroadcastQueueIdentity.Create(contentChanged));
+        Assert.Equal(original.Items, contentChanged.Items);
+    }
+
+    [Fact]
     public void CreatePlan_MissingPlaylistIsRejected()
     {
         using var fixture = new BroadcastFixture();
@@ -238,6 +260,7 @@ public sealed class BroadcastTests
         Assert.DoesNotContain("aac", arguments);
         Assert.DoesNotContain("-vf", arguments);
         Assert.DoesNotContain("-filter_complex", arguments);
+        Assert.DoesNotContain("-ss", arguments);
     }
 
     [Fact]

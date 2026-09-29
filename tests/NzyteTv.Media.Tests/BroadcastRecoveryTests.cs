@@ -129,7 +129,11 @@ public sealed class BroadcastRecoveryTests
         Assert.Contains(observer.Events, value =>
             value.Kind == BroadcastRuntimeEventKind.RecoveryStarted
             && value.RecoveryAttempts == 1
-            && value.Item?.Sequence == 2);
+            && value.Item?.Sequence == 2
+            && value.GlobalItemIndex == 1);
+        Assert.Equal([0, 1, 2], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemCompleted)
+            .Select(value => value.GlobalItemIndex));
         Assert.Contains(observer.Events, value => value.Kind == BroadcastRuntimeEventKind.BroadcastCompleted);
     }
 
@@ -154,6 +158,79 @@ public sealed class BroadcastRecoveryTests
         Assert.Equal(["asset-1", "asset-2", "asset-3"], observer.Events
             .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemChanged)
             .Select(value => value.Item!.AssetId));
+        Assert.Equal([0, 1, 2], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemCompleted)
+            .Select(value => value.GlobalItemIndex));
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_ColdResumeUsesOriginalGlobalIndexesAndOmitsEarlierItems()
+    {
+        using var fixture = new RecoveryFixture();
+        var process = new SequencedRunner(new Step(0, null, null));
+        var observer = new RecordingObserver();
+
+        BroadcastRecoveryResult result = await CreateRecovery(process, maxRetries: 1).RunAsync(
+            fixture.Plan,
+            Destination,
+            startItemIndex: 1,
+            onFfmpegOutput: null,
+            onUpdate: null,
+            observer,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain(ConcatPath(fixture.Paths[0]), process.ConcatContents[0], StringComparison.Ordinal);
+        Assert.Contains(ConcatPath(fixture.Paths[1]), process.ConcatContents[0], StringComparison.Ordinal);
+        Assert.Contains(ConcatPath(fixture.Paths[2]), process.ConcatContents[0], StringComparison.Ordinal);
+        Assert.Equal(1, observer.Events.Single(value =>
+            value.Kind == BroadcastRuntimeEventKind.BroadcastStarted).GlobalItemIndex);
+        Assert.Equal([1, 2], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemCompleted)
+            .Select(value => value.GlobalItemIndex));
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_DuplicateProgressDoesNotCompleteAnItemTwice()
+    {
+        using var fixture = new RecoveryFixture();
+        var observer = new RecordingObserver();
+        var recovery = new BroadcastRecoveryRunner(
+            new FfmpegBroadcaster("ffmpeg", new DuplicateProgressRunner()),
+            new BroadcastRecoveryPolicy(MaximumDelay: TimeSpan.Zero));
+
+        await recovery.RunAsync(
+            fixture.Plan,
+            Destination,
+            null,
+            null,
+            observer,
+            CancellationToken.None);
+
+        Assert.Equal([0, 1, 2], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemCompleted)
+            .Select(value => value.GlobalItemIndex));
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_ProgressBeforeBoundaryBiasesTowardReplay()
+    {
+        using var fixture = new RecoveryFixture();
+        var observer = new RecordingObserver();
+        var process = new SequencedRunner(new Step(1, TimeSpan.FromSeconds(9.999), "unexpected"));
+
+        BroadcastRecoveryResult result = await CreateRecovery(process, maxRetries: 0).RunAsync(
+            fixture.Plan,
+            Destination,
+            null,
+            null,
+            observer,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.DoesNotContain(observer.Events, value => value.Kind == BroadcastRuntimeEventKind.ItemCompleted);
+        Assert.Equal(0, observer.Events.Last(value =>
+            value.Kind == BroadcastRuntimeEventKind.BroadcastFailed).GlobalItemIndex);
     }
 
     private const string Destination = "rtmps://example.invalid/live2/SECRET-KEY";
@@ -210,6 +287,20 @@ public sealed class BroadcastRecoveryTests
             request.OnStandardOutput?.Invoke("out_time_us=11000000");
             request.OnStandardOutput?.Invoke("out_time_us=35000000");
             request.OnExited?.Invoke(5001);
+            return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
+        }
+    }
+
+    private sealed class DuplicateProgressRunner : IProcessRunner
+    {
+        public Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken)
+        {
+            request.OnStarted?.Invoke(5002);
+            request.OnStandardOutput?.Invoke("out_time_us=11000000");
+            request.OnStandardOutput?.Invoke("out_time_us=11000000");
+            request.OnStandardOutput?.Invoke("out_time_us=35000000");
+            request.OnStandardOutput?.Invoke("out_time_us=35000000");
+            request.OnExited?.Invoke(5002);
             return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
         }
     }

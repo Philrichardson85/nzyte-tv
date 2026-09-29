@@ -31,6 +31,8 @@ public sealed record BroadcastPlan(
     int ScheduledItemCount,
     double ScheduledDurationSeconds)
 {
+    public IReadOnlyList<string> PlaylistContentHashes { get; init; } = [];
+
     public int PlaylistCount => PlaylistPaths.Count;
 
     public int MissingFileCount => Issues.Count(issue => issue.Kind == BroadcastPlanIssueKind.MissingFile);

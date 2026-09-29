@@ -108,7 +108,7 @@ Press Ctrl+C to cancel. NZYTE TV cancels the child process, terminates its proce
 
 NZYTE TV watches FFmpeg's machine-readable `-progress pipe:1` output while it streams. An unexpected FFmpeg/RTMPS termination enters bounded recovery: it creates a fresh concat file and reconnects automatically. The retry delays are 2, 5, 10, 20, 30, then up to 60 seconds, with at most 10 consecutive recovery attempts.
 
-Recovery starts at the beginning of the interrupted item. It does not attempt unsafe mid-GOP seeking, and it never restarts the entire supplied queue from item 1: items already reported complete are omitted from the retry concat input. This runtime position is held only in the broadcaster process; it never changes playlist JSON or `history.json`.
+Recovery starts at the beginning of the interrupted item. It does not attempt unsafe mid-GOP seeking, and it never restarts the entire supplied queue from item 1: items already reported complete are omitted from the retry concat input. The lower-level `broadcast` command keeps this recovery position only in its process. When wrapped by `station run`, typed completion events also maintain the separate durable station cursor for cold resume. Neither path changes playlist JSON or `history.json`.
 
 This behavior was added after a Raspberry Pi 4 acceptance stream ran for approximately 2 hours 45 minutes at real-time speed before the remote RTMPS peer reset the connection. Post-failure Pi and external-media checks remained healthy. That is historical acceptance evidence, not a standing operational requirement.
 
@@ -173,9 +173,9 @@ tmux attach -t nzyte-tv
 
 Attach and press Ctrl+C to stop the broadcaster. tmux protects a manual session from an SSH disconnect; broadcaster recovery separately protects the active connection from transient RTMPS/FFmpeg failures. Neither survives a reboot or replaces supervision. The broadcaster does not generate future playlists, dynamically reload its queue, restart after reboot, call the YouTube API, or monitor remote stream health. The current v0.4-era broadcaster uses the fixed queue supplied at startup.
 
-## Station supervisor foundation
+## Station supervisor and persistent resume
 
-The lower-level `broadcast` command remains supported. v0.5.0 Checkpoint 1 also provides a station supervisor above this same broadcast path:
+The lower-level `broadcast` command remains supported. v0.5.0 Checkpoint 2 builds durable station resume above this same broadcast path:
 
 ```bash
 nzytetv station validate --config /etc/nzyte-tv/station.json
@@ -183,9 +183,11 @@ nzytetv station run --config /etc/nzyte-tv/station.json
 nzytetv station status
 ```
 
-The supervisor loads non-secret configuration, reuses `BroadcastPlanner` readiness checks and `BroadcastRecoveryRunner`, writes versioned runtime state atomically, records the current item and replacement FFmpeg PID through typed broadcaster events, and updates a heartbeat every 10 seconds. Status treats an active document as stale after 30 seconds without a heartbeat or when the recorded station PID no longer exists. It never displays process command lines and explicitly reports that YouTube monitoring is not configured.
+The supervisor loads non-secret configuration, reuses `BroadcastPlanner` readiness checks and `BroadcastRecoveryRunner`, writes schema-version-2 runtime state atomically, records the current item, positive item completion, and replacement FFmpeg PID through typed broadcaster events, and updates a heartbeat every 10 seconds. Status treats an active document as stale after 30 seconds without a heartbeat or when the recorded station PID no longer exists. It never displays process command lines and explicitly reports that YouTube monitoring is not configured.
 
-The configured playlist queue is fixed for the process lifetime. Successful completion becomes `completed` and exits zero. Ctrl+C or systemd SIGTERM cancels the same existing recovery/FFmpeg process tree and leaves final `stopped` state. This checkpoint does not persist playback position across a full restart, generate future playlists, or provide automatic boot operation. See [Station supervisor and manual systemd operation](station-service.md).
+The configured playlist queue remains fixed. A deterministic SHA-256 queue ID guards a zero-based global item cursor across playlist boundaries. On a matching stopped/interrupted queue, cold startup omits positively completed items and restarts the saved item from its beginning through the existing remaining-plan behavior. Clean Ctrl+C or systemd SIGTERM retains that cursor. A changed stopped queue starts fresh, while a changed interrupted queue refuses unsafe resume. Successful completion clears the resume position and exits zero.
+
+Persistent station resume does not change internal FFmpeg recovery: its bounded retry policy, interrupted-item restart, backoff, healthy-session reset, and cancellation rules remain intact. It also does not generate future playlists, dynamically discover queue files, mutate scheduler history, or enable systemd automatically. See [Station supervisor, persistent resume, and systemd operation](station-service.md).
 
 ## Historical v0.4.1 live acceptance evidence
 

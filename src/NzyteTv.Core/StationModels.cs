@@ -45,7 +45,9 @@ public enum StationBroadcastState
 
 public sealed record StationRuntimeState
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int LegacySchemaVersion = 1;
+
+    public const int CurrentSchemaVersion = 2;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -100,6 +102,28 @@ public sealed record StationRuntimeState
     public DateTimeOffset? StoppedAtUtc { get; init; }
 
     public DateTimeOffset? CompletedAtUtc { get; init; }
+
+    public string? QueueId { get; init; }
+
+    public int? QueueItemCount { get; init; }
+
+    public int? CurrentGlobalIndex { get; init; }
+
+    public int? LastCompletedGlobalIndex { get; init; }
+
+    public int? ResumeGlobalIndex { get; init; }
+
+    public StationStartMode? LastStartMode { get; init; }
+
+    public int ResumeCount { get; init; }
+
+    public DateTimeOffset? LastResumeAtUtc { get; init; }
+}
+
+public enum StationStartMode
+{
+    Fresh,
+    Resume,
 }
 
 public enum StationStatusKind
@@ -131,10 +155,16 @@ public static class StationRuntimePolicy
     public static readonly TimeSpan StaleHeartbeatThreshold = TimeSpan.FromSeconds(30);
 }
 
+public static class StationExitCodes
+{
+    public const int PermanentStartupFailure = 78;
+}
+
 public enum BroadcastRuntimeEventKind
 {
     BroadcastStarted,
     ItemChanged,
+    ItemCompleted,
     FfmpegProcessStarted,
     FfmpegProcessStopped,
     RecoveryStarted,
@@ -147,7 +177,8 @@ public sealed record BroadcastRuntimeEvent(
     BroadcastRuntimeEventKind Kind,
     BroadcastPlanItem? Item = null,
     int? FfmpegPid = null,
-    int RecoveryAttempts = 0);
+    int RecoveryAttempts = 0,
+    int? GlobalItemIndex = null);
 
 public interface IBroadcastRuntimeObserver
 {

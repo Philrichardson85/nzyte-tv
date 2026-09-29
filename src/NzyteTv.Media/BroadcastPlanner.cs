@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using NzyteTv.Core;
 
 namespace NzyteTv.Media;
@@ -33,6 +35,7 @@ public sealed class BroadcastPlanner : IBroadcastPlanner
         }
 
         var resolvedPlaylists = new List<string>(playlistPaths.Count);
+        var playlistContentHashes = new List<string>(playlistPaths.Count);
         var resolvedItems = new List<BroadcastPlanItem>();
         var issues = new List<BroadcastPlanIssue>();
         int scheduledItemCount = 0;
@@ -46,9 +49,10 @@ public sealed class BroadcastPlanner : IBroadcastPlanner
                 throw new FileNotFoundException($"Playlist file not found: {fullPlaylistPath}", fullPlaylistPath);
             }
 
-            BroadcastPlaylistInput playlist = ReadPlaylist(fullPlaylistPath);
+            BroadcastPlaylistInput playlist = ReadPlaylist(fullPlaylistPath, out string contentHash);
             BroadcastPlaylistItemInput[] orderedItems = ValidateAndOrderItems(playlist, fullPlaylistPath);
             resolvedPlaylists.Add(fullPlaylistPath);
+            playlistContentHashes.Add(contentHash);
             scheduledItemCount += orderedItems.Length;
             scheduledDurationSeconds += orderedItems.Sum(item => item.DurationSeconds);
 
@@ -64,15 +68,21 @@ public sealed class BroadcastPlanner : IBroadcastPlanner
             resolvedItems,
             issues,
             scheduledItemCount,
-            scheduledDurationSeconds);
+            scheduledDurationSeconds)
+        {
+            PlaylistContentHashes = playlistContentHashes,
+        };
     }
 
-    private static BroadcastPlaylistInput ReadPlaylist(string playlistPath)
+    private static BroadcastPlaylistInput ReadPlaylist(string playlistPath, out string contentHash)
     {
         try
         {
+            string content = File.ReadAllText(playlistPath);
+            contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)))
+                .ToLowerInvariant();
             BroadcastPlaylistInput? playlist = JsonSerializer.Deserialize<BroadcastPlaylistInput>(
-                File.ReadAllText(playlistPath),
+                content,
                 ReadOptions);
             if (playlist is null)
             {

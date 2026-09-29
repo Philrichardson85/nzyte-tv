@@ -85,6 +85,12 @@ public static class CliApplication
                 _ => 2,
             };
         }
+        catch (StationStartupException exception)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"FAILED: {StationSecretRedactor.RedactRtmpUrls(exception.Message)}");
+            return StationExitCodes.PermanentStartupFailure;
+        }
         catch (OperationCanceledException)
         {
             Console.Error.WriteLine();
@@ -466,12 +472,24 @@ public static class CliApplication
 
         string? configuredDestination = Environment.GetEnvironmentVariable(
             BroadcastDestination.DefaultEnvironmentVariable);
-        var validationService = new StationValidationService(
-            new StationConfigurationLoader(),
-            new BroadcastPlanner());
-        StationValidationResult validation = validationService.Validate(
-            command.ConfigPath!,
-            configuredDestination);
+        StationValidationResult validation;
+        try
+        {
+            var validationService = new StationValidationService(
+                new StationConfigurationLoader(),
+                new BroadcastPlanner());
+            validation = validationService.Validate(
+                command.ConfigPath!,
+                configuredDestination);
+        }
+        catch (Exception exception) when (
+            command.Kind == CommandKind.StationRun
+            && IsPermanentStationConfigurationFailure(exception))
+        {
+            throw new StationStartupException(
+                StationSecretRedactor.RedactRtmpUrls(exception.Message)!,
+                exception);
+        }
 
         if (command.Kind == CommandKind.StationValidate)
         {
@@ -482,14 +500,26 @@ public static class CliApplication
         Console.Write(StationFormatters.FormatValidation(validation));
         if (!validation.IsReady)
         {
-            return 1;
+            return StationExitCodes.PermanentStartupFailure;
         }
 
-        string destination = BroadcastDestination.Resolve(
-            configuredDestination,
-            dryRun: false)!;
-        string ffmpeg = await new MediaToolLocator().LocateFfmpegAsync(cancellationToken)
-            .ConfigureAwait(false);
+        string destination;
+        string ffmpeg;
+        try
+        {
+            destination = BroadcastDestination.Resolve(
+                configuredDestination,
+                dryRun: false)!;
+            ffmpeg = await new MediaToolLocator().LocateFfmpegAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or MediaToolNotFoundException)
+        {
+            throw new StationStartupException(
+                StationSecretRedactor.RedactRtmpUrls(exception.Message)!,
+                exception);
+        }
         var resilientRunner = new ResilientStationBroadcastRunner(
             new BroadcastRecoveryRunner(
                 new FfmpegBroadcaster(ffmpeg, new ProcessRunner())));
@@ -514,6 +544,14 @@ public static class CliApplication
 
         return result.ExitCode;
     }
+
+    private static bool IsPermanentStationConfigurationFailure(Exception exception) => exception is
+        FileNotFoundException or
+        DirectoryNotFoundException or
+        UnauthorizedAccessException or
+        InvalidDataException or
+        InvalidOperationException or
+        MediaToolNotFoundException;
 
     private static void PrintBroadcastRecoveryUpdate(BroadcastRecoveryUpdate update)
     {
@@ -893,21 +931,22 @@ public static class CliApplication
                 Console.WriteLine("  nzytetv station run --config <station.json>");
                 Console.WriteLine($"  nzytetv station status [--state <state.json>]  (default: {StationRuntimePolicy.DefaultStatePath})");
                 Console.WriteLine();
-                Console.WriteLine("Checkpoint 1 supervises one fixed configured playlist queue; it does not persist resume position across a full restart.");
+                Console.WriteLine("Checkpoint 2 safely resumes a matching fixed queue at the first item not positively completed.");
                 break;
             case CommandKind.StationValidate:
                 Console.WriteLine("Usage: nzytetv station validate --config <station.json>");
                 Console.WriteLine("Validate schema, production paths, playlist/media readiness, and FFmpeg without starting a broadcast.");
-                Console.WriteLine($"Reports whether {BroadcastDestination.DefaultEnvironmentVariable} is configured without displaying its value.");
+                Console.WriteLine($"Reports whether {BroadcastDestination.DefaultEnvironmentVariable} is absent, valid, or invalid without displaying its value.");
                 break;
             case CommandKind.StationRun:
                 Console.WriteLine("Usage: nzytetv station run --config <station.json>");
-                Console.WriteLine("Run the fixed station queue through the existing resilient broadcaster and maintain runtime state.");
+                Console.WriteLine("Run or safely resume the fixed station queue through the existing resilient broadcaster and maintain schema-v2 runtime state.");
+                Console.WriteLine($"Permanent startup/resume-safety failures exit {StationExitCodes.PermanentStartupFailure}; runtime failures remain restartable.");
                 Console.WriteLine($"Requires {BroadcastDestination.DefaultEnvironmentVariable}; the value is never displayed or serialized.");
                 break;
             case CommandKind.StationStatus:
                 Console.WriteLine("Usage: nzytetv station status [--state <state.json>]");
-                Console.WriteLine($"Read station runtime state (default: {StationRuntimePolicy.DefaultStatePath}) and verify its heartbeat and PID.");
+                Console.WriteLine($"Read station runtime/persistence state (default: {StationRuntimePolicy.DefaultStatePath}) and verify its heartbeat and PID.");
                 Console.WriteLine("Process command lines and destination credentials are never displayed.");
                 break;
             case CommandKind.MediaHelp:

@@ -2,9 +2,9 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The v0.5.0 Checkpoint 1 station supervisor can validate and run a fixed configured queue, publish atomic runtime state and a heartbeat, and report status for manual systemd operation. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Encoding remains independent from metadata, scheduling, and playback.
 
-Persistent playback resume after a full process/reboot restart, automatic boot enablement, live playlist watching, queue generation, YouTube API health monitoring, and alerts remain out of scope for this checkpoint.
+Automatic playlist generation, dynamic queue discovery, application-driven service enablement, YouTube API health monitoring, and alerts remain out of scope. Boot enablement is an explicit operator action only after Checkpoint 2 Raspberry Pi acceptance.
 
 ## Operating NZYTE TV
 
@@ -18,7 +18,7 @@ Focused references:
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
-- [Station supervisor and manual systemd operation](docs/station-service.md)
+- [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
 
 ## Setup
 
@@ -155,11 +155,13 @@ The current small production library cannot satisfy every ideal rule for six hou
 
 The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never displayed. `--dry-run` does not require the variable and does not launch FFmpeg. Pressing Ctrl+C cancels and terminates the FFmpeg child process. See [broadcasting.md](docs/broadcasting.md) for setup and usage.
 
-### Station supervisor foundation
+### Station supervisor and durable resume
 
-`station validate` checks non-secret schema-version-1 station configuration, production paths, the configured static playlist queue, broadcast media readiness, and FFmpeg availability without launching a broadcast. `station run` invokes the existing resilient broadcaster while maintaining `/var/lib/nzyte-tv/state.json` atomically; `station status` verifies its heartbeat and station PID without displaying process command lines. The heartbeat interval is 10 seconds and the stale threshold is 30 seconds.
+`station validate` checks non-secret schema-version-1 station configuration, production paths, the configured static playlist queue, broadcast media readiness, and FFmpeg availability without launching a broadcast. `station run` invokes the existing resilient broadcaster while maintaining schema-version-2 `/var/lib/nzyte-tv/state.json` atomically; `station status` verifies its heartbeat and station PID and reports durable resume telemetry without displaying process command lines. The heartbeat interval is 10 seconds and the stale threshold is 30 seconds.
 
-The repository includes a manual systemd unit using `Restart=on-failure`. Successful static-queue completion exits zero and is not restarted, preventing an automatic replay from item 1. Do not enable the service at boot in Checkpoint 1: persistent reboot resume is reserved for Checkpoint 2. See [Station supervisor and manual systemd operation](docs/station-service.md).
+The station fingerprints the exact ordered validated queue with SHA-256. A stopped or interrupted schema-v2 run resumes the first item not positively known to have completed when the queue matches; that item restarts from its beginning. A stopped state with changed programming starts fresh, an interrupted state with a changed queue refuses to guess, and a completed queue starts fresh when explicitly run again. Schema-v1 state remains readable but never supplies an inferred resume cursor.
+
+The repository unit uses `Restart=on-failure` and `RestartPreventExitStatus=78`: runtime failure remains restartable, while permanent startup/configuration or resume-safety failures do not loop. Successful static-queue completion exits zero and is not replayed. Do not enable the service until the documented Checkpoint 2 Pi acceptance tests pass; afterward, boot enablement is an explicit operator action. See [Station supervisor, persistent resume, and systemd operation](docs/station-service.md).
 
 ## Broadcast standard
 

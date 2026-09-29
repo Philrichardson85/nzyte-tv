@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NzyteTv.Core;
 using NzyteTv.Media;
 
@@ -20,15 +21,67 @@ public sealed class StationStateTests
         string json = File.ReadAllText(fixture.StatePath);
         StationRuntimeState roundTrip = new StationStateStore().Read(fixture.StatePath);
         Assert.Equal(StationRuntimeState.CurrentSchemaVersion, roundTrip.SchemaVersion);
+        Assert.Equal(new string('a', 64), roundTrip.QueueId);
+        Assert.Equal(2, roundTrip.QueueItemCount);
+        Assert.Equal(0, roundTrip.ResumeGlobalIndex);
+        Assert.Equal(StationStartMode.Fresh, roundTrip.LastStartMode);
         Assert.Equal("output failed for [REDACTED]", roundTrip.LastError);
         Assert.Contains("\"stationState\": \"broadcasting\"", json, StringComparison.Ordinal);
         Assert.Contains("\"broadcastState\": \"broadcasting\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"queueId\":", json, StringComparison.Ordinal);
+        Assert.Contains("\"queueItemCount\": 2", json, StringComparison.Ordinal);
+        Assert.Contains("\"currentGlobalIndex\": 0", json, StringComparison.Ordinal);
+        Assert.Contains("\"lastCompletedGlobalIndex\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"resumeGlobalIndex\": 0", json, StringComparison.Ordinal);
+        Assert.Contains("\"lastStartMode\": \"fresh\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"resumeCount\": 0", json, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
         Assert.DoesNotContain("rtmp", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(Directory.GetFiles(
             Path.GetDirectoryName(fixture.StatePath)!,
             "*.partial"));
+    }
+
+    [Fact]
+    public void Read_SchemaVersionOneRemainsReadableWithoutInventingResumeMetadata()
+    {
+        using var fixture = new StateFixture();
+        Directory.CreateDirectory(Path.GetDirectoryName(fixture.StatePath)!);
+        File.WriteAllText(fixture.StatePath, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            stationState = "stopped",
+            stationPid = 41,
+            startedAtUtc = fixture.Now - TimeSpan.FromMinutes(1),
+            lastHeartbeatUtc = fixture.Now,
+            mediaRoot = fixture.MediaRoot,
+            libraryRoot = fixture.LibraryRoot,
+            broadcastState = "stopped",
+            recoveryAttempts = 0,
+            queuedPlaylistCount = 1,
+            totalPlaylistCount = 2,
+        }));
+
+        StationRuntimeState state = new StationStateStore().Read(fixture.StatePath);
+
+        Assert.Equal(StationRuntimeState.LegacySchemaVersion, state.SchemaVersion);
+        Assert.Null(state.QueueId);
+        Assert.Null(state.ResumeGlobalIndex);
+        Assert.Null(state.LastStartMode);
+        StationStatusSnapshot status = new StationStatusService(
+            new MemoryStateStore(state),
+            new RecordingProcessExistence([]),
+            new FixedTimeProvider(fixture.Now)).GetStatus("ignored.json");
+        Assert.Equal(StationStatusKind.Stopped, status.Status);
+    }
+
+    [Fact]
+    public void ReadIfExists_MissingStateReturnsNull()
+    {
+        using var fixture = new StateFixture();
+
+        Assert.Null(new StationStateStore().ReadIfExists(fixture.StatePath));
     }
 
     [Fact]
@@ -70,6 +123,26 @@ public sealed class StationStateTests
             new StationStateStore().Read(fixture.StatePath));
 
         Assert.Contains("Malformed station state", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Read_InconsistentVersionTwoResumeMetadataIsRejected()
+    {
+        using var fixture = new StateFixture();
+        StationRuntimeState inconsistent = fixture.CreateState() with
+        {
+            LastCompletedGlobalIndex = 0,
+            ResumeGlobalIndex = 0,
+        };
+        await new StationStateStore().WriteAsync(
+            fixture.StatePath,
+            inconsistent,
+            CancellationToken.None);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+            new StationStateStore().Read(fixture.StatePath));
+
+        Assert.Contains("inconsistent", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -171,6 +244,8 @@ public sealed class StationStateTests
             Task.CompletedTask;
 
         public StationRuntimeState Read(string path) => state;
+
+        public StationRuntimeState? ReadIfExists(string path) => state;
     }
 
     private sealed class RecordingProcessExistence(IEnumerable<int> liveIds) : IProcessExistence
@@ -222,6 +297,12 @@ public sealed class StationStateTests
             LibraryRoot = LibraryRoot,
             TotalPlaylistCount = 2,
             QueuedPlaylistCount = 1,
+            QueueId = new string('a', 64),
+            QueueItemCount = 2,
+            CurrentGlobalIndex = 0,
+            LastCompletedGlobalIndex = null,
+            ResumeGlobalIndex = 0,
+            LastStartMode = StationStartMode.Fresh,
         };
 
         public void Dispose() => Directory.Delete(Root, recursive: true);

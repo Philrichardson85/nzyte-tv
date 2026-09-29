@@ -93,8 +93,8 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `build-playlist` | Creates a deterministic airtime-aware schedule and optionally updates history. | After the eligible library changes or another programming block is needed. |
 | `broadcast` | Validates playlist files, concatenates normalized assets, and stream-copies them to RTMP/RTMPS using FFmpeg. | Dry-run first; then start the live stream. |
 | `station validate` | Validates non-secret station configuration and the existing broadcast readiness checks without launching FFmpeg. | Before every station/service start or after configuration changes. |
-| `station run` | Supervises the configured fixed queue through the existing resilient broadcaster and writes runtime state/heartbeat. | Checkpoint 1 manual production operation. |
-| `station status` | Reads runtime state and verifies heartbeat freshness and station PID without displaying process arguments. | Check station, broadcast, FFmpeg, media, and queue state. |
+| `station run` | Supervises the configured fixed queue through the existing resilient broadcaster and writes durable runtime state/heartbeat. | Checkpoint 2 item-level restart/reboot resume. |
+| `station status` | Reads runtime state, resume telemetry, heartbeat freshness, and station PID without displaying process arguments. | Check station, broadcast, FFmpeg, media, queue, and persistence state. |
 
 Use `nzytetv <command> --help` for command-specific syntax.
 
@@ -808,7 +808,7 @@ fi
 
 Never print the value of `NZYTE_TV_RTMP_URL`.
 
-Environment variables are safer than command arguments. The Checkpoint 1 systemd workflow uses the root-controlled `/etc/nzyte-tv/secrets.env` described in the [station service guide](station-service.md). When finished with a manual shell session:
+Environment variables are safer than command arguments. The station systemd workflow uses the root-controlled `/etc/nzyte-tv/secrets.env` described in the [station service guide](station-service.md). When finished with a manual shell session:
 
 Bash:
 
@@ -890,7 +890,7 @@ After automatic recovery, `pgrep -x ffmpeg` should print a replacement PID. This
 
 ## 17. Keep the manual broadcast alive with tmux
 
-tmux keeps a terminal session running when SSH disconnects. NZYTE TV broadcast recovery separately survives supported transient FFmpeg/RTMPS failures. Neither replaces the other. The Checkpoint 1 station supervisor adds manual systemd process supervision, but persistent playback resume after a full restart remains deferred to Checkpoint 2.
+tmux keeps a terminal session running when SSH disconnects. NZYTE TV broadcast recovery separately survives supported transient FFmpeg/RTMPS failures. Neither replaces the other. The Checkpoint 2 station supervisor adds durable item-level resume across a full station-process restart; systemd provides process/boot supervision. These remain separate responsibilities.
 
 Install once if needed:
 
@@ -933,9 +933,9 @@ tmux attach -t nzyte-tv
 
 To stop the broadcaster, attach and press Ctrl+C. You may then detach again with Ctrl+B, D. Before closing the session, run `unset NZYTE_TV_RTMP_URL`.
 
-### Checkpoint 1 station supervisor and manual systemd control
+### Checkpoint 2 station resume and systemd control
 
-For production-foundation testing, install the non-secret `station.json`, root-controlled `secrets.env`, and repository unit by following [Station supervisor and manual systemd operation](station-service.md). Validate before starting:
+For persistent-resume acceptance, install the non-secret `station.json`, root-controlled `secrets.env`, and repository unit by following [Station supervisor, persistent resume, and systemd operation](station-service.md). Validate before starting:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv station validate --config /etc/nzyte-tv/station.json
@@ -952,9 +952,11 @@ sudo systemctl stop nzyte-tv
 pgrep -x ffmpeg
 ```
 
-The process check should print nothing. The unit uses `Restart=on-failure`, so successful completion of the fixed queue exits normally and is not replayed automatically.
+The process check should print nothing. Clean stop writes `STOPPED` while preserving queue identity and the resume cursor, so starting the same queue again restarts the interrupted item from its beginning instead of sequence 1. A normal reboot uses the same graceful SIGTERM path.
 
-> **Do not run `systemctl enable nzyte-tv` yet.** Checkpoint 1 does not preserve playback position across a full process restart or Pi reboot. Boot-time enablement waits for Checkpoint 2 acceptance.
+The unit uses `Restart=on-failure`, so an unexpected parent-process failure is eligible for restart and matching schema-v2 state resumes. Successful fixed-queue completion exits zero and is not replayed. Permanent startup/configuration and resume-safety failures exit 78; `RestartPreventExitStatus=78` prevents a systemd restart loop.
+
+> **Do not run `systemctl enable nzyte-tv` until the Checkpoint 2 Raspberry Pi crash, clean stop/start, and disabled-service graceful reboot acceptance tests pass.** After they pass, the operator may enable the unit and perform the final boot-resume acceptance test. NZYTE TV never enables it automatically.
 
 ## 18. First live-stream acceptance checklist
 
@@ -979,18 +981,19 @@ pgrep -x -c ffmpeg
 
 ## 19. Current operational limitations
 
-The current Checkpoint 1 station foundation:
+The current Checkpoint 2 station supervisor:
 
 - uses the supplied playlist queue fixed at broadcaster startup and does not dynamically discover new playlist JSON files;
 - does not automatically generate future playlist blocks;
-- does not persist runtime playback state across full broadcaster restarts;
-- includes a systemd unit for manual start/stop but must not be enabled at boot yet;
-- does not resume playback position after a Pi reboot;
+- persists item-level runtime progress for the fixed configured queue across full station-process restarts;
+- restarts the saved item from its beginning and never attempts timestamp/frame resume;
+- preserves the resume cursor on clean stop so a normal graceful reboot can resume;
+- includes a boot-suitable systemd unit, but operator enablement remains deferred until Checkpoint 2 Pi acceptance;
 - automatically reconnects transient RTMPS/FFmpeg output failures with bounded backoff, restarting the interrupted asset rather than the whole queue;
 - does not integrate with the YouTube API; and
 - does not monitor YouTube API stream health.
 
-Use tmux for the established manual broadcaster workflow or manually control the Checkpoint 1 station service. Neither is true unattended 24/7 operation. Later checkpoints may add persistent restart state, automatic queue advancement, dynamic future-block generation, and monitoring. The queue remains fixed at process startup.
+The queue remains fixed at startup. Checkpoint 2 does not discover or generate another playlist, mutate scheduler `history.json`, call the YouTube API, monitor remote stream health, or alert an operator. It is not continuous unattended 24/7 programming; automatic queue advancement and future-block generation remain Checkpoint 3 work.
 
 ## 20. What do I do when…?
 
@@ -1034,7 +1037,7 @@ Run the broadcast inside tmux and detach with Ctrl+B, D.
 
 ### I rebooted the Pi
 
-The tmux session is gone, and the Checkpoint 1 station unit must not be enabled automatically. Mount validation and manual startup must be repeated. Persistent reboot resume is Checkpoint 2.
+The tmux session is gone. During Checkpoint 2 acceptance, keep the station unit disabled: systemd's graceful SIGTERM writes `STOPPED` with the durable cursor, and a manual `sudo systemctl start nzyte-tv` after reboot should resume the same queue item from its beginning. Only after the documented crash, clean stop/start, and disabled-service reboot tests pass should the operator run `sudo systemctl enable nzyte-tv` and perform the final automatic boot-resume test.
 
 ## 21. Novice troubleshooting
 
@@ -1134,5 +1137,5 @@ The following have been validated at specific points in production acceptance. T
 - [Content catalog](content-catalog.md): catalog schema, matching, review, edits, and identity.
 - [Playlists](playlists.md): scheduling policy, diagnostics, schema, and history.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
-- [Station supervisor](station-service.md): Checkpoint 1 configuration, state, status, secrets, and manual systemd operation.
+- [Station supervisor](station-service.md): Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance plan.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

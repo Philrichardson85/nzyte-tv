@@ -1,24 +1,26 @@
-# Station supervisor and manual systemd operation
+# Station supervisor, persistent resume, and systemd operation
 
-NZYTE TV v0.5.0 Checkpoint 1 adds a station-level supervisor above the existing resilient broadcaster. It validates a fixed playlist queue, maintains atomic runtime state and a heartbeat, reports status without exposing process arguments, and can run as a manually controlled systemd service.
+NZYTE TV v0.5.0 Checkpoint 2 extends the accepted station foundation with safe item-level resume across a full station-process restart. It still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover or generate future playlists.
 
-This is foundation work, not persistent reboot resume or continuous 24/7 queue generation. A full station-process restart can begin again from the configured static queue. Checkpoint 2 will address persistent playback position across restarts.
-
-## What the supervisor owns
+The supervisor continues to wrap, rather than replace, the existing resilient broadcaster:
 
 ```text
 systemd
     -> nzytetv station run
-        -> station configuration, runtime state, heartbeat
+        -> configuration, schema-v2 runtime state, heartbeat, resume decision
             -> existing BroadcastRecoveryRunner
                 -> FFmpeg
 ```
 
-The supervisor does not contain a second broadcaster. It uses the existing `BroadcastPlanner`, `BroadcastRecoveryRunner`, `FfmpegBroadcaster`, retry policy, progress parser, stream-copy behavior, cancellation, temporary concat cleanup, and destination redaction.
+FFmpeg recovery and persistent resume are separate:
 
-The configured playlist list is fixed for the lifetime of one `station run` process. The supervisor does not discover new playlist JSON, generate future blocks, persist resume position across a full restart, call the YouTube API, or send alerts.
+- `recoveryAttempts` counts replacement FFmpeg attempts within one station process.
+- `resumeCount` counts cold resumes across station-process starts.
+- Both restart the interrupted item from its beginning. Neither seeks to an exact timestamp or frame.
 
-## Station configuration
+Checkpoint 2 does not add automatic playlist generation, dynamic queue discovery, scheduling-history mutation, continuous queue advancement, YouTube API monitoring, or alerts. YouTube monitoring remains `NOT CONFIGURED`.
+
+## Station configuration and destination secret
 
 Start from [the repository example](../deploy/config/station.json.example) and install it as `/etc/nzyte-tv/station.json`:
 
@@ -35,11 +37,9 @@ Start from [the repository example](../deploy/config/station.json.example) and i
 }
 ```
 
-All paths are absolute. Configuration is non-secret: never add an RTMP/RTMPS URL, stream key, token, or password. Schema version 1 requires an available media root, an available library root, a valid state-file path, and at least one existing, unique playlist file.
+Configuration schema version 1 remains non-secret and requires absolute paths, available media and library roots, a valid state-file path, and at least one existing unique playlist. The playlist list and order are fixed for one configured queue.
 
-## Destination secret
-
-The live destination remains in `NZYTE_TV_RTMP_URL`; it is never stored in station configuration or runtime state. For systemd, create a root-controlled environment file:
+The live destination remains in `NZYTE_TV_RTMP_URL`; it is never part of station configuration, queue identity, runtime state, status, or application diagnostics. For systemd, use a root-controlled environment file:
 
 ```bash
 sudo editor /etc/nzyte-tv/secrets.env
@@ -47,61 +47,86 @@ sudo chown root:root /etc/nzyte-tv/secrets.env
 sudo chmod 600 /etc/nzyte-tv/secrets.env
 ```
 
-The file has this form; replace the placeholder locally and never commit or document the real value:
+Its form is:
 
 ```text
 NZYTE_TV_RTMP_URL=<SECRET>
 ```
 
-NZYTE TV redacts the destination from application diagnostics. FFmpeg still receives it as an output argument, so never inspect or publish full FFmpeg process command lines. Use `pgrep -x ffmpeg` for PID-only checks and `pgrep -x -c ffmpeg` for a count.
+Never put a real value in documentation or source control. FFmpeg receives the destination as an argument, so do not inspect full process command lines. Use `pgrep -x ffmpeg` for PID-only checks and `pgrep -x -c ffmpeg` for a count.
 
-## Validate before running
+## Validate, run, and inspect
 
-Validation does not start FFmpeg or mutate the configuration:
+Validation does not start FFmpeg or mutate configuration:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv station validate \
   --config /etc/nzyte-tv/station.json
 ```
 
-It validates configuration, roots, playlist JSON, playlist media, technical manifests, and FFmpeg availability by reusing broadcast planning/readiness checks. Without printing the destination value, the destination line reports `NOT CONFIGURED`, `CONFIGURED / VALID`, or `CONFIGURED / INVALID` using the same RTMP/RTMPS validation as a live run. An absent destination does not prevent configuration/media validation because systemd can supply it later; a configured but malformed destination makes the overall result `NOT READY`, and `station run` requires a valid destination.
+The destination line reports only `NOT CONFIGURED`, `CONFIGURED / VALID`, or `CONFIGURED / INVALID`. An absent destination does not prevent non-secret configuration/media validation because systemd can supply it later. A configured malformed destination makes validation `NOT READY`; `station run` requires a valid RTMP/RTMPS destination.
 
-## Run and inspect without systemd
-
-For a manual shell test, securely export `NZYTE_TV_RTMP_URL` as described in [Broadcasting generated playlists](broadcasting.md), then run:
+For a manual shell test, securely export the destination and run:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv station run \
   --config /etc/nzyte-tv/station.json
-```
 
-In another shell:
-
-```bash
 /opt/nzyte-tv/app/nzytetv station status
 ```
 
-The default state path is `/var/lib/nzyte-tv/state.json`. A test or alternate deployment can use:
+The default state path is `/var/lib/nzyte-tv/state.json`. An alternate state can be inspected with:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv station status --state /some/path/state.json
 ```
 
-Runtime-state schema version 1 records:
+The 10-second heartbeat and 30-second stale threshold are unchanged. Status verifies the recorded station PID without displaying process arguments and never claims a queue match because `station status` does not load station configuration.
 
-- `stationState`, `stationPid`, `startedAtUtc`, and `lastHeartbeatUtc`;
-- `currentPlaylist`, its one-based `currentPlaylistIndex`, `currentSequence`, playlist item count, `assetId`, `title`, and `type` when known;
-- `ffmpegPid`, `broadcastState`, and consecutive `recoveryAttempts`;
-- `queuedPlaylistCount` and `totalPlaylistCount`; and
-- `lastError`, `stoppedAtUtc`, or `completedAtUtc` when applicable.
+## Runtime-state schema version 2
 
-It never contains the RTMPS destination, environment secrets, scheduling history, or OAuth tokens. Writes use a flushed temporary file followed by an atomic move, so the live JSON is not overwritten in place.
+Schema version 2 preserves the Checkpoint 1 process, current-item, FFmpeg, recovery, queue-count, error, stop, and completion fields. It adds:
 
-The active supervisor writes `lastHeartbeatUtc` about every 10 seconds. `station status` reports an otherwise active state as `STALE` when the heartbeat is older than 30 seconds or the recorded station PID no longer exists. It checks PIDs without displaying process command lines. Status intentionally reports `YouTube monitoring: NOT CONFIGURED`.
+- `queueId`: deterministic SHA-256 identity for the exact ordered validated queue;
+- `queueItemCount`;
+- zero-based `currentGlobalIndex`, `lastCompletedGlobalIndex`, and `resumeGlobalIndex`;
+- `lastStartMode`, either `fresh` or `resume`;
+- `resumeCount`; and
+- `lastResumeAtUtc` after a cold resume.
 
-## Install for manual systemd control
+The flattened global index crosses playlist boundaries. If playlist 1 has 325 items, its last item is global index 324 and playlist 2 sequence 1 is global index 325. CLI status presents one-based global positions or playlist/sequence details where the state can do so reliably.
 
-The service currently runs as the established production user `u24`. On the Pi, from the repository checkout:
+`lastCompletedGlobalIndex` advances only after positive FFmpeg completion evidence. `resumeGlobalIndex` is the first item not positively known to be complete. While an item is active, resume points to that same item. At the first item, last-completed is null and resume is 0. After the final item completes, last-completed is the final index and resume is null.
+
+State writes remain atomic: NZYTE TV writes and flushes a temporary file, then atomically moves it over the live file. A crash can therefore leave the previous valid JSON or the new valid JSON, not an in-place partial document. Ambiguous persistence biases toward replaying an item, never skipping unconfirmed content.
+
+The deployed schema-version-1 state remains readable by `station status`. It has no trustworthy queue identity or completion cursor, so `station run` never guesses a cold-resume position from it. The first Checkpoint 2 run starts fresh and writes schema version 2; no manual JSON edit is required.
+
+## Queue identity and start policy
+
+`queueId` is a SHA-256 digest of an unambiguously framed representation containing the ordered playlist paths, hashes of the playlist content read during validation, and ordered validated broadcast-item identity. It changes when playlist order, playlist content, or material ordered item content changes. It does not use file modification timestamps, process IDs, the current time, runtime state, random values, or the RTMP/RTMPS destination.
+
+At startup, NZYTE TV acquires an exclusive non-secret companion lock for the configured state path, validates configuration, builds the full plan, calculates the current queue ID, reads any prior state, checks for a live previous supervisor where appropriate, and applies this policy. The lock closes automatically on a process crash and prevents two near-simultaneous supervisors from writing one state file.
+
+| Persisted state | Queue comparison | Result |
+|---|---|---|
+| No state file | Not applicable | Fresh at global index 0 |
+| Schema version 1 | Not safely comparable | Fresh at global index 0; write schema version 2 |
+| `completed` | Any | Explicit later start begins the configured queue fresh |
+| `stopped` | Same queue | Resume saved `resumeGlobalIndex` |
+| `stopped` | Different queue | Treat the changed programming as a fresh queue |
+| `starting`, `broadcasting`, `stopping`, or `failed` with dead prior PID | Same queue | Resume saved item |
+| Interrupted state | Different queue | Refuse startup; do not guess |
+| Interrupted state with live prior station PID | Any | Refuse a second supervisor |
+| Same queue but invalid/inconsistent cursor metadata | Same queue | Refuse unsafe automatic resume |
+
+A clean Ctrl+C, `systemctl stop`, or normal reboot writes `stopped` without erasing queue identity, last-completed position, or resume position. Therefore `STOPPED` plus the same queue resumes. `STOPPED` plus changed programming intentionally starts the new queue at item 1. A successfully `COMPLETED` queue has no interrupted run; a later explicit start is a new fresh run.
+
+Cold resume supplies the original zero-based global index to the existing `BroadcastRecoveryRunner`. Its concat slice omits earlier completed items and begins with the saved item, without `-ss` or timestamp seeking. Typed item-start/item-completion events retain original full-plan indices across both cold resume and internal FFmpeg retries.
+
+## systemd installation and restart behavior
+
+The service still runs as production user `u24`. From the repository checkout:
 
 ```bash
 sudo mkdir -p /etc/nzyte-tv
@@ -117,11 +142,17 @@ sudo cp deploy/systemd/nzyte-tv.service /etc/systemd/system/nzyte-tv.service
 sudo systemctl daemon-reload
 ```
 
-The unit's `StateDirectory=nzyte-tv` creates `/var/lib/nzyte-tv` for user `u24` when the service starts; `StateDirectoryMode=0750` and `UMask=0027` keep the generated state file appropriately restricted. The state contains no destination secret.
+`StateDirectory=nzyte-tv` creates `/var/lib/nzyte-tv`; `StateDirectoryMode=0750` and `UMask=0027` restrict the generated state. The unit uses:
 
-Validate the installed configuration before starting. If running validation from an ordinary shell, `Destination env: NOT CONFIGURED` is expected when only systemd's environment file contains the secret.
+```text
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+```
 
-Start and inspect manually:
+Exit code 78 means a permanent station-start/configuration or resume-safety failure. systemd does not loop on invalid configuration, a malformed destination, an unsafe cursor, a queue mismatch, or a detected second supervisor. Unexpected station runtime failure still exits 1 and remains eligible for restart. Successful completion and clean stop exit 0 and are not restarted.
+
+Operate manually while Checkpoint 2 awaits Pi acceptance:
 
 ```bash
 sudo systemctl start nzyte-tv
@@ -129,23 +160,58 @@ sudo systemctl status nzyte-tv
 /opt/nzyte-tv/app/nzytetv station status
 journalctl -u nzyte-tv -n 100
 journalctl -u nzyte-tv -f
-```
 
-The station writes operational output to stdout/stderr, which systemd captures in journald. There is no separate application log-file subsystem, and the existing broadcaster destination redaction remains active.
-
-Stop cleanly:
-
-```bash
 sudo systemctl stop nzyte-tv
 pgrep -x ffmpeg
 ```
 
-The final process check should print nothing. SIGTERM follows the supervisor cancellation path: heartbeat and recovery stop, FFmpeg's process tree is terminated, retry is not started, and final station state becomes `stopped`.
+The final process check should print nothing. SIGTERM cancels heartbeat and recovery, terminates the owned FFmpeg child tree, starts no retry, and writes `stopped` while retaining the resume cursor.
 
-> **Do not run `systemctl enable nzyte-tv` yet.** Boot-time enablement is intentionally deferred until Checkpoint 2 persistent resume is accepted. In Checkpoint 1, a station-process restart can replay the configured static queue from its normal starting behavior.
+> Do not run `systemctl enable nzyte-tv` until Checkpoint 2 Raspberry Pi acceptance Tests A, B, and C below pass. Installation and application code never enable the service automatically.
 
-## Why the service uses `Restart=on-failure`
+## Manual Raspberry Pi acceptance plan
 
-The repository unit uses `Restart=on-failure`, not `Restart=always`. When every configured playlist completes, station state becomes `completed`, `station run` exits zero, and systemd leaves the service completed. It must not automatically replay the queue from item 1. An unrecoverable station failure exits nonzero and is eligible for the unit's five-second restart policy.
+These tests are for later manual Pi acceptance; they are not automated workstation tests.
 
-Automatic future-playlist generation, continuous queue advancement, persistent reboot resume, YouTube health monitoring, alerts, and automatic service enablement are later checkpoints.
+### Test A — hard parent-process crash
+
+1. Start the service manually and let several items progress.
+2. Record `station status`.
+3. Get only the parent PID: `systemctl show -p MainPID --value nzyte-tv`.
+4. Send SIGKILL only to that NZYTE TV parent: `sudo kill -KILL <parent-pid>`.
+5. Let `Restart=on-failure` create a new parent.
+6. Verify a new station PID, a new FFmpeg PID, restart of the interrupted item, no replay from sequence 1, `Start mode: RESUME`, and one increment to `Resume count`.
+
+Do not use a command that displays FFmpeg arguments.
+
+### Test B — clean stop and start
+
+1. While an item is active, run `sudo systemctl stop nzyte-tv`.
+2. Verify `STOPPED` and that `pgrep -x ffmpeg` prints nothing.
+3. Run `sudo systemctl start nzyte-tv`.
+4. Verify the same queue resumes the saved item instead of sequence 1.
+
+### Test C — graceful reboot while still disabled
+
+1. Run `systemctl is-enabled nzyte-tv` and confirm it reports `disabled`, then start the service manually.
+2. Record the current item.
+3. Run `sudo reboot`.
+4. After the Pi returns, verify the service did not auto-start.
+5. Start it manually with `sudo systemctl start nzyte-tv`.
+6. Verify the saved item restarts from its beginning and earlier completed items are omitted.
+
+This test proves graceful SIGTERM/reboot semantics, not stale-process recovery alone.
+
+### Test D — final boot enablement
+
+Only after A, B, and C pass:
+
+```bash
+sudo systemctl enable nzyte-tv
+```
+
+Reboot while the station is running. Verify automatic service startup, persisted queue resume, `pgrep -x -c ffmpeg` reports exactly `1`, the correct item is active, status is healthy, and no secret is disclosed. This operator action is the final Checkpoint 2 acceptance step; it is not performed by NZYTE TV or installation code.
+
+## Current limitations
+
+Checkpoint 2 is durable resume for the explicitly configured static queue, not unattended continuous programming. It does not generate or discover another playlist, append to the queue, mutate `playlists/history.json`, persist an exact media timestamp, call YouTube APIs, monitor remote stream health, or alert an operator. Scheduler history remains planned-programming history; station state remains actual runtime progress. Those responsibilities are intentionally separate, and Checkpoint 3/4 functionality is not implemented here.
