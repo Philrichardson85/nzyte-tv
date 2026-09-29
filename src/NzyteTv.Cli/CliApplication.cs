@@ -25,6 +25,13 @@ public static class CliApplication
 
         try
         {
+            if (command.Kind is CommandKind.StationValidate
+                or CommandKind.StationRun
+                or CommandKind.StationStatus)
+            {
+                return await RunStationCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             if (command.Kind == CommandKind.MediaInit)
             {
                 return await RunMediaInitAsync(command.Input!, cancellationToken).ConfigureAwait(false);
@@ -442,6 +449,72 @@ public static class CliApplication
         }
     }
 
+    private static async Task<int> RunStationCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (command.Kind == CommandKind.StationStatus)
+        {
+            string statePath = command.StatePath ?? StationRuntimePolicy.DefaultStatePath;
+            var statusService = new StationStatusService(
+                new StationStateStore(),
+                new ProcessExistence());
+            StationStatusSnapshot snapshot = statusService.GetStatus(statePath);
+            Console.Write(StationFormatters.FormatStatus(snapshot));
+            return snapshot.Status is StationStatusKind.Stale or StationStatusKind.Failed ? 1 : 0;
+        }
+
+        bool destinationConfigured = !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable(BroadcastDestination.DefaultEnvironmentVariable));
+        var validationService = new StationValidationService(
+            new StationConfigurationLoader(),
+            new BroadcastPlanner());
+        StationValidationResult validation = validationService.Validate(
+            command.ConfigPath!,
+            destinationConfigured);
+
+        if (command.Kind == CommandKind.StationValidate)
+        {
+            Console.Write(StationFormatters.FormatValidation(validation));
+            return validation.IsReady ? 0 : 1;
+        }
+
+        Console.Write(StationFormatters.FormatValidation(validation));
+        if (!validation.IsReady)
+        {
+            return 1;
+        }
+
+        string destination = BroadcastDestination.Resolve(
+            Environment.GetEnvironmentVariable(BroadcastDestination.DefaultEnvironmentVariable),
+            dryRun: false)!;
+        string ffmpeg = await new MediaToolLocator().LocateFfmpegAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var resilientRunner = new ResilientStationBroadcastRunner(
+            new BroadcastRecoveryRunner(
+                new FfmpegBroadcaster(ffmpeg, new ProcessRunner())));
+        var supervisor = new StationSupervisor(resilientRunner, new StationStateStore());
+
+        Console.WriteLine();
+        Console.WriteLine("Station starting. Press Ctrl+C to stop.");
+        StationRunResult result = await supervisor.RunAsync(
+            validation.Configuration,
+            validation.BroadcastPlan,
+            destination,
+            line => Console.Error.WriteLine(line),
+            PrintBroadcastRecoveryUpdate,
+            cancellationToken).ConfigureAwait(false);
+
+        Console.WriteLine();
+        Console.WriteLine($"Station status:             {result.FinalState.StationState.ToString().ToUpperInvariant()}");
+        if (result.ExitCode != 0 && !string.IsNullOrWhiteSpace(result.Error))
+        {
+            Console.Error.WriteLine($"FAILED: {result.Error}");
+        }
+
+        return result.ExitCode;
+    }
+
     private static void PrintBroadcastRecoveryUpdate(BroadcastRecoveryUpdate update)
     {
         Console.WriteLine();
@@ -768,6 +841,7 @@ public static class CliApplication
             Console.WriteLine("  nzytetv verify <input>");
             Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
             Console.WriteLine("  nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
+            Console.WriteLine("  nzytetv station <validate|run|status> ...");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
             Console.WriteLine();
@@ -810,6 +884,31 @@ public static class CliApplication
                 Console.WriteLine("Stream generated playlists sequentially with FFmpeg concat and stream-copy.");
                 Console.WriteLine($"Destination is read from {BroadcastDestination.DefaultEnvironmentVariable} and is never displayed.");
                 Console.WriteLine("--dry-run  Validate playlists, media, manifests, and FFmpeg without requiring a destination or starting FFmpeg.");
+                break;
+            case CommandKind.StationHelp:
+                Console.WriteLine("NZYTE TV station supervision");
+                Console.WriteLine();
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv station validate --config <station.json>");
+                Console.WriteLine("  nzytetv station run --config <station.json>");
+                Console.WriteLine($"  nzytetv station status [--state <state.json>]  (default: {StationRuntimePolicy.DefaultStatePath})");
+                Console.WriteLine();
+                Console.WriteLine("Checkpoint 1 supervises one fixed configured playlist queue; it does not persist resume position across a full restart.");
+                break;
+            case CommandKind.StationValidate:
+                Console.WriteLine("Usage: nzytetv station validate --config <station.json>");
+                Console.WriteLine("Validate schema, production paths, playlist/media readiness, and FFmpeg without starting a broadcast.");
+                Console.WriteLine($"Reports whether {BroadcastDestination.DefaultEnvironmentVariable} is configured without displaying its value.");
+                break;
+            case CommandKind.StationRun:
+                Console.WriteLine("Usage: nzytetv station run --config <station.json>");
+                Console.WriteLine("Run the fixed station queue through the existing resilient broadcaster and maintain runtime state.");
+                Console.WriteLine($"Requires {BroadcastDestination.DefaultEnvironmentVariable}; the value is never displayed or serialized.");
+                break;
+            case CommandKind.StationStatus:
+                Console.WriteLine("Usage: nzytetv station status [--state <state.json>]");
+                Console.WriteLine($"Read station runtime state (default: {StationRuntimePolicy.DefaultStatePath}) and verify its heartbeat and PID.");
+                Console.WriteLine("Process command lines and destination credentials are never displayed.");
                 break;
             case CommandKind.MediaHelp:
                 Console.WriteLine("NZYTE TV portable media-root tools");

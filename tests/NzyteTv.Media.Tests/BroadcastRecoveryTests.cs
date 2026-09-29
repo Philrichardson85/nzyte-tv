@@ -105,6 +105,57 @@ public sealed class BroadcastRecoveryTests
         Assert.Contains("[REDACTED]", combined, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RecoveryRunner_ObserverReceivesReplacementFfmpegPidAndRecoveryCount()
+    {
+        using var fixture = new RecoveryFixture();
+        var process = new SequencedRunner(
+            new Step(255, TimeSpan.FromSeconds(15), "Terminated"),
+            new Step(0, TimeSpan.FromSeconds(1), null));
+        var observer = new RecordingObserver();
+
+        BroadcastRecoveryResult result = await CreateRecovery(process, maxRetries: 10).RunAsync(
+            fixture.Plan,
+            Destination,
+            null,
+            null,
+            observer,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal([4001, 4002], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.FfmpegProcessStarted)
+            .Select(value => value.FfmpegPid));
+        Assert.Contains(observer.Events, value =>
+            value.Kind == BroadcastRuntimeEventKind.RecoveryStarted
+            && value.RecoveryAttempts == 1
+            && value.Item?.Sequence == 2);
+        Assert.Contains(observer.Events, value => value.Kind == BroadcastRuntimeEventKind.BroadcastCompleted);
+    }
+
+    [Fact]
+    public async Task RecoveryRunner_ObserverReceivesEveryItemChangeWithoutParsingConsoleText()
+    {
+        using var fixture = new RecoveryFixture();
+        var observer = new RecordingObserver();
+        var recovery = new BroadcastRecoveryRunner(
+            new FfmpegBroadcaster("ffmpeg", new MultiProgressRunner()),
+            new BroadcastRecoveryPolicy(MaximumDelay: TimeSpan.Zero));
+
+        BroadcastRecoveryResult result = await recovery.RunAsync(
+            fixture.Plan,
+            Destination,
+            null,
+            null,
+            observer,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(["asset-1", "asset-2", "asset-3"], observer.Events
+            .Where(value => value.Kind == BroadcastRuntimeEventKind.ItemChanged)
+            .Select(value => value.Item!.AssetId));
+    }
+
     private const string Destination = "rtmps://example.invalid/live2/SECRET-KEY";
 
     private static BroadcastRecoveryRunner CreateRecovery(IProcessRunner process, int maxRetries) => new(
@@ -127,6 +178,8 @@ public sealed class BroadcastRecoveryTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             InvocationCount++;
+            int processId = 4000 + InvocationCount;
+            request.OnStarted?.Invoke(processId);
             int inputIndex = request.Arguments.ToList().IndexOf("-i");
             ConcatContents.Add(File.ReadAllText(request.Arguments[inputIndex + 1]));
             Step step = _steps.Dequeue();
@@ -136,7 +189,28 @@ public sealed class BroadcastRecoveryTests
             }
             if (step.Diagnostic is not null) request.OnStandardError?.Invoke(step.Diagnostic);
             step.BeforeReturn?.Invoke();
+            request.OnExited?.Invoke(processId);
             return Task.FromResult(new ProcessResult(step.ExitCode, string.Empty, step.Diagnostic ?? string.Empty));
+        }
+    }
+
+    private sealed class RecordingObserver : IBroadcastRuntimeObserver
+    {
+        public List<BroadcastRuntimeEvent> Events { get; } = [];
+
+        public void OnEvent(BroadcastRuntimeEvent runtimeEvent) => Events.Add(runtimeEvent);
+    }
+
+    private sealed class MultiProgressRunner : IProcessRunner
+    {
+        public Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken)
+        {
+            request.OnStarted?.Invoke(5001);
+            request.OnStandardOutput?.Invoke("out_time_us=1000000");
+            request.OnStandardOutput?.Invoke("out_time_us=11000000");
+            request.OnStandardOutput?.Invoke("out_time_us=35000000");
+            request.OnExited?.Invoke(5001);
+            return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
         }
     }
 

@@ -513,6 +513,10 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv normalize-library --help
 /opt/nzyte-tv/app/nzytetv verify --help
 /opt/nzyte-tv/app/nzytetv build-playlist --help
+/opt/nzyte-tv/app/nzytetv station --help
+/opt/nzyte-tv/app/nzytetv station validate --help
+/opt/nzyte-tv/app/nzytetv station run --help
+/opt/nzyte-tv/app/nzytetv station status --help
 /opt/nzyte-tv/app/nzytetv metadata --help
 /opt/nzyte-tv/app/nzytetv metadata initialize --help
 /opt/nzyte-tv/app/nzytetv metadata review --help
@@ -524,6 +528,10 @@ Check executable help and each command's help without touching media:
 The recommended master song catalog path is `/srv/nzyte-tv/catalog/song-catalog.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. See [content-catalog.md](content-catalog.md) before initializing sidecars for production media.
 
 The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
+
+Checkpoint 1 includes a repository-owned systemd unit and examples under `deploy/`. Follow [Station supervisor and manual systemd operation](station-service.md) to install non-secret configuration, a root-controlled destination environment file, and the unit for manual start/stop. The service uses the current production user `u24` and `Restart=on-failure` so a successfully completed static queue is not replayed automatically.
+
+> **Do not run `systemctl enable nzyte-tv` yet.** Persistent playback resume after a process restart or Pi reboot is not part of Checkpoint 1 and must be accepted in Checkpoint 2 before boot-time enablement.
 
 Inspect a quoted source-master path through the convenience symlink:
 
@@ -672,4 +680,6 @@ The current broadcaster automates this stream-copy path and still never stores o
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
-- Automatic playlist queue regeneration, systemd supervision, restart recovery, and remote stream-health monitoring.
+- Raspberry Pi live acceptance of the new Checkpoint 1 station/systemd supervisor.
+- Persistent playback-position resume after a station-process restart or Pi reboot.
+- Automatic playlist queue regeneration and remote stream-health monitoring.

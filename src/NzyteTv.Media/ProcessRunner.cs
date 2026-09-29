@@ -7,7 +7,9 @@ public sealed record ProcessRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
     Action<string>? OnStandardOutput = null,
-    Action<string>? OnStandardError = null);
+    Action<string>? OnStandardError = null,
+    Action<int>? OnStarted = null,
+    Action<int>? OnExited = null);
 
 public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
@@ -77,12 +79,16 @@ public sealed class ProcessRunner : IProcessRunner
             request.OnStandardError?.Invoke(eventArgs.Data);
         };
 
+        bool started = false;
         try
         {
             if (!process.Start())
             {
                 throw new InvalidOperationException($"Unable to start process: {request.FileName}");
             }
+
+            started = true;
+            request.OnStarted?.Invoke(process.Id);
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -96,7 +102,8 @@ public sealed class ProcessRunner : IProcessRunner
                         process.Kill(entireProcessTree: true);
                     }
                 }
-                catch (InvalidOperationException)
+                catch (Exception exception) when (exception is
+                    InvalidOperationException or System.ComponentModel.Win32Exception)
                 {
                     // The process exited between the HasExited check and Kill.
                 }
@@ -108,9 +115,35 @@ public sealed class ProcessRunner : IProcessRunner
 
             return new ProcessResult(process.ExitCode, stdout.ToString(), stderr.ToString());
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is
+                InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // The process exited or was never fully associated while cancellation raced startup.
+            }
+
+            throw;
+        }
         catch (System.ComponentModel.Win32Exception exception)
         {
             throw new ProcessExecutionException($"Unable to launch '{request.FileName}'.", exception);
+        }
+        finally
+        {
+            if (started)
+            {
+                request.OnExited?.Invoke(process.Id);
+            }
         }
     }
 }

@@ -2,9 +2,9 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The v0.5.0 Checkpoint 1 station supervisor can validate and run a fixed configured queue, publish atomic runtime state and a heartbeat, and report status for manual systemd operation. Encoding remains independent from metadata, scheduling, and playback.
 
-YouTube API integration, services, live playlist watching, queue regeneration, health polling, and automatic restarts remain out of scope.
+Persistent playback resume after a full process/reboot restart, automatic boot enablement, live playlist watching, queue generation, YouTube API health monitoring, and alerts remain out of scope for this checkpoint.
 
 ## Operating NZYTE TV
 
@@ -18,6 +18,7 @@ Focused references:
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
+- [Station supervisor and manual systemd operation](docs/station-service.md)
 
 ## Setup
 
@@ -84,6 +85,9 @@ nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vert
 nzytetv verify <input>
 nzytetv build-playlist <library-root> --catalog <catalog-path> --output <playlist-path> --duration <value> [--seed <integer>] [--history <history-path>] [--dry-run]
 nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]
+nzytetv station validate --config <station.json>
+nzytetv station run --config <station.json>
+nzytetv station status [--state <state.json>]
 nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
 nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
 nzytetv metadata sync <source-root> <library-root>
@@ -150,6 +154,12 @@ The current small production library cannot satisfy every ideal rule for six hou
 `broadcast` validates one or more generated schema-version-1 playlists and plays them sequentially from the normalized library. It uses an FFmpeg concat input with real-time pacing, `-c copy`, and FLV output, so playback does not re-encode or filter media. Library-relative paths are resolved safely beneath the supplied root; missing MP4 files, missing technical manifests, traversal attempts, malformed playlists, and invalid sequences prevent broadcast startup.
 
 The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never displayed. `--dry-run` does not require the variable and does not launch FFmpeg. Pressing Ctrl+C cancels and terminates the FFmpeg child process. See [broadcasting.md](docs/broadcasting.md) for setup and usage.
+
+### Station supervisor foundation
+
+`station validate` checks non-secret schema-version-1 station configuration, production paths, the configured static playlist queue, broadcast media readiness, and FFmpeg availability without launching a broadcast. `station run` invokes the existing resilient broadcaster while maintaining `/var/lib/nzyte-tv/state.json` atomically; `station status` verifies its heartbeat and station PID without displaying process command lines. The heartbeat interval is 10 seconds and the stale threshold is 30 seconds.
+
+The repository includes a manual systemd unit using `Restart=on-failure`. Successful static-queue completion exits zero and is not restarted, preventing an automatic replay from item 1. Do not enable the service at boot in Checkpoint 1: persistent reboot resume is reserved for Checkpoint 2. See [Station supervisor and manual systemd operation](docs/station-service.md).
 
 ## Broadcast standard
 

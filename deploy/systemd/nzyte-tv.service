@@ -1,0 +1,20 @@
+[Unit]
+Description=NZYTE TV Station
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/srv/nzyte-tv/media
+
+[Service]
+Type=simple
+User=u24
+Group=u24
+EnvironmentFile=/etc/nzyte-tv/secrets.env
+ExecStart=/opt/nzyte-tv/app/nzytetv station run --config /etc/nzyte-tv/station.json
+Restart=on-failure
+RestartSec=5
+StateDirectory=nzyte-tv
+StateDirectoryMode=0750
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

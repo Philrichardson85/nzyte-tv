@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace NzyteTv.Cli;
 
 public static class ProgramEntry
@@ -10,6 +12,14 @@ public static class ProgramEntry
             eventArgs.Cancel = true;
             cancellation.Cancel();
         };
+
+        using PosixSignalRegistration? terminationRegistration = OperatingSystem.IsWindows()
+            ? null
+            : PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+            {
+                context.Cancel = true;
+                cancellation.Cancel();
+            });
 
         return await CliApplication.RunAsync(args, cancellation.Token).ConfigureAwait(false);
     }

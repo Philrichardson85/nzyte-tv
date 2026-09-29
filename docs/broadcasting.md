@@ -173,6 +173,20 @@ tmux attach -t nzyte-tv
 
 Attach and press Ctrl+C to stop the broadcaster. tmux protects a manual session from an SSH disconnect; broadcaster recovery separately protects the active connection from transient RTMPS/FFmpeg failures. Neither survives a reboot or replaces supervision. The broadcaster does not generate future playlists, dynamically reload its queue, restart after reboot, call the YouTube API, or monitor remote stream health. The current v0.4-era broadcaster uses the fixed queue supplied at startup.
 
+## Station supervisor foundation
+
+The lower-level `broadcast` command remains supported. v0.5.0 Checkpoint 1 also provides a station supervisor above this same broadcast path:
+
+```bash
+nzytetv station validate --config /etc/nzyte-tv/station.json
+nzytetv station run --config /etc/nzyte-tv/station.json
+nzytetv station status
+```
+
+The supervisor loads non-secret configuration, reuses `BroadcastPlanner` readiness checks and `BroadcastRecoveryRunner`, writes versioned runtime state atomically, records the current item and replacement FFmpeg PID through typed broadcaster events, and updates a heartbeat every 10 seconds. Status treats an active document as stale after 30 seconds without a heartbeat or when the recorded station PID no longer exists. It never displays process command lines and explicitly reports that YouTube monitoring is not configured.
+
+The configured playlist queue is fixed for the process lifetime. Successful completion becomes `completed` and exits zero. Ctrl+C or systemd SIGTERM cancels the same existing recovery/FFmpeg process tree and leaves final `stopped` state. This checkpoint does not persist playback position across a full restart, generate future playlists, or provide automatic boot operation. See [Station supervisor and manual systemd operation](station-service.md).
+
 ## Historical v0.4.1 live acceptance evidence
 
 This is historical acceptance evidence, not a permanent operating requirement or a guarantee that every future network failure is recoverable. The accepted Raspberry Pi candidate was freshly published as a self-contained `linux-arm64` build from commit `c23e461` ("Fix broadcast recovery bypass"). The Pi source checkout was explicitly verified at the full commit `c23e46168be883e4e857abda5ee23568dc3b7ba0`, and the candidate was demonstrably different from the previously deployed binary.

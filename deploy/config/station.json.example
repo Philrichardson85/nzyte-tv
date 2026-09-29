@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "mediaRoot": "/srv/nzyte-tv/media",
+  "libraryRoot": "/srv/nzyte-tv/media/library",
+  "statePath": "/var/lib/nzyte-tv/state.json",
+  "playlists": [
+    "/srv/nzyte-tv/media/playlists/production-01.json",
+    "/srv/nzyte-tv/media/playlists/production-02.json"
+  ]
+}

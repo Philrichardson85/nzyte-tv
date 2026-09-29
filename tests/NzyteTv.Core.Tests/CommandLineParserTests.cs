@@ -219,6 +219,58 @@ public sealed class CommandLineParserTests
         Assert.Equal(CommandKind.Broadcast, result.Command.Kind);
     }
 
+    [Theory]
+    [InlineData("validate", CommandKind.StationValidate)]
+    [InlineData("run", CommandKind.StationRun)]
+    public void Parse_StationConfigCommandsRequireAndReturnConfigPath(
+        string subcommand,
+        CommandKind expectedKind)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "station", subcommand, "--config", "/etc/nzyte-tv/station.json",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedKind, result.Command!.Kind);
+        Assert.Equal("/etc/nzyte-tv/station.json", result.Command.ConfigPath);
+
+        CommandParseResult missing = CommandLineParser.Parse(["station", subcommand]);
+        Assert.False(missing.IsSuccess);
+        Assert.Contains("--config", missing.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_StationStatusSupportsOptionalStatePath()
+    {
+        CommandParseResult defaultResult = CommandLineParser.Parse(["station", "status"]);
+        CommandParseResult customResult = CommandLineParser.Parse([
+            "station", "status", "--state", "/tmp/station-state.json",
+        ]);
+
+        Assert.True(defaultResult.IsSuccess);
+        Assert.Equal(CommandKind.StationStatus, defaultResult.Command!.Kind);
+        Assert.Null(defaultResult.Command.StatePath);
+        Assert.True(customResult.IsSuccess);
+        Assert.Equal("/tmp/station-state.json", customResult.Command!.StatePath);
+    }
+
+    [Theory]
+    [InlineData("--help", CommandKind.StationHelp)]
+    [InlineData("validate --help", CommandKind.StationValidate)]
+    [InlineData("run --help", CommandKind.StationRun)]
+    [InlineData("status --help", CommandKind.StationStatus)]
+    public void Parse_StationHelpCommandsAreSupported(string arguments, CommandKind expectedKind)
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "station",
+            .. arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Command!.ShowHelp);
+        Assert.Equal(expectedKind, result.Command.Kind);
+    }
+
     [Fact]
     public void BroadcastSummary_ReportsDestinationConfigurationWithoutSecretValue()
     {

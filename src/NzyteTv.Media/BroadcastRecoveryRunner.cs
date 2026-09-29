@@ -30,10 +30,31 @@ public sealed class BroadcastRecoveryRunner
         Action<BroadcastRecoveryUpdate>? onUpdate,
         CancellationToken cancellationToken)
     {
+        return await RunAsync(
+            plan,
+            destination,
+            onFfmpegOutput,
+            onUpdate,
+            observer: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<BroadcastRecoveryResult> RunAsync(
+        BroadcastPlan plan,
+        string destination,
+        Action<string>? onFfmpegOutput,
+        Action<BroadcastRecoveryUpdate>? onUpdate,
+        IBroadcastRuntimeObserver? observer,
+        CancellationToken cancellationToken)
+    {
         int startIndex = 0;
         int consecutiveRetries = 0;
         BroadcastPlanItem? lastItem = plan.Items[0];
         string lastDiagnostic = string.Empty;
+
+        observer?.OnEvent(new BroadcastRuntimeEvent(
+            BroadcastRuntimeEventKind.BroadcastStarted,
+            lastItem));
 
         while (startIndex < plan.Items.Count)
         {
@@ -42,6 +63,7 @@ public sealed class BroadcastRecoveryRunner
             int activeIndex = startIndex;
             bool reachedEndOfQueue = false;
             bool announced = false;
+            int observedIndex = -1;
             BroadcastAttemptResult attempt = await _broadcaster.BroadcastAttemptAsync(
                 plan,
                 destination,
@@ -58,11 +80,25 @@ public sealed class BroadcastRecoveryRunner
                         announced = true;
                         onUpdate?.Invoke(new BroadcastRecoveryUpdate(lastItem, 0, null, "Now playing"));
                     }
+
+                    if (observedIndex != activeIndex)
+                    {
+                        observedIndex = activeIndex;
+                        observer?.OnEvent(new BroadcastRuntimeEvent(
+                            BroadcastRuntimeEventKind.ItemChanged,
+                            lastItem,
+                            RecoveryAttempts: consecutiveRetries));
+                    }
                 },
+                observer,
                 cancellationToken).ConfigureAwait(false);
 
             if (attempt.FfmpegExitCode == 0)
             {
+                observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.BroadcastCompleted,
+                    lastItem,
+                    RecoveryAttempts: consecutiveRetries));
                 return new BroadcastRecoveryResult(0, consecutiveRetries, lastItem, lastDiagnostic);
             }
 
@@ -70,6 +106,10 @@ public sealed class BroadcastRecoveryRunner
             // has already reported progress beyond the last queued asset. Do not replay it.
             if (reachedEndOfQueue)
             {
+                observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.BroadcastCompleted,
+                    lastItem,
+                    RecoveryAttempts: consecutiveRetries));
                 return new BroadcastRecoveryResult(0, consecutiveRetries, lastItem, lastDiagnostic);
             }
 
@@ -78,6 +118,10 @@ public sealed class BroadcastRecoveryRunner
             BroadcastFailureKind kind = BroadcastFailureClassifier.Classify(attempt.FfmpegExitCode, lastDiagnostic, cancellationToken.IsCancellationRequested);
             if (kind is BroadcastFailureKind.Cancelled or BroadcastFailureKind.Permanent)
             {
+                observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.BroadcastFailed,
+                    lastItem,
+                    RecoveryAttempts: consecutiveRetries));
                 return new BroadcastRecoveryResult(attempt.FfmpegExitCode, consecutiveRetries, lastItem, lastDiagnostic);
             }
 
@@ -86,16 +130,27 @@ public sealed class BroadcastRecoveryRunner
             {
                 consecutiveRetries = 0;
                 onUpdate?.Invoke(new BroadcastRecoveryUpdate(lastItem, 0, null, "Broadcast stable; recovery retry budget reset."));
+                observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.RecoveryBudgetReset,
+                    lastItem));
             }
 
             if (consecutiveRetries >= _policy.MaxConsecutiveRetries)
             {
+                observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.BroadcastFailed,
+                    lastItem,
+                    RecoveryAttempts: consecutiveRetries));
                 return new BroadcastRecoveryResult(attempt.FfmpegExitCode, consecutiveRetries, lastItem, lastDiagnostic);
             }
 
             consecutiveRetries++;
             TimeSpan delay = _policy.GetDelay(consecutiveRetries);
             onUpdate?.Invoke(new BroadcastRecoveryUpdate(lastItem, consecutiveRetries, delay, "Broadcast connection interrupted."));
+            observer?.OnEvent(new BroadcastRuntimeEvent(
+                BroadcastRuntimeEventKind.RecoveryStarted,
+                lastItem,
+                RecoveryAttempts: consecutiveRetries));
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             onUpdate?.Invoke(new BroadcastRecoveryUpdate(lastItem, consecutiveRetries, null, "Broadcast connection restored."));
             startIndex = activeIndex; // restart the interrupted asset; never replay completed assets.

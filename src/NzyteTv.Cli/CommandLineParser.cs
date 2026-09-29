@@ -18,6 +18,10 @@ public enum CommandKind
     MetadataEdit,
     BuildPlaylist,
     Broadcast,
+    StationHelp,
+    StationValidate,
+    StationRun,
+    StationStatus,
     MediaHelp,
     MediaInit,
 }
@@ -37,6 +41,8 @@ public sealed record ParsedCommand(
     int? Seed = null,
     string? HistoryPath = null,
     IReadOnlyList<string>? PlaylistPaths = null,
+    string? ConfigPath = null,
+    string? StatePath = null,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
@@ -61,6 +67,11 @@ public static class CommandLineParser
         if (string.Equals(args[0], "media", StringComparison.OrdinalIgnoreCase))
         {
             return ParseMedia(args);
+        }
+
+        if (string.Equals(args[0], "station", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStation(args);
         }
 
         if (string.Equals(args[0], "build-playlist", StringComparison.OrdinalIgnoreCase))
@@ -183,6 +194,72 @@ public static class CommandLineParser
         }
 
         return Success(new ParsedCommand(CommandKind.MediaInit, Input: args[2]));
+    }
+
+    private static CommandParseResult ParseStation(IReadOnlyList<string> args)
+    {
+        if (args.Count == 1 || (args.Count == 2 && IsHelp(args[1])))
+        {
+            return Success(new ParsedCommand(CommandKind.StationHelp, ShowHelp: true));
+        }
+
+        CommandKind? kind = args[1].ToLowerInvariant() switch
+        {
+            "validate" => CommandKind.StationValidate,
+            "run" => CommandKind.StationRun,
+            "status" => CommandKind.StationStatus,
+            _ => null,
+        };
+        if (kind is null)
+        {
+            return Failure($"Unknown station command '{args[1]}'.");
+        }
+
+        if (args.Count == 3 && IsHelp(args[2]))
+        {
+            return Success(new ParsedCommand(kind.Value, ShowHelp: true));
+        }
+
+        string? configPath = null;
+        string? statePath = null;
+        for (int index = 2; index < args.Count; index++)
+        {
+            string argument = args[index];
+            string expectedOption = kind == CommandKind.StationStatus ? "--state" : "--config";
+            if (argument != expectedOption)
+            {
+                return Failure($"Unknown option '{argument}' for station {args[1]}.");
+            }
+
+            if (++index >= args.Count
+                || string.IsNullOrWhiteSpace(args[index])
+                || args[index].StartsWith("-", StringComparison.Ordinal))
+            {
+                return Failure($"{expectedOption} requires a path.");
+            }
+
+            if (kind == CommandKind.StationStatus)
+            {
+                if (statePath is not null) return Failure("--state may be specified only once.");
+                statePath = args[index];
+            }
+            else
+            {
+                if (configPath is not null) return Failure("--config may be specified only once.");
+                configPath = args[index];
+            }
+        }
+
+        if (kind is CommandKind.StationValidate or CommandKind.StationRun
+            && string.IsNullOrWhiteSpace(configPath))
+        {
+            return Failure($"The station {args[1]} command requires --config <path>.");
+        }
+
+        return Success(new ParsedCommand(
+            kind.Value,
+            ConfigPath: configPath,
+            StatePath: statePath));
     }
 
     private static CommandParseResult ParseMetadata(IReadOnlyList<string> args)

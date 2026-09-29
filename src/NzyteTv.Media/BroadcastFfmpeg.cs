@@ -173,6 +173,25 @@ public sealed class FfmpegBroadcaster
         Action<TimeSpan>? onProgress,
         CancellationToken cancellationToken)
     {
+        return await BroadcastAttemptAsync(
+            plan,
+            destination,
+            startItemIndex,
+            onOutput,
+            onProgress,
+            observer: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<BroadcastAttemptResult> BroadcastAttemptAsync(
+        BroadcastPlan plan,
+        string destination,
+        int startItemIndex,
+        Action<string>? onOutput,
+        Action<TimeSpan>? onProgress,
+        IBroadcastRuntimeObserver? observer,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (!plan.IsReady) throw new InvalidOperationException("Broadcast plan is not ready.");
@@ -202,7 +221,16 @@ public sealed class FfmpegBroadcaster
                 }
             }
             ProcessResult result = await _processRunner.RunAsync(new ProcessRequest(
-                _ffmpegPath, arguments, HandleOutput, HandleOutput), cancellationToken).ConfigureAwait(false);
+                _ffmpegPath,
+                arguments,
+                HandleOutput,
+                HandleOutput,
+                processId => observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.FfmpegProcessStarted,
+                    FfmpegPid: processId)),
+                processId => observer?.OnEvent(new BroadcastRuntimeEvent(
+                    BroadcastRuntimeEventKind.FfmpegProcessStopped,
+                    FfmpegPid: processId))), cancellationToken).ConfigureAwait(false);
             // Only the parent cancellation state makes this a cancellation. In particular,
             // FFmpeg exit 255 without a requested token is an unexpected child failure.
             cancellationToken.ThrowIfCancellationRequested();

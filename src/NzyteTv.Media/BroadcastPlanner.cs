@@ -3,7 +3,12 @@ using NzyteTv.Core;
 
 namespace NzyteTv.Media;
 
-public sealed class BroadcastPlanner
+public interface IBroadcastPlanner
+{
+    BroadcastPlan CreatePlan(IReadOnlyList<string> playlistPaths, string libraryRoot);
+}
+
+public sealed class BroadcastPlanner : IBroadcastPlanner
 {
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
