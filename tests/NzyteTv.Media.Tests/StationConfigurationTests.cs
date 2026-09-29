@@ -210,18 +210,45 @@ public sealed class StationConfigurationTests
 
         StationValidationResult ready = service.Validate(
             fixture.WriteValidConfiguration(),
-            destinationConfigured: false);
+            configuredDestination: null);
         File.Delete(SourceManifestStore.GetManifestPath(fixture.MediaPath));
         StationValidationResult unready = service.Validate(
             fixture.WriteValidConfiguration(),
-            destinationConfigured: true);
+            configuredDestination: "rtmps://example.invalid/live2/EXAMPLE-KEY");
 
         Assert.True(ready.IsReady);
-        Assert.False(ready.DestinationConfigured);
+        Assert.Equal(BroadcastDestinationStatus.NotConfigured, ready.DestinationStatus);
         Assert.False(unready.IsReady);
-        Assert.True(unready.DestinationConfigured);
+        Assert.Equal(BroadcastDestinationStatus.Valid, unready.DestinationStatus);
         Assert.Equal(1, unready.BroadcastPlan.UnreadyAssetCount);
         Assert.Equal(2, locatorCalls);
+    }
+
+    [Theory]
+    [InlineData(null, BroadcastDestinationStatus.NotConfigured, true)]
+    [InlineData("", BroadcastDestinationStatus.NotConfigured, true)]
+    [InlineData("   ", BroadcastDestinationStatus.NotConfigured, true)]
+    [InlineData("rtmp://example.invalid/live/EXAMPLE-KEY", BroadcastDestinationStatus.Valid, true)]
+    [InlineData("rtmps://example.invalid/live2/EXAMPLE-KEY", BroadcastDestinationStatus.Valid, true)]
+    [InlineData("not-a-url", BroadcastDestinationStatus.Invalid, false)]
+    [InlineData("https://example.invalid/live/EXAMPLE-KEY", BroadcastDestinationStatus.Invalid, false)]
+    public void Validate_ClassifiesDestinationUsingLiveRunSemantics(
+        string? configuredDestination,
+        BroadcastDestinationStatus expectedStatus,
+        bool expectedReady)
+    {
+        using var fixture = new StationConfigurationFixture();
+        var service = new StationValidationService(
+            new StationConfigurationLoader(),
+            new BroadcastPlanner(),
+            () => "ffmpeg");
+
+        StationValidationResult result = service.Validate(
+            fixture.WriteValidConfiguration(),
+            configuredDestination);
+
+        Assert.Equal(expectedStatus, result.DestinationStatus);
+        Assert.Equal(expectedReady, result.IsReady);
     }
 
     private sealed class StationConfigurationFixture : IDisposable

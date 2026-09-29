@@ -464,14 +464,14 @@ public static class CliApplication
             return snapshot.Status is StationStatusKind.Stale or StationStatusKind.Failed ? 1 : 0;
         }
 
-        bool destinationConfigured = !string.IsNullOrWhiteSpace(
-            Environment.GetEnvironmentVariable(BroadcastDestination.DefaultEnvironmentVariable));
+        string? configuredDestination = Environment.GetEnvironmentVariable(
+            BroadcastDestination.DefaultEnvironmentVariable);
         var validationService = new StationValidationService(
             new StationConfigurationLoader(),
             new BroadcastPlanner());
         StationValidationResult validation = validationService.Validate(
             command.ConfigPath!,
-            destinationConfigured);
+            configuredDestination);
 
         if (command.Kind == CommandKind.StationValidate)
         {
@@ -486,7 +486,7 @@ public static class CliApplication
         }
 
         string destination = BroadcastDestination.Resolve(
-            Environment.GetEnvironmentVariable(BroadcastDestination.DefaultEnvironmentVariable),
+            configuredDestination,
             dryRun: false)!;
         string ffmpeg = await new MediaToolLocator().LocateFfmpegAsync(cancellationToken)
             .ConfigureAwait(false);

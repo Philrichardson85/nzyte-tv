@@ -73,6 +73,24 @@ public static class BroadcastDestination
 {
     public const string DefaultEnvironmentVariable = "NZYTE_TV_RTMP_URL";
 
+    public static BroadcastDestinationStatus GetStatus(string? configuredValue)
+    {
+        if (string.IsNullOrWhiteSpace(configuredValue))
+        {
+            return BroadcastDestinationStatus.NotConfigured;
+        }
+
+        try
+        {
+            _ = Resolve(configuredValue, dryRun: false);
+            return BroadcastDestinationStatus.Valid;
+        }
+        catch (InvalidOperationException)
+        {
+            return BroadcastDestinationStatus.Invalid;
+        }
+    }
+
     public static string? Resolve(string? configuredValue, bool dryRun)
     {
         if (dryRun)
@@ -95,6 +113,13 @@ public static class BroadcastDestination
 
         return configuredValue;
     }
+}
+
+public enum BroadcastDestinationStatus
+{
+    NotConfigured,
+    Valid,
+    Invalid,
 }
 
 public sealed record BroadcastAttemptResult(

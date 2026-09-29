@@ -199,6 +199,28 @@ public sealed class BroadcastTests
         Assert.Contains(BroadcastDestination.DefaultEnvironmentVariable, exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("rtmp://example.invalid/live/EXAMPLE-KEY")]
+    [InlineData("rtmps://example.invalid/live2/EXAMPLE-KEY")]
+    public void Destination_ValidLiveRunValuesResolveUnchanged(string configuredDestination)
+    {
+        Assert.Equal(BroadcastDestinationStatus.Valid, BroadcastDestination.GetStatus(configuredDestination));
+        Assert.Equal(configuredDestination, BroadcastDestination.Resolve(configuredDestination, dryRun: false));
+    }
+
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("https://example.invalid/live/EXAMPLE-KEY")]
+    public void Destination_InvalidLiveRunValuesAreRejectedWithoutDisclosure(string configuredDestination)
+    {
+        Assert.Equal(BroadcastDestinationStatus.Invalid, BroadcastDestination.GetStatus(configuredDestination));
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            BroadcastDestination.Resolve(configuredDestination, dryRun: false));
+
+        Assert.DoesNotContain(configuredDestination, exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void BuildArguments_UsesConcatRealtimeStreamCopyFlvWithoutEncoders()
     {

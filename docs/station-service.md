@@ -64,7 +64,7 @@ Validation does not start FFmpeg or mutate the configuration:
   --config /etc/nzyte-tv/station.json
 ```
 
-It validates configuration, roots, playlist JSON, playlist media, technical manifests, and FFmpeg availability by reusing broadcast planning/readiness checks. The destination line reports only `CONFIGURED` or `NOT CONFIGURED`. An absent destination does not prevent configuration/media validation because systemd can supply it later; `station run` does require it.
+It validates configuration, roots, playlist JSON, playlist media, technical manifests, and FFmpeg availability by reusing broadcast planning/readiness checks. Without printing the destination value, the destination line reports `NOT CONFIGURED`, `CONFIGURED / VALID`, or `CONFIGURED / INVALID` using the same RTMP/RTMPS validation as a live run. An absent destination does not prevent configuration/media validation because systemd can supply it later; a configured but malformed destination makes the overall result `NOT READY`, and `station run` requires a valid destination.
 
 ## Run and inspect without systemd
 

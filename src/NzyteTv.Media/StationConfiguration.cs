@@ -149,9 +149,11 @@ public sealed record StationValidationResult(
     StationConfiguration Configuration,
     BroadcastPlan BroadcastPlan,
     bool FfmpegAvailable,
-    bool DestinationConfigured)
+    BroadcastDestinationStatus DestinationStatus)
 {
-    public bool IsReady => BroadcastPlan.IsReady && FfmpegAvailable;
+    public bool IsReady => BroadcastPlan.IsReady
+        && FfmpegAvailable
+        && DestinationStatus != BroadcastDestinationStatus.Invalid;
 }
 
 public sealed class StationValidationService
@@ -172,7 +174,7 @@ public sealed class StationValidationService
         _locateFfmpeg = locateFfmpeg ?? MediaToolLocator.LocateFfmpegOnPath;
     }
 
-    public StationValidationResult Validate(string configPath, bool destinationConfigured)
+    public StationValidationResult Validate(string configPath, string? configuredDestination)
     {
         StationConfiguration configuration = _configurationLoader.Load(configPath);
         BroadcastPlan plan = _broadcastPlanner.CreatePlan(
@@ -192,6 +194,6 @@ public sealed class StationValidationService
             configuration,
             plan,
             ffmpegAvailable,
-            destinationConfigured);
+            BroadcastDestination.GetStatus(configuredDestination));
     }
 }

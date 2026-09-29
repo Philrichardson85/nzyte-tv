@@ -19,7 +19,7 @@ public static class StationFormatters
         output.AppendLine($"Playlists:           {result.Configuration.Playlists.Count}");
         output.AppendLine($"Playlist media:      {(result.BroadcastPlan.IsReady ? "READY" : "NOT READY")}");
         output.AppendLine($"FFmpeg:              {(result.FfmpegAvailable ? "AVAILABLE" : "NOT AVAILABLE")}");
-        output.AppendLine($"Destination env:     {(result.DestinationConfigured ? "CONFIGURED" : "NOT CONFIGURED")}");
+        output.AppendLine($"Destination env:     {FormatDestinationStatus(result.DestinationStatus)}");
         output.AppendLine();
         output.AppendLine("Status:");
         output.AppendLine($"    {(result.IsReady ? "READY" : "NOT READY")}");
@@ -117,4 +117,12 @@ public static class StationFormatters
 
     private static string FormatTimestamp(DateTimeOffset value) =>
         value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static string FormatDestinationStatus(BroadcastDestinationStatus status) => status switch
+    {
+        BroadcastDestinationStatus.NotConfigured => "NOT CONFIGURED",
+        BroadcastDestinationStatus.Valid => "CONFIGURED / VALID",
+        BroadcastDestinationStatus.Invalid => "CONFIGURED / INVALID",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown destination status."),
+    };
 }

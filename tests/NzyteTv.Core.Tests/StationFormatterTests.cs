@@ -9,11 +9,13 @@ public sealed class StationFormatterTests
     private const string Secret = "rtmps://example.invalid/live2/SECRET-KEY";
 
     [Theory]
-    [InlineData(false, "Destination env:     NOT CONFIGURED")]
-    [InlineData(true, "Destination env:     CONFIGURED")]
-    public void Validation_ReportsDestinationPresenceWithoutValue(
-        bool configured,
-        string expected)
+    [InlineData(BroadcastDestinationStatus.NotConfigured, "Destination env:     NOT CONFIGURED", "    READY")]
+    [InlineData(BroadcastDestinationStatus.Valid, "Destination env:     CONFIGURED / VALID", "    READY")]
+    [InlineData(BroadcastDestinationStatus.Invalid, "Destination env:     CONFIGURED / INVALID", "    NOT READY")]
+    public void Validation_ReportsDestinationStatusWithoutValue(
+        BroadcastDestinationStatus destinationStatus,
+        string expectedDestination,
+        string expectedOverallStatus)
     {
         var configuration = new StationConfiguration
         {
@@ -35,10 +37,40 @@ public sealed class StationFormatterTests
             configuration,
             plan,
             FfmpegAvailable: true,
-            DestinationConfigured: configured));
+            DestinationStatus: destinationStatus));
 
-        Assert.Contains(expected, output, StringComparison.Ordinal);
-        Assert.Contains("READY", output, StringComparison.Ordinal);
+        Assert.Contains(expectedDestination, output, StringComparison.Ordinal);
+        Assert.Contains(expectedOverallStatus, output, StringComparison.Ordinal);
+        Assert.DoesNotContain(Secret, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Validation_ConfiguredDestinationValueIsNotAvailableToFormatterOutput()
+    {
+        var configuration = new StationConfiguration
+        {
+            SchemaVersion = 1,
+            MediaRoot = "/media",
+            LibraryRoot = "/library",
+            StatePath = "/state.json",
+            Playlists = ["/playlist.json"],
+        };
+        var plan = new BroadcastPlan(
+            configuration.LibraryRoot,
+            configuration.Playlists,
+            [new BroadcastPlanItem("/playlist.json", 1, "asset", "asset.mp4", "/library/asset.mp4", 60)],
+            [],
+            1,
+            60);
+        BroadcastDestinationStatus destinationStatus = BroadcastDestination.GetStatus(Secret);
+
+        string output = StationFormatters.FormatValidation(new StationValidationResult(
+            configuration,
+            plan,
+            FfmpegAvailable: true,
+            DestinationStatus: destinationStatus));
+
+        Assert.Contains("Destination env:     CONFIGURED / VALID", output, StringComparison.Ordinal);
         Assert.DoesNotContain(Secret, output, StringComparison.Ordinal);
     }
 
