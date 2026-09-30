@@ -105,7 +105,12 @@ public sealed class PlaylistGenerator
                     IsCadenceOverdue(asset.Type, state, policy, playTime),
                     state.GetLastAssetPlay(asset.AssetId),
                     policy.MusicOrientedNormalTypes.Contains(asset.Type),
-                    IsShortSongPresentation(asset, policy),
+                    programmingConfiguration is null
+                        ? IsShortSongPresentation(asset, policy)
+                        : ProgrammingContentClassifier.IsShortProgrammingPiece(
+                            asset.Type,
+                            RoundSeconds(asset.DurationSeconds),
+                            policy),
                     IsCategoryBelowTarget(asset.Type, state, effectiveTargets),
                     GetCategoryDeficitImprovement(asset, state, effectiveTargets),
                     state.GetLastContentGroupPlay(asset.ContentGroupId),
@@ -212,7 +217,10 @@ public sealed class PlaylistGenerator
                 relaxation.ContentGroupAdjacency++;
             }
 
-            if (selection.ShortRunRelaxationUsed)
+            if (programmingConfiguration is not null
+                && state.ConsecutiveShortProgrammingPieces
+                    >= programmingConfiguration.Repetition!.MaximumConsecutiveShortPieces
+                && selected.ShortPresentation)
             {
                 relaxation.ShortRun++;
             }
@@ -250,7 +258,7 @@ public sealed class PlaylistGenerator
                 asset.RelativePath,
                 RoundSeconds(asset.DurationSeconds),
                 RoundSeconds(offsetSeconds)));
-            state.Record(asset, playTime, policy);
+            state.Record(asset, playTime, policy, selected.ShortPresentation);
             if (patternSequencer is not null
                 && ProgrammingContentClassifier.IsSubstantial(asset.Type))
             {
@@ -301,7 +309,7 @@ public sealed class PlaylistGenerator
             ShortRunRelaxations = relaxation.ShortRun,
             MaximumObservedConsecutiveShortPieces = programmingConfiguration is null
                 ? 0
-                : state.MaximumObservedConsecutiveShortPieces,
+                : CalculateMaximumConsecutiveShortPieces(items, policy),
             ConfiguredAirtimeTargetPercentages = ToPercentages(targetPlan.ConfiguredTargets),
             EffectiveAirtimeTargetPercentages = ToPercentages(targetPlan.EffectiveTargets),
             PracticalCategoryCapacitySeconds = targetPlan.PracticalCapacitySeconds,
@@ -514,78 +522,24 @@ public sealed class PlaylistGenerator
                 vlogAtOrAboveTarget);
         }
 
-        CandidateEvaluation[]? preferredShortFallback = null;
         for (int stage = 0; stage <= 10; stage++)
         {
-            CandidateEvaluation[] available = candidates
-                .Where(candidate => stage switch
-                {
-                    0 => candidate.CategoryPreferred
-                        && candidate.LanePreferred
-                        && candidate.ExactAssetAllowed
-                        && candidate.ContentGroupClusterPreferred
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    1 => candidate.LanePreferred
-                        && candidate.ExactAssetAllowed
-                        && candidate.ContentGroupClusterPreferred
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    2 => candidate.CategoryPreferred
-                        && candidate.ExactAssetAllowed
-                        && candidate.ContentGroupClusterPreferred
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    3 => candidate.ExactAssetAllowed
-                        && candidate.ContentGroupClusterPreferred
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    4 => candidate.ExactAssetAllowed
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    5 => candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogPreferred,
-                    6 => candidate.ExactAssetAllowed
-                        && candidate.ContentGroupClusterPreferred
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogWithinNormalLimit,
-                    7 => candidate.ExactAssetAllowed
-                        && candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogWithinNormalLimit,
-                    8 => candidate.ContentGroupAdjacentAllowed
-                        && candidate.VlogWithinNormalLimit,
-                    9 => candidate.VlogWithinNormalLimit,
-                    _ => true,
-                })
+            CandidateEvaluation[] constraintSafe = candidates
+                .Where(candidate => IsProgrammingCandidateAllowedAtStage(candidate, stage))
                 .ToArray();
-
-            bool shortRunRelaxationUsed = false;
-            if (maximumShortRunReached)
+            if (maximumShortRunReached
+                && constraintSafe.Any(candidate =>
+                    ProgrammingContentClassifier.IsSubstantial(candidate.Asset.Type)
+                    && !candidate.ShortPresentation))
             {
-                CandidateEvaluation[] nonShort = available
+                constraintSafe = constraintSafe
                     .Where(candidate => !candidate.ShortPresentation)
                     .ToArray();
-                if (nonShort.Length > 0)
-                {
-                    available = nonShort;
-                }
-                else if (stage < 3)
-                {
-                    preferredShortFallback ??= available.Length > 0 ? available : null;
-                    continue;
-                }
-                else if (stage == 3 && (available.Length > 0 || preferredShortFallback is not null))
-                {
-                    preferredShortFallback ??= available;
-                    available = preferredShortFallback;
-                    shortRunRelaxationUsed = true;
-                }
-                else if (available.Length > 0)
-                {
-                    shortRunRelaxationUsed = true;
-                }
             }
 
+            CandidateEvaluation[] available = constraintSafe
+                .Where(candidate => IsProgrammingCandidatePreferredAtStage(candidate, stage))
+                .ToArray();
             if (available.Length == 0)
             {
                 continue;
@@ -593,7 +547,7 @@ public sealed class PlaylistGenerator
 
             CandidatePreference preference = ApplyCandidatePreferences(
                 available,
-                candidates,
+                constraintSafe,
                 stage >= 5 ? 2 : 0,
                 vlogAtOrAboveTarget,
                 musicBelowCombinedTarget);
@@ -630,8 +584,7 @@ public sealed class PlaylistGenerator
                 PatternFallbackUsed: ProgrammingContentClassifier.IsSubstantial(selected.Asset.Type)
                     && !selected.LanePreferred,
                 ContentGroupClusterRelaxationUsed: !selected.ContentGroupClusterPreferred,
-                ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed,
-                ShortRunRelaxationUsed: shortRunRelaxationUsed && selected.ShortPresentation);
+                ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed);
         }
 
         throw new InvalidOperationException("Playlist scheduling made no progress because no candidates are available.");
@@ -652,6 +605,42 @@ public sealed class PlaylistGenerator
             ContentGroupClusterRelaxationUsed: !selected.ContentGroupClusterPreferred,
             ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed);
     }
+
+    private static bool IsProgrammingCandidateAllowedAtStage(
+        CandidateEvaluation candidate,
+        int stage) => stage switch
+        {
+            <= 3 => candidate.ExactAssetAllowed
+                && candidate.ContentGroupClusterPreferred
+                && candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogPreferred,
+            4 => candidate.ExactAssetAllowed
+                && candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogPreferred,
+            5 => candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogPreferred,
+            6 => candidate.ExactAssetAllowed
+                && candidate.ContentGroupClusterPreferred
+                && candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogWithinNormalLimit,
+            7 => candidate.ExactAssetAllowed
+                && candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogWithinNormalLimit,
+            8 => candidate.ContentGroupAdjacentAllowed
+                && candidate.VlogWithinNormalLimit,
+            9 => candidate.VlogWithinNormalLimit,
+            _ => true,
+        };
+
+    private static bool IsProgrammingCandidatePreferredAtStage(
+        CandidateEvaluation candidate,
+        int stage) => stage switch
+        {
+            0 => candidate.CategoryPreferred && candidate.LanePreferred,
+            1 => candidate.LanePreferred,
+            2 => candidate.CategoryPreferred,
+            _ => true,
+        };
 
     private static CandidateEvaluation ProgrammingWeightedChoice(
         IReadOnlyList<CandidateEvaluation> candidates,
@@ -755,7 +744,7 @@ public sealed class PlaylistGenerator
 
     private static CandidatePreference ApplyCandidatePreferences(
         IReadOnlyCollection<CandidateEvaluation> available,
-        IReadOnlyCollection<CandidateEvaluation> allCandidates,
+        IReadOnlyCollection<CandidateEvaluation> constraintSafeCandidates,
         int stage,
         bool vlogAtOrAboveTarget,
         bool musicBelowCombinedTarget)
@@ -764,7 +753,7 @@ public sealed class PlaylistGenerator
         bool musicFirstSubstitutionAvailable = false;
         bool projectedVlogSubstitutionAvailable = false;
         HashSet<CandidateEvaluation> maturingFullResetCandidates = preferred
-            .Where(candidate => WouldDelayMaturingFullPresentation(candidate, allCandidates))
+            .Where(candidate => WouldDelayMaturingFullPresentation(candidate, constraintSafeCandidates))
             .ToHashSet();
         if (maturingFullResetCandidates.Count > 0
             && preferred.Any(candidate => candidate.Asset.Type == AssetTypes.Vlog))
@@ -774,10 +763,10 @@ public sealed class PlaylistGenerator
                 .ToArray();
         }
 
-        CandidateEvaluation[] legalMusic = allCandidates
+        CandidateEvaluation[] legalMusic = constraintSafeCandidates
             .Where(candidate => candidate.MusicOriented
                 && IsCandidateLegalAtStage(candidate, stage)
-                && !WouldDelayMaturingFullPresentation(candidate, allCandidates))
+                && !WouldDelayMaturingFullPresentation(candidate, constraintSafeCandidates))
             .ToArray();
         CandidateEvaluation[] vlogCandidatesToDefer = preferred
             .Where(candidate => candidate.Asset.Type == AssetTypes.Vlog
@@ -795,7 +784,7 @@ public sealed class PlaylistGenerator
                 && vlogCandidatesToDefer.Any(candidate => candidate.ProjectedVlogOvershoot);
         }
 
-        CandidateEvaluation[] underTargetFull = allCandidates
+        CandidateEvaluation[] underTargetFull = constraintSafeCandidates
             .Where(candidate => candidate.MusicOriented
                 && !candidate.ShortPresentation
                 && candidate.CategoryBelowTarget
@@ -1355,6 +1344,31 @@ public sealed class PlaylistGenerator
                     : Math.Round(group.Sum(item => item.DurationSeconds) / totalSeconds * 100, 2),
                 StringComparer.Ordinal);
 
+    private static int CalculateMaximumConsecutiveShortPieces(
+        IEnumerable<PlaylistItem> items,
+        PlaylistPolicy policy)
+    {
+        int current = 0;
+        int maximum = 0;
+        foreach (PlaylistItem item in items)
+        {
+            if (!ProgrammingContentClassifier.IsSubstantial(item.Type))
+            {
+                continue;
+            }
+
+            current = ProgrammingContentClassifier.IsShortProgrammingPiece(
+                item.Type,
+                item.DurationSeconds,
+                policy)
+                ? current + 1
+                : 0;
+            maximum = Math.Max(maximum, current);
+        }
+
+        return maximum;
+    }
+
     private static IReadOnlyDictionary<string, double> ToPercentages(
         IReadOnlyDictionary<string, double> targets) =>
         targets.ToDictionary(
@@ -1482,8 +1496,7 @@ public sealed class PlaylistGenerator
         bool LongMusicAirtimeEfficiencySubstitutionUsed = false,
         bool PatternFallbackUsed = false,
         bool ContentGroupClusterRelaxationUsed = false,
-        bool ContentGroupAdjacencyViolationUsed = false,
-        bool ShortRunRelaxationUsed = false);
+        bool ContentGroupAdjacencyViolationUsed = false);
 
     private sealed record ProgrammingFamily(
         string Key,
@@ -1609,7 +1622,6 @@ public sealed class PlaylistGenerator
                     play.DurationSeconds,
                     policy))
                 .Count();
-            MaximumObservedConsecutiveShortPieces = ConsecutiveShortProgrammingPieces;
             LastPromoAt = prior.LastOrDefault(play => policy.PromoInsertionTypes.Contains(play.Type))?.PlayedAtUtc
                 ?? scheduleStart;
             LastInterstitialAt = prior.LastOrDefault(play => play.Type == AssetTypes.Interstitial)?.PlayedAtUtc
@@ -1626,8 +1638,6 @@ public sealed class PlaylistGenerator
         public int ConsecutiveVlogCount { get; private set; }
 
         public int ConsecutiveShortProgrammingPieces { get; private set; }
-
-        public int MaximumObservedConsecutiveShortPieces { get; private set; }
 
         public int NormalProgramsSinceBumper { get; private set; }
 
@@ -1653,7 +1663,11 @@ public sealed class PlaylistGenerator
         public IEnumerable<string?> RecentSubstantialContentGroupIds(int count) =>
             _substantialContentGroups.TakeLast(Math.Max(0, count));
 
-        public void Record(PlaylistAsset asset, DateTimeOffset playTime, PlaylistPolicy policy)
+        public void Record(
+            PlaylistAsset asset,
+            DateTimeOffset playTime,
+            PlaylistPolicy policy,
+            bool shortPresentation)
         {
             LastAssetPlay[asset.AssetId] = playTime;
             if (!string.IsNullOrWhiteSpace(asset.ContentGroupId))
@@ -1673,12 +1687,9 @@ public sealed class PlaylistGenerator
             if (ProgrammingContentClassifier.IsSubstantial(asset.Type))
             {
                 _substantialContentGroups.Add(asset.ContentGroupId);
-                ConsecutiveShortProgrammingPieces = ProgrammingContentClassifier.IsShortProgrammingPiece(asset, policy)
+                ConsecutiveShortProgrammingPieces = shortPresentation
                     ? ConsecutiveShortProgrammingPieces + 1
                     : 0;
-                MaximumObservedConsecutiveShortPieces = Math.Max(
-                    MaximumObservedConsecutiveShortPieces,
-                    ConsecutiveShortProgrammingPieces);
             }
 
             if (asset.Type == AssetTypes.Bumper)

@@ -425,7 +425,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
 
         Assert.Equal("short-three", result.Playlist.Items[0].AssetId);
         Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
-        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(1, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
@@ -442,7 +442,8 @@ public sealed class ProgrammingPlaylistGeneratorTests
 
         Assert.Equal("full", result.Playlist.Items[0].AssetId);
         Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
-        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(0, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(1, result.Playlist.Summary.ProgrammingPatternFallbacks);
     }
 
     [Fact]
@@ -460,7 +461,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
             history: History((AssetTypes.ShortForm, 30)));
 
         Assert.Equal("full", result.Playlist.Items[0].AssetId);
-        Assert.Equal(1, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(0, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
@@ -524,7 +525,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
                 (AssetTypes.AnimatedVisual, 30)));
 
         Assert.Equal("full", result.Playlist.Items[0].AssetId);
-        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(0, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
@@ -538,13 +539,13 @@ public sealed class ProgrammingPlaylistGeneratorTests
 
         Assert.Equal("only-short", result.Playlist.Items[0].AssetId);
         Assert.Equal(1, result.Playlist.Summary.ShortRunRelaxations);
-        Assert.Equal(4, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(1, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
     public void ActiveCampaignCannotBypassMaximumShortRun()
     {
-        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.ShortPerformance) with
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.Personality) with
         {
             ActiveCampaign = new ActiveCampaign
             {
@@ -556,14 +557,331 @@ public sealed class ProgrammingPlaylistGeneratorTests
         PlaylistGenerationResult result = Generate(
             [
                 Song("campaign-short", "campaign-short", 30, AssetTypes.ShortForm),
-                Song("full-alternative", "full-alternative", 120),
+                Vlog("vlog-alternative", 120),
             ],
             configuration,
             TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.ShortForm] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
             history: ThreeShortPieceHistory());
 
-        Assert.Equal("full-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
         Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void CategoryPreferenceCannotReintroduceShortAfterMaximumRun()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("category-short", "category-short", 30, AssetTypes.AnimatedVisual),
+                Vlog("vlog-alternative", 120),
+            ],
+            Config(ProgrammingLaneNames.Personality),
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.AnimatedVisual] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: ThreeShortPieceHistory());
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void PresentationWeightCannotReintroduceShortAfterMaximumRun()
+    {
+        PlaylistAsset favoredShort = Song(
+            "favored-short",
+            "favored-short",
+            30,
+            AssetTypes.AnimatedVisual);
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.Personality) with
+        {
+            AssetOverrides = new Dictionary<string, AssetEditorialOverride>
+            {
+                [favoredShort.AssetId] = new() { WeightMultiplier = 10 },
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [favoredShort, Vlog("vlog-alternative", 120)],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.AnimatedVisual] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: ThreeShortPieceHistory());
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void CategoryCapacityFallbackCannotBypassMaximumShortRun()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                .. Enumerable.Range(1, 4).Select(index => Song(
+                    $"short-{index}",
+                    $"short-group-{index}",
+                    30,
+                    AssetTypes.AnimatedVisual)),
+                .. Enumerable.Range(1, 6).Select(index => Song(
+                    $"full-{index}",
+                    $"full-group-{index}",
+                    120)),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromMinutes(5),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.AnimatedVisual] = 0.9,
+                [AssetTypes.MusicVideo] = 0.1,
+            });
+
+        Assert.Contains(AssetTypes.AnimatedVisual, result.Playlist.Summary.CapacityLimitedCategories);
+        Assert.True(result.Playlist.Summary.MaximumObservedConsecutiveShortPieces <= 3);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void EveryUnavoidableShortBeyondMaximumIsCountedFromFinalEmissions()
+    {
+        PlaylistGenerationResult result = Generate(
+            Enumerable.Range(1, 6)
+                .Select(index => Song(
+                    $"short-{index}",
+                    $"short-group-{index}",
+                    30,
+                    AssetTypes.AnimatedVisual))
+                .ToArray(),
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromMinutes(3));
+
+        Assert.Equal(6, result.Playlist.Items.Count);
+        Assert.Equal(3, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(6, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(
+            CalculateMaximumShortRun(result.Playlist.Items),
+            result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void LaneAndCategoryFallbackCannotReintroduceAdjacentPerformance()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("performance-b", "same-song", 120, AssetTypes.Performance),
+                Vlog("vlog-alternative", 120),
+            ],
+            Config(ProgrammingLaneNames.Personality),
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.Performance] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: HistoryWithIdentity(
+                ("performance-a", "same-song", AssetTypes.Performance, 120)));
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void SameGroupPerformancePresentationCannotFollowWhenAnotherGroupExists()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("performance-b", "same-song", 120, AssetTypes.Performance),
+                Song("other-performance", "other-song", 120, AssetTypes.Performance),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: HistoryWithIdentity(
+                ("performance-a", "same-song", AssetTypes.Performance, 120)));
+
+        Assert.Equal("other-performance", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void CampaignCannotReintroduceAdjacentPerformance()
+    {
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.Personality) with
+        {
+            ActiveCampaign = new ActiveCampaign
+            {
+                Enabled = true,
+                ContentGroupId = "same-song",
+                WeightMultiplier = 10,
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("performance-b", "same-song", 120, AssetTypes.Performance),
+                Vlog("vlog-alternative", 120),
+            ],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.Performance] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: HistoryWithIdentity(
+                ("performance-a", "same-song", AssetTypes.Performance, 120)));
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void PresentationWeightCannotReintroduceAdjacentPerformance()
+    {
+        PlaylistAsset adjacent = Song(
+            "performance-b",
+            "same-song",
+            120,
+            AssetTypes.Performance);
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.Personality) with
+        {
+            AssetOverrides = new Dictionary<string, AssetEditorialOverride>
+            {
+                [adjacent.AssetId] = new() { WeightMultiplier = 10 },
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [adjacent, Vlog("vlog-alternative", 120)],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.Performance] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: HistoryWithIdentity(
+                ("performance-a", "same-song", AssetTypes.Performance, 120)));
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Theory]
+    [InlineData(AssetTypes.Bumper)]
+    [InlineData(AssetTypes.Promo)]
+    public void InsertionInHistoryDoesNotLegalizeAdjacentSong(string insertionType)
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("performance-b", "same-song", 120, AssetTypes.Performance),
+                Vlog("vlog-alternative", 120),
+            ],
+            Config(ProgrammingLaneNames.Personality),
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.Performance] = 0.9,
+                [AssetTypes.Vlog] = 0.1,
+            },
+            history: HistoryWithIdentity(
+                ("performance-a", "same-song", AssetTypes.Performance, 120),
+                ("insertion", null, insertionType, 10)));
+
+        Assert.Equal("vlog-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void ShortRunAndAdjacencyConstraintsSelectValidAlternativeTogether()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("adjacent-short", "last-song", 30, AssetTypes.ShortForm),
+                Song("other-short", "other-short", 30, AssetTypes.AnimatedVisual),
+                Song("valid-full", "valid-full", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.ShortForm] = 0.45,
+                [AssetTypes.AnimatedVisual] = 0.45,
+                [AssetTypes.MusicVideo] = 0.1,
+            },
+            history: HistoryWithIdentity(
+                ("history-one", "history-one", AssetTypes.ShortForm, 30),
+                ("history-two", "history-two", AssetTypes.Performance, 30),
+                ("history-three", "last-song", AssetTypes.AnimatedVisual, 30)));
+
+        Assert.Equal("valid-full", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void SongClusterLookbackRemainsAheadOfCampaignWeight()
+    {
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.ShortPerformance) with
+        {
+            ActiveCampaign = new ActiveCampaign
+            {
+                Enabled = true,
+                ContentGroupId = "recent-song",
+                WeightMultiplier = 10,
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("recent-performance", "recent-song", 120, AssetTypes.Performance),
+                Song("fresh-performance", "fresh-song", 120, AssetTypes.Performance),
+            ],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            history: HistoryWithIdentity(
+                ("recent-history", "recent-song", AssetTypes.MusicVideo, 120),
+                ("other-history", "other-song", AssetTypes.MusicVideo, 120)));
+
+        Assert.Equal("fresh-performance", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupClusterRelaxations);
+    }
+
+    [Fact]
+    public void PlannedHistoryCarriesShortRunAndAdjacencyContextsAcrossBlocks()
+    {
+        PlaylistGenerationResult first = Generate(
+            [
+                Song("short-a", "group-a", 30, AssetTypes.ShortForm),
+                Song("short-b", "group-b", 30, AssetTypes.AnimatedVisual),
+                Song("short-c", "group-c", 30, AssetTypes.Performance),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromMinutes(1.5),
+            seed: 40);
+        string previousGroup = first.Playlist.Items[^1].ContentGroupId!;
+        PlaylistGenerationResult second = Generate(
+            [
+                Song("adjacent-short", previousGroup, 30, AssetTypes.ShortForm),
+                Song("other-short", "other-short", 30, AssetTypes.AnimatedVisual),
+                Song("valid-full", "valid-full", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: first.UpdatedHistory);
+
+        Assert.Equal(3, CalculateMaximumShortRun(first.Playlist.Items));
+        Assert.Equal("valid-full", second.Playlist.Items[0].AssetId);
+        Assert.Equal(0, second.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(0, second.Playlist.Summary.ContentGroupAdjacencyViolations);
     }
 
     [Fact]
@@ -594,6 +912,9 @@ public sealed class ProgrammingPlaylistGeneratorTests
         Assert.Equal(
             first.Playlist.Summary.MaximumObservedConsecutiveShortPieces,
             second.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(
+            CalculateMaximumShortRun(first.Playlist.Items),
+            first.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
@@ -640,6 +961,10 @@ public sealed class ProgrammingPlaylistGeneratorTests
 
         Assert.Equal(first.Playlist.Items, second.Playlist.Items);
         Assert.True(first.Playlist.ActualDurationSeconds >= TimeSpan.FromHours(6).TotalSeconds);
+        Assert.True(first.Playlist.Summary.MaximumObservedConsecutiveShortPieces <= 3);
+        Assert.Equal(0, first.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(0, first.Playlist.Summary.ContentGroupAdjacencyViolations);
+        AssertNoAdjacentSubstantialSong(first.Playlist.Items);
     }
 
     [Fact]
@@ -708,13 +1033,14 @@ public sealed class ProgrammingPlaylistGeneratorTests
         int bumperMaximum = 5,
         int promoMinimumMinutes = 30,
         int promoMaximumMinutes = 45,
-        int maximumConsecutiveShortPieces = 3)
+        int maximumConsecutiveShortPieces = 3,
+        int exactAssetCooldownMinutes = 1)
     {
         return ProgrammingConfiguration.CreateDefault() with
         {
             Repetition = new ProgrammingRepetitionPolicy
             {
-                ExactAssetCooldownMinutes = 1,
+                ExactAssetCooldownMinutes = exactAssetCooldownMinutes,
                 SameContentGroupLookback = lookback,
                 MaximumConsecutiveShortPieces = maximumConsecutiveShortPieces,
             },
@@ -798,6 +1124,42 @@ public sealed class ProgrammingPlaylistGeneratorTests
             Now.AddMinutes(index - plays.Length),
             play.DurationSeconds)).ToArray(),
     };
+
+    private static PlaylistHistoryDocument HistoryWithIdentity(
+        params (string AssetId, string? ContentGroupId, string Type, double DurationSeconds)[] plays) => new()
+        {
+            ScheduleEndUtc = Now,
+            Plays = plays.Select((play, index) => new PlaylistHistoryEntry(
+                play.AssetId,
+                play.ContentGroupId,
+                play.Type,
+                Now.AddMinutes(index - plays.Length),
+                play.DurationSeconds)).ToArray(),
+        };
+
+    private static int CalculateMaximumShortRun(IReadOnlyList<PlaylistItem> items)
+    {
+        var policy = new PlaylistPolicy();
+        int current = 0;
+        int maximum = 0;
+        foreach (PlaylistItem item in items)
+        {
+            if (!ProgrammingContentClassifier.IsSubstantial(item.Type))
+            {
+                continue;
+            }
+
+            current = ProgrammingContentClassifier.IsShortProgrammingPiece(
+                item.Type,
+                item.DurationSeconds,
+                policy)
+                ? current + 1
+                : 0;
+            maximum = Math.Max(maximum, current);
+        }
+
+        return maximum;
+    }
 
     private static void AssertNoAdjacentSubstantialSong(IReadOnlyList<PlaylistItem> items)
     {
