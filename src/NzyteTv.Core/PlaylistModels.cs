@@ -82,6 +82,16 @@ public sealed class PlaylistSummary
 
     public int InterstitialInsertions { get; init; }
 
+    public bool ProgrammingPolicyActive { get; init; }
+
+    public int? ProgrammingPolicyRevision { get; init; }
+
+    public int ProgrammingPatternFallbacks { get; init; }
+
+    public int ContentGroupClusterRelaxations { get; init; }
+
+    public int ContentGroupAdjacencyViolations { get; init; }
+
     public IReadOnlyDictionary<string, double> ConfiguredAirtimeTargetPercentages { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal);
 

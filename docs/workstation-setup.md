@@ -434,6 +434,7 @@ Resulting layout (reference, not a command):
     library/
     catalog/
         song-catalog.json
+        programming.json        optional; created explicitly
     playlists/
     work/
 ```
@@ -445,6 +446,7 @@ The directories have distinct purposes:
 - `source/Animated Visuals` contains animated, narrative, cinematic, anime/movie-style, AI-animated, or similar extended song presentations.
 - `library` is managed by NZYTE TV and contains normalized, verified broadcast media. Do not manually put normalized files there unless project documentation explicitly instructs you to do so.
 - `catalog/song-catalog.json` contains canonical song identity and grouping.
+- optional `catalog/programming.json` contains sparse Checkpoint 3A editorial and sequencing policy; `media init` does not create it.
 - Programming metadata sidecars and technical normalization manifests travel with their related library assets.
 - `playlists` can hold generated playlists and history.
 - `work` is available for media-root working data.
@@ -510,6 +512,9 @@ C:\Tools\NzyteTv\candidate\nzytetv.exe metadata review `
 
 C:\Tools\NzyteTv\candidate\nzytetv.exe metadata sync "D:\source" "D:\library"
 
+C:\Tools\NzyteTv\candidate\nzytetv.exe programming init --media-root "D:\"
+C:\Tools\NzyteTv\candidate\nzytetv.exe programming validate --media-root "D:\"
+
 C:\Tools\NzyteTv\candidate\nzytetv.exe build-playlist `
   "D:\library" `
   --catalog "D:\catalog\song-catalog.json" `
@@ -535,6 +540,9 @@ Bash:
   /mnt/nzyte-media/source \
   /mnt/nzyte-media/library
 
+/opt/nzyte-tv/app/nzytetv programming init --media-root /mnt/nzyte-media
+/opt/nzyte-tv/app/nzytetv programming validate --media-root /mnt/nzyte-media
+
 /opt/nzyte-tv/app/nzytetv build-playlist \
   /mnt/nzyte-media/library \
   --catalog /mnt/nzyte-media/catalog/song-catalog.json \
@@ -543,9 +551,9 @@ Bash:
   --duration 6h
 ```
 
-These metadata commands do not invoke FFmpeg or re-encode media. When normalization and metadata review are complete, use the operating system's safe-eject function before unplugging the drive. Mount the same drive on the Raspberry Pi and use its normalized `library/`; an operating-system or mount-path change alone does not require normalization again.
+The two `programming` commands explicitly activate optional Checkpoint 3A policy; omit them to retain legacy scheduler behavior. Initialization never overwrites an existing policy. These metadata and programming commands do not invoke FFmpeg or re-encode media. When normalization and metadata review are complete, use the operating system's safe-eject function before unplugging the drive. Mount the same drive on the Raspberry Pi and use its normalized `library/`; an operating-system or mount-path change alone does not require normalization again.
 
-See [Media library](media-library.md) for the full workstation-to-Pi workflow and [Content catalog](content-catalog.md) for catalog and review details.
+See [Media library](media-library.md) for the full workstation-to-Pi workflow, [Content catalog](content-catalog.md) for catalog and review details, and [V1 programming policy](programming.md) for editorial controls and scheduling behavior.
 
 ## Troubleshooting
 

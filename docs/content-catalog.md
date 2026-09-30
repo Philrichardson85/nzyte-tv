@@ -14,10 +14,13 @@ The recommended catalog directory is:
 
 ```text
 /srv/nzyte-tv/catalog/
-`-- song-catalog.json
+|-- song-catalog.json
+`-- programming.json        optional Checkpoint 3A policy
 ```
 
-The location is an operational convention, not a domain constant. Every command accepts the source, library, and catalog paths explicitly.
+The location is an operational convention, not a domain constant. Metadata commands accept the source, library, and catalog paths explicitly. Playlist generation looks for optional `programming.json` beside the supplied `song-catalog.json`; portable roots conventionally use `<media-root>/catalog/programming.json`.
+
+These files have different responsibilities. `song-catalog.json` and `.nzytetv.meta.json` sidecars define stable content identity. Sparse `programming.json` policy defines editorial selection and pacing for future playlists. It does not replace either identity source and never contains station runtime state or secrets. See [V1 programming policy](programming.md).
 
 ## Two identities
 
@@ -302,6 +305,10 @@ A song asset is eligible only when:
 - `contentGroupId` resolves in the catalog;
 - `enabled` is `true`.
 
+When optional Checkpoint 3A programming policy is active, final air eligibility additionally requires that no sparse asset override has `doNotAir: true`. Assets are eligible by default; they do not need to be registered in `programming.json`. Do Not Air is editorial only and never alters normalized media, source files, technical manifests, catalog relationships, or sidecars. Clearing or resetting the override makes a technically eligible asset available again without normalization.
+
+The policy's Active Campaign targets the existing catalog `contentGroupId`, while asset presentation weights and Do Not Air target the existing sidecar `assetId`. No second song-identity system is created.
+
 Unresolved metadata does not affect encoding:
 
 ```text
@@ -344,6 +351,6 @@ The edit preserves `assetId` and all unrelated fields. Changing to a non-song ty
 
 ## Scope boundary
 
-Metadata commands do not normalize, schedule, broadcast, watch the filesystem, call the YouTube API, or provide a GUI.
+Metadata commands do not normalize, schedule, broadcast, watch the filesystem, call the YouTube API, or provide a GUI. The separate `programming` commands manage the optional sparse scheduling policy without editing identity metadata or invoking FFmpeg.
 
 Most importantly: encoding never waits for metadata questions.

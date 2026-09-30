@@ -1,6 +1,6 @@
 # Station supervisor, persistent resume, and systemd operation
 
-NZYTE TV v0.5.0 Checkpoint 2 extends the accepted station foundation with safe item-level resume across a full station-process restart. It still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover or generate future playlists.
+NZYTE TV v0.5.0 Checkpoint 2 extends the station foundation with safe item-level resume across a full station-process restart. It has passed Raspberry Pi acceptance for hard parent failure, clean stop/start, graceful reboot, and boot-enabled reboot. It still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover or generate future playlists.
 
 The supervisor continues to wrap, rather than replace, the existing resilient broadcaster:
 
@@ -152,7 +152,7 @@ RestartPreventExitStatus=78
 
 Exit code 78 means a permanent station-start/configuration or resume-safety failure. systemd does not loop on invalid configuration, a malformed destination, an unsafe cursor, a queue mismatch, or a detected second supervisor. Unexpected station runtime failure still exits 1 and remains eligible for restart. Successful completion and clean stop exit 0 and are not restarted.
 
-Operate manually while Checkpoint 2 awaits Pi acceptance:
+Routine service controls are:
 
 ```bash
 sudo systemctl start nzyte-tv
@@ -167,11 +167,11 @@ pgrep -x ffmpeg
 
 The final process check should print nothing. SIGTERM cancels heartbeat and recovery, terminates the owned FFmpeg child tree, starts no retry, and writes `stopped` while retaining the resume cursor.
 
-> Do not run `systemctl enable nzyte-tv` until Checkpoint 2 Raspberry Pi acceptance Tests A, B, and C below pass. Installation and application code never enable the service automatically.
+Boot enablement remains an explicit operator decision. Installation and application code never run `systemctl enable`; the production operator enabled the service only after Tests A, B, and C passed.
 
-## Manual Raspberry Pi acceptance plan
+## Raspberry Pi acceptance procedure and result
 
-These tests are for later manual Pi acceptance; they are not automated workstation tests.
+The following manual tests passed on the Raspberry Pi. Keep the procedure for later deployment regression checks; it is not an automated workstation test.
 
 ### Test A — hard parent-process crash
 
@@ -210,8 +210,8 @@ Only after A, B, and C pass:
 sudo systemctl enable nzyte-tv
 ```
 
-Reboot while the station is running. Verify automatic service startup, persisted queue resume, `pgrep -x -c ffmpeg` reports exactly `1`, the correct item is active, status is healthy, and no secret is disclosed. This operator action is the final Checkpoint 2 acceptance step; it is not performed by NZYTE TV or installation code.
+Reboot while the station is running. Verify automatic service startup, persisted queue resume, `pgrep -x -c ffmpeg` reports exactly `1`, the correct item is active, status is healthy, and no secret is disclosed. This operator action passed as the final Checkpoint 2 acceptance step; it was not performed by NZYTE TV or installation code.
 
 ## Current limitations
 
-Checkpoint 2 is durable resume for the explicitly configured static queue, not unattended continuous programming. It does not generate or discover another playlist, append to the queue, mutate `playlists/history.json`, persist an exact media timestamp, call YouTube APIs, monitor remote stream health, or alert an operator. Scheduler history remains planned-programming history; station state remains actual runtime progress. Those responsibilities are intentionally separate, and Checkpoint 3/4 functionality is not implemented here.
+Checkpoint 2 is durable resume for the explicitly configured static queue, not unattended continuous programming. Checkpoint 3A can improve playlists before they are supplied to the station, but it does not generate or discover another playlist while broadcasting or append to the active queue. The station does not mutate `playlists/history.json`, persist an exact media timestamp, call YouTube APIs, monitor remote stream health, or alert an operator. Scheduler history remains planned-programming history; station state remains actual runtime progress.

@@ -16,7 +16,9 @@ public sealed record PlaylistBuildResult(
     PlaylistGenerationResult Generation,
     string OutputPath,
     string? HistoryPath,
-    bool DryRun);
+    bool DryRun,
+    bool ProgrammingPolicyActive = false,
+    string? ProgrammingConfigurationPath = null);
 
 public sealed class PlaylistBuilder(
     ISongCatalogStore catalogStore,
@@ -25,10 +27,13 @@ public sealed class PlaylistBuilder(
     IPlaylistHistoryStore historyStore,
     PlaylistGenerator generator,
     PlaylistPolicy? basePolicy = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IProgrammingConfigurationStore? programmingStore = null)
 {
     private readonly PlaylistPolicy _basePolicy = basePolicy ?? new PlaylistPolicy();
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly IProgrammingConfigurationStore _programmingStore =
+        programmingStore ?? new ProgrammingConfigurationStore();
 
     public async Task<PlaylistBuildResult> BuildAsync(
         PlaylistBuildRequest request,
@@ -50,6 +55,34 @@ public sealed class PlaylistBuilder(
             request.LibraryRoot,
             catalog,
             cancellationToken).ConfigureAwait(false);
+        string programmingPath = ProgrammingConfigurationStore.GetPathForCatalog(request.CatalogPath);
+        ProgrammingConfiguration? programmingConfiguration = _programmingStore.LoadIfExists(programmingPath);
+        if (programmingConfiguration is not null)
+        {
+            var inventory = snapshot.KnownAssetIds
+                .ToDictionary(
+                    assetId => assetId,
+                    assetId => new ProgrammingAssetInventoryEntry(
+                        assetId,
+                        ContentGroupId: null,
+                        AssetTypes.Special,
+                        IsTechnicallyPlaylistEligible: false),
+                    StringComparer.Ordinal);
+            foreach (PlaylistAsset asset in snapshot.EligibleAssets)
+            {
+                inventory[asset.AssetId] = new ProgrammingAssetInventoryEntry(
+                    asset.AssetId,
+                    asset.ContentGroupId,
+                    asset.Type,
+                    IsTechnicallyPlaylistEligible: true);
+            }
+
+            ProgrammingConfigurationValidator.Validate(
+                programmingConfiguration,
+                catalog,
+                inventory.Values.ToArray());
+        }
+
         PlaylistHistoryDocument history = historyPath is null
             ? PlaylistHistoryDocument.Empty
             : historyStore.Load(historyPath);
@@ -62,7 +95,8 @@ public sealed class PlaylistBuilder(
             history,
             policy,
             seed,
-            now);
+            now,
+            programmingConfiguration);
         if (!request.DryRun)
         {
             await playlistStore.WriteAsync(outputPath, generation.Playlist, cancellationToken)
@@ -74,7 +108,13 @@ public sealed class PlaylistBuilder(
             }
         }
 
-        return new PlaylistBuildResult(generation, outputPath, historyPath, request.DryRun);
+        return new PlaylistBuildResult(
+            generation,
+            outputPath,
+            historyPath,
+            request.DryRun,
+            programmingConfiguration is not null,
+            programmingConfiguration is null ? null : programmingPath);
     }
 
     private static int CreateDailySeed(DateTimeOffset value) =>

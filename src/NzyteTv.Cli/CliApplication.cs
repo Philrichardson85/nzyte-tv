@@ -32,6 +32,17 @@ public static class CliApplication
                 return await RunStationCommandAsync(command, cancellationToken).ConfigureAwait(false);
             }
 
+            if (command.Kind is CommandKind.ProgrammingInit
+                or CommandKind.ProgrammingValidate
+                or CommandKind.ProgrammingStatus
+                or CommandKind.ProgrammingCampaignSet
+                or CommandKind.ProgrammingCampaignClear
+                or CommandKind.ProgrammingAssetSet
+                or CommandKind.ProgrammingAssetReset)
+            {
+                return await RunProgrammingCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             if (command.Kind == CommandKind.MediaInit)
             {
                 return await RunMediaInitAsync(command.Input!, cancellationToken).ConfigureAwait(false);
@@ -398,6 +409,77 @@ public static class CliApplication
         return 0;
     }
 
+    private static async Task<int> RunProgrammingCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        var service = new ProgrammingService();
+        string mediaRoot = command.ProgrammingMediaRoot!;
+        switch (command.Kind)
+        {
+            case CommandKind.ProgrammingInit:
+                {
+                    ProgrammingConfigurationInitializationResult result = await service.InitializeAsync(
+                        mediaRoot,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(ProgrammingFormatters.FormatInitialization(result));
+                    return 0;
+                }
+            case CommandKind.ProgrammingValidate:
+                {
+                    ProgrammingValidationResult result = service.Validate(mediaRoot);
+                    Console.Write(ProgrammingFormatters.FormatValidation(result));
+                    return result.IsValid ? 0 : 1;
+                }
+            case CommandKind.ProgrammingStatus:
+                {
+                    ProgrammingValidationResult result = service.Validate(mediaRoot);
+                    Console.Write(ProgrammingFormatters.FormatStatus(result));
+                    return result.IsValid ? 0 : 1;
+                }
+            case CommandKind.ProgrammingCampaignSet:
+                {
+                    ProgrammingMutationResult result = await service.SetCampaignAsync(
+                        mediaRoot,
+                        command.ProgrammingContentGroupId!,
+                        command.ProgrammingWeightMultiplier,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(ProgrammingFormatters.FormatMutation(result));
+                    return 0;
+                }
+            case CommandKind.ProgrammingCampaignClear:
+                {
+                    ProgrammingMutationResult result = await service.ClearCampaignAsync(
+                        mediaRoot,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(ProgrammingFormatters.FormatMutation(result));
+                    return 0;
+                }
+            case CommandKind.ProgrammingAssetSet:
+                {
+                    ProgrammingMutationResult result = await service.SetAssetOverrideAsync(
+                        mediaRoot,
+                        command.ProgrammingAssetId!,
+                        command.ProgrammingDoNotAir,
+                        command.ProgrammingWeightMultiplier,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(ProgrammingFormatters.FormatMutation(result));
+                    return 0;
+                }
+            case CommandKind.ProgrammingAssetReset:
+                {
+                    ProgrammingMutationResult result = await service.ResetAssetOverrideAsync(
+                        mediaRoot,
+                        command.ProgrammingAssetId!,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(ProgrammingFormatters.FormatMutation(result));
+                    return 0;
+                }
+            default:
+                return 2;
+        }
+    }
+
     private static async Task<int> RunBroadcastAsync(
         ParsedCommand command,
         CancellationToken cancellationToken)
@@ -605,6 +687,7 @@ public static class CliApplication
         Console.WriteLine($"Actual duration:            {FormatScheduleDuration(playlist.ActualDurationSeconds)}");
         Console.WriteLine($"Overrun:                    {FormatScheduleDuration(playlist.OverrunSeconds)}");
         Console.WriteLine($"Seed:                       {playlist.Seed}");
+        Console.WriteLine($"Programming policy:         {(summary.ProgrammingPolicyActive ? $"ACTIVE (revision {summary.ProgrammingPolicyRevision})" : "LEGACY")}");
         Console.WriteLine($"Eligible assets:            {summary.EligibleAssets}");
         Console.WriteLine($"Excluded assets:            {summary.ExcludedAssets}");
         Console.WriteLine();
@@ -652,6 +735,12 @@ public static class CliApplication
         Console.WriteLine($"    long-music efficiency:  {summary.LongMusicAirtimeEfficiencySubstitutions}");
         Console.WriteLine($"    consecutive vlog:       {summary.ConsecutiveVlogViolations}");
         Console.WriteLine($"    emergency vlog run:     {summary.EmergencyVlogRunViolations}");
+        if (summary.ProgrammingPolicyActive)
+        {
+            Console.WriteLine($"    pattern fallback:       {summary.ProgrammingPatternFallbacks}");
+            Console.WriteLine($"    song cluster lookback:  {summary.ContentGroupClusterRelaxations}");
+            Console.WriteLine($"    song adjacency:         {summary.ContentGroupAdjacencyViolations}");
+        }
         Console.WriteLine();
         Console.WriteLine("Cadence misses:");
         Console.WriteLine($"    bumper:                  {summary.BumperCadenceMisses}");
@@ -880,6 +969,7 @@ public static class CliApplication
             Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
             Console.WriteLine("  nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
             Console.WriteLine("  nzytetv station <validate|run|status> ...");
+            Console.WriteLine("  nzytetv programming <init|validate|status|campaign|asset> ...");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
             Console.WriteLine();
@@ -948,6 +1038,59 @@ public static class CliApplication
                 Console.WriteLine("Usage: nzytetv station status [--state <state.json>]");
                 Console.WriteLine($"Read station runtime/persistence state (default: {StationRuntimePolicy.DefaultStatePath}) and verify its heartbeat and PID.");
                 Console.WriteLine("Process command lines and destination credentials are never displayed.");
+                break;
+            case CommandKind.ProgrammingHelp:
+                Console.WriteLine("NZYTE TV programming policy");
+                Console.WriteLine();
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv programming init --media-root <media-root>");
+                Console.WriteLine("  nzytetv programming validate --media-root <media-root>");
+                Console.WriteLine("  nzytetv programming status --media-root <media-root>");
+                Console.WriteLine("  nzytetv programming campaign <set|clear> ...");
+                Console.WriteLine("  nzytetv programming asset <set|reset> ...");
+                Console.WriteLine();
+                Console.WriteLine("The portable configuration is <media-root>/catalog/programming.json.");
+                Console.WriteLine("It contains policy and editorial controls only, never runtime state or secrets.");
+                break;
+            case CommandKind.ProgrammingInit:
+                Console.WriteLine("Usage: nzytetv programming init --media-root <media-root>");
+                Console.WriteLine("Create the default schema-v1 programming configuration when absent; never overwrite an existing configuration.");
+                break;
+            case CommandKind.ProgrammingValidate:
+                Console.WriteLine("Usage: nzytetv programming validate --media-root <media-root>");
+                Console.WriteLine("Validate policy structure, catalog identities, asset overrides, and available library inventory.");
+                break;
+            case CommandKind.ProgrammingStatus:
+                Console.WriteLine("Usage: nzytetv programming status --media-root <media-root>");
+                Console.WriteLine("Report campaign, editorial overrides, repetition, cadence, personalities, and scheduler integration.");
+                break;
+            case CommandKind.ProgrammingCampaignHelp:
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv programming campaign set <contentGroupId> --media-root <media-root> [--weight <value>]");
+                Console.WriteLine("  nzytetv programming campaign clear --media-root <media-root>");
+                Console.WriteLine("One content group may be spotlighted; the default multiplier is 2.0x.");
+                break;
+            case CommandKind.ProgrammingCampaignSet:
+                Console.WriteLine("Usage: nzytetv programming campaign set <contentGroupId> --media-root <media-root> [--weight <value>]");
+                Console.WriteLine("Set the one active song-family campaign after validating the catalog identity.");
+                break;
+            case CommandKind.ProgrammingCampaignClear:
+                Console.WriteLine("Usage: nzytetv programming campaign clear --media-root <media-root>");
+                Console.WriteLine("Clear the active campaign and restore ordinary song-family weighting.");
+                break;
+            case CommandKind.ProgrammingAssetHelp:
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv programming asset set <assetId> --media-root <media-root> [--do-not-air true|false] [--weight <value>]");
+                Console.WriteLine("  nzytetv programming asset reset <assetId> --media-root <media-root>");
+                Console.WriteLine("Overrides are sparse; assets without an override use normal defaults.");
+                break;
+            case CommandKind.ProgrammingAssetSet:
+                Console.WriteLine("Usage: nzytetv programming asset set <assetId> --media-root <media-root> [--do-not-air true|false] [--weight <value>]");
+                Console.WriteLine("Set editorial eligibility and/or presentation weighting without changing media or metadata.");
+                break;
+            case CommandKind.ProgrammingAssetReset:
+                Console.WriteLine("Usage: nzytetv programming asset reset <assetId> --media-root <media-root>");
+                Console.WriteLine("Remove the sparse editorial override so the asset returns to programming defaults.");
                 break;
             case CommandKind.MediaHelp:
                 Console.WriteLine("NZYTE TV portable media-root tools");

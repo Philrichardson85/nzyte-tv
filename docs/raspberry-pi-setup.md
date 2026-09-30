@@ -370,7 +370,9 @@ The deployed layout separates source, published application files, mutable worki
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
-|-- catalog/                       versioned programming catalog
+|-- catalog/
+|   |-- song-catalog.json          stable song identity
+|   `-- programming.json           optional Checkpoint 3A policy
 |-- work/
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
@@ -517,6 +519,12 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv station validate --help
 /opt/nzyte-tv/app/nzytetv station run --help
 /opt/nzyte-tv/app/nzytetv station status --help
+/opt/nzyte-tv/app/nzytetv programming --help
+/opt/nzyte-tv/app/nzytetv programming init --help
+/opt/nzyte-tv/app/nzytetv programming validate --help
+/opt/nzyte-tv/app/nzytetv programming status --help
+/opt/nzyte-tv/app/nzytetv programming campaign --help
+/opt/nzyte-tv/app/nzytetv programming asset --help
 /opt/nzyte-tv/app/nzytetv metadata --help
 /opt/nzyte-tv/app/nzytetv metadata initialize --help
 /opt/nzyte-tv/app/nzytetv metadata review --help
@@ -525,7 +533,7 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv metadata edit --help
 ```
 
-The recommended master song catalog path is `/srv/nzyte-tv/catalog/song-catalog.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. See [content-catalog.md](content-catalog.md) before initializing sidecars for production media.
+The recommended master song catalog path is `/srv/nzyte-tv/catalog/song-catalog.json`. Catalog and programming-metadata commands accept paths explicitly and do not invoke FFmpeg. Optional Checkpoint 3A policy lives beside the catalog as `programming.json`; initialize it with `programming init --media-root /srv/nzyte-tv` when the SD-card catalog and `/srv/nzyte-tv/library` convenience symlink are used, or `--media-root /srv/nzyte-tv/media` for the portable-drive catalog. See [content-catalog.md](content-catalog.md) and [programming.md](programming.md) before production use.
 
 The original commands `inspect`, `normalize`, and `verify` were verified on the deployed Pi. `normalize-library` completed both the representative nine-file acceptance run and the full 39-file production run, including unchanged second-run verification tests.
 
@@ -533,7 +541,7 @@ Checkpoint 2 uses the repository-owned systemd unit and examples under `deploy/`
 
 Schema-version-2 state preserves a deterministic queue identity and the first item not positively known to have completed. A matching stopped/interrupted queue resumes that item from its beginning; schema-version-1 state starts fresh, stopped state with changed programming starts fresh, and interrupted state with a changed queue refuses to guess.
 
-> **Do not run `systemctl enable nzyte-tv` until Checkpoint 2 Pi acceptance succeeds.** First perform the documented hard parent-crash, clean stop/start, and graceful reboot tests while the service remains disabled. Only then may the operator enable it and run the final automatic boot-resume test. No NZYTE TV code or install step enables the unit.
+Checkpoint 2 passed the documented hard parent-crash, clean stop/start, graceful disabled-service reboot, and final boot-enabled reboot tests on Raspberry Pi. Boot enablement remains an explicit operator action; no NZYTE TV code or install step enables the unit.
 
 Inspect a quoted source-master path through the convenience symlink:
 
@@ -682,6 +690,5 @@ The current broadcaster automates this stream-copy path and still never stores o
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
-- Raspberry Pi acceptance of Checkpoint 2 persistent resume: hard parent-process restart, clean stop/start, and graceful reboot while the unit remains disabled.
-- Final operator-controlled `systemctl enable nzyte-tv` and automatic boot-resume acceptance, only after the preceding Checkpoint 2 tests pass.
+- Checkpoint 3A programming-policy playlist inspection against the live production inventory on Raspberry Pi.
 - Automatic playlist queue regeneration and remote stream-health monitoring.

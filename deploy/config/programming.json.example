@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "repetition": {
+    "exactAssetCooldownMinutes": 120,
+    "sameContentGroupLookback": 2
+  },
+  "stationImaging": {
+    "minimumSubstantialPieces": 3,
+    "maximumSubstantialPieces": 5
+  },
+  "promoCadence": {
+    "minimumIntervalMinutes": 30,
+    "maximumIntervalMinutes": 45
+  },
+  "releaseAgeHotRotationEnabled": false,
+  "personalities": [
+    {
+      "name": "music-heavy",
+      "lanes": [
+        "full-music",
+        "full-music",
+        "short-performance",
+        "full-music",
+        "personality",
+        "full-music"
+      ]
+    },
+    {
+      "name": "mixed",
+      "lanes": [
+        "full-music",
+        "short-performance",
+        "full-music",
+        "personality",
+        "short-performance",
+        "full-music"
+      ]
+    },
+    {
+      "name": "fast-paced",
+      "lanes": [
+        "short-performance",
+        "full-music",
+        "short-performance",
+        "full-music",
+        "short-performance",
+        "personality-or-full-music"
+      ]
+    }
+  ],
+  "activeCampaign": {
+    "enabled": false,
+    "contentGroupId": null,
+    "weightMultiplier": 2.0
+  },
+  "assetOverrides": {}
+}

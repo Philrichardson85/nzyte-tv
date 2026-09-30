@@ -32,6 +32,8 @@ Preview without writing either output:
 
 Dry-run still takes a real read-only snapshot and inspects durations with FFprobe. It writes no playlist, history, metadata, manifest, or media file.
 
+Checkpoint 3A automatically looks for `programming.json` beside the `song-catalog.json` supplied through `--catalog`. When present, the versioned V1 programming policy is validated and applied. When absent, the accepted legacy scheduler behavior remains available without migration. See [V1 programming policy](programming.md) for initialization and operator commands.
+
 ## Why six hours
 
 Six hours is the initial production schedule target. The present library contains only about 1 hour 17 minutes of unique programming, so a six-hour schedule necessarily repeats material. The engine keeps adding complete assets until it reaches or slightly exceeds the target; it never cuts media merely to hit the boundary.
@@ -50,13 +52,15 @@ Generation scans the normalized library once. An asset is schedulable only when 
 - FFprobe returns a positive duration;
 - the active policy gives the asset type an airtime target or cadence.
 
+With Checkpoint 3A policy active, sparse `assetOverrides` are applied after these existing technical and metadata checks. A Do Not Air override excludes the asset from future playlist generation. An asset with no override remains eligible by default; adding prepared content never requires registering it in `programming.json`.
+
 Missing, disabled, invalid, unresolved, duration-less, duplicate-identity, or policy-disabled assets are excluded with visible reasons. Schedule generation never repairs or mutates them. Zero participating eligible assets is a clear failure.
 
 `visualizer` represents a full-song static or lightly animated graphical presentation. `animated-visual` represents an animated, narrative, cinematic, anime/movie-style, AI-animated, or similar extended song presentation. Both are normal music programming, require a valid catalog relationship, and are never treated as promo, bumper, interstitial, advertisement, or vlog cadence content.
 
-## Default policy
+## Shared category policy and legacy behavior
 
-The strongly typed policy is centralized in `NzyteTv.Core`. The provisional normal-program defaults are:
+The strongly typed base policy is centralized in `NzyteTv.Core`. The following table describes the compatibility behavior used when `programming.json` is absent. The active Checkpoint 3A overrides are described in the next section.
 
 | Rule | Default |
 |---|---:|
@@ -73,7 +77,7 @@ The strongly typed policy is centralized in `NzyteTv.Core`. The provisional norm
 | Same `contentGroupId` normal floor | 60 minutes |
 | Music-first rescue floor | 45 minutes, only before vlog #3+ |
 | Consecutive vlogs | one preferred; two permitted as fallback |
-| Bumper cadence | every 4–5 normal programs |
+| Bumper cadence | every 4–5 normal programs (legacy mode) |
 | Interstitial cadence | every 20–30 minutes |
 | Promo cadence | every 30–45 minutes |
 
@@ -95,11 +99,36 @@ Cadence windows have a minimum eligibility boundary as well as a preferred/overd
 - an interstitial is ineligible before 20 minutes, preferred from 20 through 30 minutes, and overdue after 30 minutes;
 - a bumper is ineligible until four normal programs have played, is preferred after four, and is overdue after five.
 
-A normal program is any scheduled type other than bumper, promo, or interstitial. Cadence items do not increment the bumper's normal-program count.
+In legacy mode, a normal program is any scheduled type other than bumper, promo, or interstitial. Cadence items do not increment the bumper's normal-program count. With Checkpoint 3A policy active, bumper cadence instead counts only substantial programming pieces and uses the configurable 3–5 default; promo and advertisement share one configurable mini-break cadence.
 
 Minimum cadence eligibility is independent of the ordinary exact-asset cooldown and is not opened by the normal fallback ladder. When a cadence category is due, assets outside their exact cooldown are preferred. If every asset in an overdue cadence category is still inside its ordinary exact cooldown, that cooldown may be relaxed for the cadence insertion. This never permits an insertion before the cadence minimum. Multiple eligible cadence assets continue to use deterministic seeded selection.
 
-The mix is provisional and remains centralized in `PlaylistPolicy` so it can be tuned after the expanded production library is ingested and measured. External policy JSON is intentionally deferred.
+The category mix and inventory-capacity planner remain centralized in `PlaylistPolicy`. Checkpoint 3A layers its versioned operator configuration over these existing targets rather than replacing them or creating a second scheduler.
+
+## Checkpoint 3A programming-policy selection
+
+The active policy changes sequencing while retaining the same eligible snapshot, target planner, deterministic seed, playlist schema, and planned history. The conceptual selection order is:
+
+1. honor an overdue cadence insertion;
+2. ask the current internal personality template for a lane;
+3. use category deficit and inventory capacity to prefer an asset type;
+4. enforce exact-asset protection and same-song substantial-item adjacency, then prefer a content group outside the recent substantial-piece lookback;
+5. choose one `contentGroupId` family, applying the optional Active Campaign multiplier;
+6. choose a presentation within that family using its sparse asset weight; and
+7. relax preferences deterministically when real inventory cannot satisfy them.
+
+Song-family choice and presentation choice are separate. A family with twelve eligible presentations therefore receives the same ordinary family weight as a family with one presentation. The active campaign defaults to 2.0x and changes the family weight once; it never multiplies by presentation count or bypasses Do Not Air or hard adjacency.
+
+The exact asset retains a configurable preferred cooldown, initially two hours. The previous long time-based same-song model is replaced, only under active Checkpoint 3A policy, by:
+
+- no adjacent substantial pieces with the same `contentGroupId` while any valid alternative exists; and
+- a strong, configurable preference against a group seen in the previous two substantial pieces.
+
+Substantial content uses existing types: music-video, lyric-video, visualizer, animated-visual, performance, short-form, vlog, and special. Bumper, promo, interstitial, and advertisement insertions do not reset adjacency or the lookback.
+
+MUSIC-HEAVY, MIXED, and FAST-PACED are internal deterministic lane templates, not named shows. Missing lane inventory falls back safely. Full/short classification reuses the existing 60-second rule, short-form remains part of ordinary flow, and vlogs remain non-music personality content with consecutive-vlog protection.
+
+Bumpers rotate through least-recently-used eligible presentations and are preferred after three substantial pieces and due by five. Promo and advertisement assets share the configurable 30–45 minute mini-break interval; they are not scheduled as back-to-back commercial pods. Interstitial cadence remains separate and compatible.
 
 ## Hot rotation
 
@@ -114,7 +143,11 @@ Hot rotation uses metadata `rotationStartDate`, never filesystem timestamps:
 
 Weights feed the seeded deterministic choice. Hot preference cannot bypass same-song spacing or consecutive-vlog protection. When the selected hot preference cannot be used and a lower-weight candidate is required, the bypass is counted.
 
-## Cooldowns and relaxation
+This release-age behavior remains the legacy default when `programming.json` is absent. Under Checkpoint 3A policy it defaults OFF, so it does not silently stack with an operator-selected campaign. `releaseAgeHotRotationEnabled` can explicitly opt back in; if enabled, the age weight is calculated once per content group rather than once per presentation.
+
+## Legacy cooldowns and relaxation
+
+The time-based rules in this section describe compatibility behavior when `programming.json` is absent. Active Checkpoint 3A policy instead uses the exact-asset cooldown plus substantial-item adjacency and lookback described above.
 
 Different visual assets with the same `contentGroupId` are one song family. A music video, lyric video, visualizer, animated visual, performance, and short-form clip for one song all share one cooldown clock. Changing presentation type never bypasses history or song spacing. The preferred target is 90 minutes. A controlled relaxation may schedule the group from 60 through 90 minutes; ordinary fallback never schedules it below the 60-minute floor. Visualizers, animated visuals, and short-form have no special song-repeat escape hatch.
 
@@ -209,7 +242,7 @@ Playlist schema version 1 is JSON with camel-case property names:
 }
 ```
 
-Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. Target-planning diagnostics, the music-first rescue, cadence insertion, and emergency-violation counters are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
+Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. Target-planning diagnostics, the music-first rescue, cadence insertion, emergency-violation counters, `programmingPolicyActive`, `programmingPolicyRevision`, pattern fallbacks, song-cluster relaxations, and unavoidable adjacency violations are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
 
 ## History schema and playlist boundaries
 
@@ -234,8 +267,10 @@ The next playlist starts no earlier than the prior `scheduleEndUtc`. This preven
 
 Missing history starts cleanly. Malformed, unsupported, or internally inconsistent history fails with a clear error; it is never silently ignored or overwritten.
 
+History remains planned programming history under Checkpoint 3A. It is not an air log and is never merged with schema-v2 station resume state. Programming configuration changes affect only later normal playlist-generation writes.
+
 During ongoing station operation, generate each next playlist block with the same current history path. Do not delete or reset history casually: doing so discards the cross-playlist exact-asset and same-song cooldown context.
 
 ## Scope boundary
 
-Playlist generation produces schedules and bounded history only. The separate `broadcast` command can play supplied playlist files, but it does not automatically generate future blocks, run as a systemd service, monitor YouTube, or watch the filesystem.
+Playlist generation produces finite schedules and bounded planned history only. The separate `broadcast` and station commands can play supplied playlist files, but Checkpoint 3A does not generate or append future blocks while broadcasting, create an air log, add Skip/Force Play controls, provide a Web UI, define dayparts or named shows, monitor YouTube, or watch the filesystem.

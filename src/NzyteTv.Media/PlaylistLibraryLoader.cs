@@ -4,7 +4,11 @@ namespace NzyteTv.Media;
 
 public sealed record PlaylistLibrarySnapshot(
     IReadOnlyList<PlaylistAsset> EligibleAssets,
-    IReadOnlyList<PlaylistExclusion> ExcludedAssets);
+    IReadOnlyList<PlaylistExclusion> ExcludedAssets)
+{
+    public IReadOnlySet<string> KnownAssetIds { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal);
+}
 
 public interface IPlaylistLibraryLoader
 {
@@ -43,6 +47,7 @@ public sealed class PlaylistLibraryLoader(
         string[] candidates = DiscoverCandidateMediaPaths(root);
         var eligible = new List<PlaylistAsset>();
         var excluded = new List<PlaylistExclusion>();
+        var knownAssetIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (string mediaPath in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -64,6 +69,11 @@ public sealed class PlaylistLibraryLoader(
                         relativePath,
                         [$"Programming metadata is invalid: {exception.Message}"]));
                     continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(metadata.AssetId))
+                {
+                    knownAssetIds.Add(metadata.AssetId);
                 }
             }
 
@@ -132,10 +142,13 @@ public sealed class PlaylistLibraryLoader(
 
         return new PlaylistLibrarySnapshot(
             eligible.OrderBy(asset => asset.RelativePath, StringComparer.Ordinal).ToArray(),
-            excluded.OrderBy(asset => asset.RelativePath, StringComparer.Ordinal).ToArray());
+            excluded.OrderBy(asset => asset.RelativePath, StringComparer.Ordinal).ToArray())
+        {
+            KnownAssetIds = knownAssetIds,
+        };
     }
 
-    private static string[] DiscoverCandidateMediaPaths(string root)
+    internal static string[] DiscoverCandidateMediaPaths(string root)
     {
         var candidates = new HashSet<string>(GetPathComparer());
         var pending = new Stack<string>();

@@ -76,15 +76,27 @@ public sealed record PlaylistPolicy
     public TimeCadence? PromoCadence { get; init; } =
         new(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(45));
 
+    public IReadOnlySet<string> PromoInsertionTypes { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AssetTypes.Promo,
+        };
+
+    public IReadOnlySet<string> AdditionalNormalTypes { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal);
+
+    public bool UseSubstantialProgrammingForBumperCadence { get; init; }
+
     public TimeSpan HistorySafetyMargin { get; init; } = TimeSpan.FromMinutes(15);
 
     public double ProjectedVlogOvershootTolerance { get; init; } = 0.02;
 
     public bool IsCategoryEnabled(string type) =>
         CategoryAirtimeTargets.TryGetValue(type, out double target) && target > 0
+        || AdditionalNormalTypes.Contains(type)
         || type == AssetTypes.Bumper && BumperCadence is not null
         || type == AssetTypes.Interstitial && InterstitialCadence is not null
-        || type == AssetTypes.Promo && PromoCadence is not null;
+        || PromoInsertionTypes.Contains(type) && PromoCadence is not null;
 
     public double GetRotationWeight(DateOnly? rotationStartDate, DateOnly scheduleDate)
     {
@@ -167,6 +179,19 @@ public sealed record PlaylistPolicy
             || HotRotationBands.Any(band => band.MaximumAgeDays < 0 || band.Weight <= 0))
         {
             errors.Add("Rotation weights and age bands must be positive.");
+        }
+
+        if (PromoInsertionTypes is null
+            || PromoInsertionTypes.Count == 0
+            || PromoInsertionTypes.Any(type => type is not (AssetTypes.Promo or AssetTypes.Advertisement)))
+        {
+            errors.Add("Promo insertion types must contain promo and/or advertisement.");
+        }
+
+        if (AdditionalNormalTypes is null
+            || AdditionalNormalTypes.Any(type => !AssetTypes.Supported.Contains(type)))
+        {
+            errors.Add("Additional normal programming types must use supported asset types.");
         }
 
         if (ProjectedVlogOvershootTolerance < 0 || ProjectedVlogOvershootTolerance >= 1)

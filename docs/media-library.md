@@ -71,12 +71,13 @@ The command uses platform-neutral filesystem APIs. It does not format or partiti
 |   `-- Specials/
 |-- library/
 |-- catalog/
-|   `-- song-catalog.json
+|   |-- song-catalog.json
+|   `-- programming.json       optional; created by `programming init`, not `media init`
 |-- playlists/
 `-- work/
 ```
 
-The descriptor contains only `{ "schemaVersion": 1 }`; it stores no drive letter, mount path, machine identity, or secret. A valid existing descriptor is preserved byte-for-byte. A corrupt or unsupported descriptor stops initialization before the root is changed. A missing song catalog is created as the existing schema-version-1 catalog with an empty `songs` array. Any existing catalog, including a populated one, is preserved exactly.
+The descriptor contains only `{ "schemaVersion": 1 }`; it stores no drive letter, mount path, machine identity, or secret. A valid existing descriptor is preserved byte-for-byte. A corrupt or unsupported descriptor stops initialization before the root is changed. A missing song catalog is created as the existing schema-version-1 catalog with an empty `songs` array. Any existing catalog, including a populated one, is preserved exactly. `media init` deliberately does not create `programming.json`, so existing roots retain legacy scheduler behavior until the operator explicitly runs `programming init`.
 
 The source folders come from the authoritative directory/category mapping used by metadata discovery. `Visualizers` maps to the song-based `visualizer` type, and `Animated Visuals` maps to the song-based `animated-visual` type. `short-form` remains a supported programming type, but `media init` does not create a dedicated `Short Form` directory.
 
@@ -123,7 +124,17 @@ The source folders come from the authoritative directory/category mapping used b
      --catalog "E:\catalog\song-catalog.json"
    ```
 
-5. Safely eject the physical drive, attach it to the Raspberry Pi, and mount it (for example at `/srv/nzyte-tv/media`).
+5. To activate the optional Checkpoint 3A policy, initialize and validate it after metadata identities are ready:
+
+   ```powershell
+   nzytetv programming init --media-root "E:\"
+   nzytetv programming validate --media-root "E:\"
+   nzytetv programming status --media-root "E:\"
+   ```
+
+   Skip this step to preserve accepted legacy playlist scheduling. The sparse policy automatically includes future technically eligible assets unless an editorial Do Not Air override excludes one.
+
+6. Safely eject the physical drive, attach it to the Raspberry Pi, and mount it (for example at `/srv/nzyte-tv/media`).
 
 The portrait path creates no intermediate H.264 file: visual treatment, canonical broadcast normalization, verification, publication, and technical-manifest writing remain one pipeline. Landscape files continue through ordinary normalization. A drive-letter or mount-path change does not change `assetId`, `contentGroupId`, source-relative technical fingerprints, or media-root identity, so the Pi does not need to re-encode assets that are already current and verified.
 
@@ -143,7 +154,7 @@ An existing portable drive can be extended without rebuilding it. After installi
      --vertical-layout blurred-background
    ```
 
-5. Initialize and review metadata, synchronize reviewed changes, and build the playlist:
+5. Initialize and review metadata, synchronize reviewed changes, optionally initialize programming policy, and build the playlist:
 
    ```powershell
    nzytetv metadata initialize `
@@ -158,6 +169,9 @@ An existing portable drive can be extended without rebuilding it. After installi
 
    nzytetv metadata sync "E:\source" "E:\library"
 
+   nzytetv programming init --media-root "E:\"
+   nzytetv programming validate --media-root "E:\"
+
    nzytetv build-playlist `
      "E:\library" `
      --catalog "E:\catalog\song-catalog.json" `
@@ -166,9 +180,11 @@ An existing portable drive can be extended without rebuilding it. After installi
      --duration 6h
    ```
 
+Omit the two `programming` commands when legacy scheduling is intentional. If `catalog/programming.json` already exists, `programming init` preserves it rather than overwriting it.
+
 All visual forms of one recording use separate `assetId` values but the same catalog `contentGroupId`. Adding these directories does not provide song identity by itself; ambiguous or unresolved filenames still require metadata review.
 
-The catalog, `.nzytetv.meta.json` programming sidecars, `.nzytetv.json` technical manifests, and any playlist/history JSON can travel on the media drive. The application executable and repository do not need to. Keeping catalog/playlists on the Pi's SD card remains supported; all commands accept explicit paths.
+The catalog, optional `programming.json`, `.nzytetv.meta.json` programming sidecars, `.nzytetv.json` technical manifests, and any playlist/history JSON can travel on the media drive. The application executable and repository do not need to. Keeping catalog/playlists on the Pi's SD card remains supported; all commands accept explicit paths.
 
 ## Source and library rules
 
@@ -241,7 +257,7 @@ nzytetv.exe normalize-library `
 
 Current verified outputs skip; new, stale, or invalid outputs normalize. Complete catalog and metadata processing and safely eject the drive. After returning it to the Pi, verify it with `lsblk -f`, `ls /srv/nzyte-tv/media`, and `findmnt /srv/nzyte-tv/media`. Running `nzytetv media init /srv/nzyte-tv/media` is an optional safe layout check, not a required step for every content addition.
 
-Build future playlist blocks with the current history file if the new asset should enter rotation. History records planned scheduling when playlists are generated; it is not a live playback-position database. Prefer a deliberate maintenance boundary before replacing planned blocks. See [Adding media while NZYTE TV is running](operations-runbook.md#adding-media-while-nzyte-tv-is-running) for the complete stop, move, return, playlist, and restart procedure.
+Build future playlist blocks with the current history file if the new asset should enter rotation. Under active Checkpoint 3A policy, a technically eligible new asset is included automatically unless a Do Not Air override excludes it; no per-asset registration is required. History records planned scheduling when playlists are generated; it is not a live playback-position database. Prefer a deliberate maintenance boundary before replacing planned blocks. See [Adding media while NZYTE TV is running](operations-runbook.md#adding-media-while-nzyte-tv-is-running) for the complete stop, move, return, playlist, and restart procedure.
 
 ## Production inventory acceptance example
 

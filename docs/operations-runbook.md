@@ -17,6 +17,8 @@ broadcast-ready library
     ↓
 metadata + song catalog
     ↓
+optional programming policy
+    ↓
 playlist generation
     ↓
 playlist history
@@ -28,11 +30,12 @@ FFmpeg stream-copy
 YouTube Live
 ```
 
-The commands have four broad responsibilities:
+The commands have five broad responsibilities:
 
 - **Normalize** is technical media preparation. It converts source masters into the one tested H.264/AAC broadcast format and verifies the result.
 - **Metadata and catalog** describe content identity and programming information. They answer “what asset is this?” and “which song does it represent?”
-- **Build playlist** is television programming. It creates a deterministic, airtime-aware schedule and preserves cooldown state in history.
+- **Programming policy** optionally supplies sparse editorial controls, one spotlight campaign, and internal pacing patterns without duplicating content identity.
+- **Build playlist** is television programming. It creates a deterministic, airtime-aware schedule and preserves planned cooldown state in history.
 - **Broadcast** is playback and transmission. It plays supplied playlists sequentially and sends already-normalized media to RTMP/RTMPS with FFmpeg stream-copy.
 
 These responsibilities are deliberately separate. Metadata never encodes media. Playlist generation never changes media. Broadcast never repairs or transcodes media.
@@ -90,6 +93,10 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `metadata sync` | Copies source programming sidecars to matching normalized library assets without encoding. | After metadata edits or review. |
 | `metadata rebind` | Preserves asset identity after an intentional source rename or move. | Before treating a renamed source as a new asset. |
 | `metadata edit` | Manually changes programming type/subtype without encoding. | Correct classification, including performance subtypes. |
+| `programming init` | Creates the optional versioned policy without replacing an existing one. | Explicitly activate Checkpoint 3A on a media root. |
+| `programming validate` | Validates policy values plus referenced catalog groups and library asset IDs. | Before playlist generation and after policy edits. |
+| `programming status` | Summarizes campaign, overrides, repetition, cadence, and internal patterns. | Inspect the active finite-block policy. |
+| `programming campaign` / `programming asset` | Manages the spotlight record and sparse per-asset editorial overrides. | Routine programming changes without hand-editing JSON. |
 | `build-playlist` | Creates a deterministic airtime-aware schedule and optionally updates history. | After the eligible library changes or another programming block is needed. |
 | `broadcast` | Validates playlist files, concatenates normalized assets, and stream-copies them to RTMP/RTMPS using FFmpeg. | Dry-run first; then start the live stream. |
 | `station validate` | Validates non-secret station configuration and the existing broadcast readiness checks without launching FFmpeg. | Before every station/service start or after configuration changes. |
@@ -466,6 +473,33 @@ PowerShell:
 
 See [Content catalog and asset metadata](content-catalog.md) before editing the catalog JSON manually.
 
+### 9.3 Initialize and manage optional programming policy
+
+Checkpoint 3A policy is opt-in. Existing roots without `catalog/programming.json` continue using the accepted legacy scheduler. To activate the new policy on the portable drive, initialize it once, then validate and inspect it:
+
+PowerShell:
+
+```powershell
+Set-Location C:\Tools\NzyteTv\candidate
+.\nzytetv.exe programming init --media-root "E:\"
+.\nzytetv.exe programming validate --media-root "E:\"
+.\nzytetv.exe programming status --media-root "E:\"
+```
+
+`programming init` is idempotent and never overwrites an existing policy. The portable file is `E:\catalog\programming.json`. It contains no destination secret or station runtime state.
+
+Common editorial changes are:
+
+```powershell
+.\nzytetv.exe programming campaign set free-fallin --media-root "E:\"
+.\nzytetv.exe programming campaign clear --media-root "E:\"
+.\nzytetv.exe programming asset set free-fallin-video --media-root "E:\" --do-not-air true
+.\nzytetv.exe programming asset set free-fallin-visualizer --media-root "E:\" --weight 1.5
+.\nzytetv.exe programming asset reset free-fallin-video --media-root "E:\"
+```
+
+Use real catalog `contentGroupId` and sidecar `assetId` values. A prepared asset needs no policy entry to air: technical/metadata eligibility remains authoritative, and only an explicit Do Not Air override excludes it. See [V1 programming policy](programming.md) for validation, campaign, repetition, pattern, bumper, and promo details.
+
 ## 10. Generate playlists and history
 
 ### 10.1 Dry-run programming first
@@ -500,7 +534,7 @@ Bash:
   --history /srv/nzyte-tv/media/playlists/history.json
 ```
 
-The seed is any chosen 32-bit integer. Reusing the same eligible library, history, time, policy, and seed makes candidate ordering reproducible.
+The seed is any chosen 32-bit integer. `build-playlist` automatically uses `programming.json` beside the supplied catalog when it exists. Reusing the same eligible library, catalog, programming policy, history input, generation time, target duration, and seed makes the schedule reproducible.
 
 `history.json` carries asset and same-song cooldown state across playlist boundaries. Generate the next block with the **same current history file**:
 
@@ -538,6 +572,10 @@ Promo, bumper, and interstitial are cadence-controlled and sit outside the norma
 
 ### 10.4 Song pacing in plain language
 
+With Checkpoint 3A policy active, the exact same `assetId` keeps the configurable two-hour preferred cooldown. Song-family pacing uses substantial pieces instead of a long time ban: the same `contentGroupId` cannot occupy adjacent substantial slots while any alternative exists, and it is strongly avoided within the previous two substantial pieces by default. Bumper, promo, interstitial, and advertisement inserts do not count as song separation. A different presentation can return after the configured lookback when the schedule permits.
+
+The following time-based same-song rules describe legacy compatibility when `programming.json` is absent.
+
 All song presentations sharing a `contentGroupId` use one same-song clock.
 
 For a full song followed by another full song:
@@ -559,9 +597,9 @@ The exact same asset has a separate approximately two-hour replay preference. A 
 
 ### 10.5 Cadence content is not filler
 
-- Promo: blocked below 30 minutes, preferred at 30–45 minutes, overdue after 45 minutes.
-- Interstitial: blocked below 20 minutes, preferred at 20–30 minutes, overdue after 30 minutes.
-- Bumper: requires at least four normal programs before insertion.
+- Promo: blocked below 30 minutes, preferred at 30–45 minutes, overdue after 45 minutes. Under Checkpoint 3A, `promo` and `advertisement` share this mini-break timer.
+- Interstitial: blocked below 20 minutes, preferred at 20—30 minutes, overdue after 30 minutes.
+- Bumper: legacy scheduling requires at least four normal programs. Checkpoint 3A defaults to a deterministic 3–5 substantial-piece window and rotates eligible station IDs before repeating when inventory permits.
 
 These assets cannot become generic filler merely because another category is constrained. See [Playlist and programming engine](playlists.md) for full policy details.
 
@@ -933,9 +971,9 @@ tmux attach -t nzyte-tv
 
 To stop the broadcaster, attach and press Ctrl+C. You may then detach again with Ctrl+B, D. Before closing the session, run `unset NZYTE_TV_RTMP_URL`.
 
-### Checkpoint 2 station resume and systemd control
+### Accepted Checkpoint 2 station resume and systemd control
 
-For persistent-resume acceptance, install the non-secret `station.json`, root-controlled `secrets.env`, and repository unit by following [Station supervisor, persistent resume, and systemd operation](station-service.md). Validate before starting:
+Checkpoint 2 passed Raspberry Pi acceptance for hard parent failure, clean stop/start, graceful reboot, and boot-enabled reboot. Install the non-secret `station.json`, root-controlled `secrets.env`, and repository unit by following [Station supervisor, persistent resume, and systemd operation](station-service.md). Validate before starting:
 
 ```bash
 /opt/nzyte-tv/app/nzytetv station validate --config /etc/nzyte-tv/station.json
@@ -956,7 +994,7 @@ The process check should print nothing. Clean stop writes `STOPPED` while preser
 
 The unit uses `Restart=on-failure`, so an unexpected parent-process failure is eligible for restart and matching schema-v2 state resumes. Successful fixed-queue completion exits zero and is not replayed. Permanent startup/configuration and resume-safety failures exit 78; `RestartPreventExitStatus=78` prevents a systemd restart loop.
 
-> **Do not run `systemctl enable nzyte-tv` until the Checkpoint 2 Raspberry Pi crash, clean stop/start, and disabled-service graceful reboot acceptance tests pass.** After they pass, the operator may enable the unit and perform the final boot-resume acceptance test. NZYTE TV never enables it automatically.
+Boot enablement is still an explicit operator action; NZYTE TV code and installation steps never enable the unit automatically. The accepted production Pi completed the prerequisite tests before the operator enabled it.
 
 ## 18. First live-stream acceptance checklist
 
@@ -981,19 +1019,19 @@ pgrep -x -c ffmpeg
 
 ## 19. Current operational limitations
 
-The current Checkpoint 2 station supervisor:
+The accepted Checkpoint 2 station supervisor, unchanged by Checkpoint 3A:
 
 - uses the supplied playlist queue fixed at broadcaster startup and does not dynamically discover new playlist JSON files;
 - does not automatically generate future playlist blocks;
 - persists item-level runtime progress for the fixed configured queue across full station-process restarts;
 - restarts the saved item from its beginning and never attempts timestamp/frame resume;
 - preserves the resume cursor on clean stop so a normal graceful reboot can resume;
-- includes a boot-suitable systemd unit, but operator enablement remains deferred until Checkpoint 2 Pi acceptance;
+- includes a boot-suitable systemd unit; enablement is an explicit operator choice, and enabled reboot resume has passed Pi acceptance;
 - automatically reconnects transient RTMPS/FFmpeg output failures with bounded backoff, restarting the interrupted asset rather than the whole queue;
 - does not integrate with the YouTube API; and
 - does not monitor YouTube API stream health.
 
-The queue remains fixed at startup. Checkpoint 2 does not discover or generate another playlist, mutate scheduler `history.json`, call the YouTube API, monitor remote stream health, or alert an operator. It is not continuous unattended 24/7 programming; automatic queue advancement and future-block generation remain Checkpoint 3 work.
+The queue remains fixed at startup. Checkpoint 3A improves finite playlist generation but does not discover or generate another playlist while broadcasting, append to the station queue, mutate scheduler `history.json` outside normal generation, call the YouTube API, monitor remote stream health, or alert an operator. It is not yet rolling unattended 24/7 programming.
 
 ## 20. What do I do when…?
 
@@ -1037,7 +1075,7 @@ Run the broadcast inside tmux and detach with Ctrl+B, D.
 
 ### I rebooted the Pi
 
-The tmux session is gone. During Checkpoint 2 acceptance, keep the station unit disabled: systemd's graceful SIGTERM writes `STOPPED` with the durable cursor, and a manual `sudo systemctl start nzyte-tv` after reboot should resume the same queue item from its beginning. Only after the documented crash, clean stop/start, and disabled-service reboot tests pass should the operator run `sudo systemctl enable nzyte-tv` and perform the final automatic boot-resume test.
+The tmux session is gone. systemd's graceful SIGTERM writes `STOPPED` with the durable cursor. If the operator has enabled the accepted station unit, it should start at boot and resume the same queue item from its beginning; otherwise start it manually with `sudo systemctl start nzyte-tv`. NZYTE TV never enables the unit itself.
 
 ## 21. Novice troubleshooting
 
@@ -1121,6 +1159,7 @@ The following have been validated at specific points in production acceptance. T
 - Metadata initialization resolved the full production inventory without errors.
 - Availability-aware playlist generation was validated across multiple deterministic seeds.
 - Cross-playlist history behavior was validated.
+- Checkpoint 2 persistent resume passed hard parent-process failure, clean stop/start, graceful reboot while disabled, and final boot-enabled reboot acceptance on Raspberry Pi, retaining the item-level cursor with exactly one FFmpeg process.
 - A broadcaster dry-run validated 2 playlists, 650 scheduled items, approximately 12 hours, and 0 missing/invalid/unready assets.
 - Actual RTMPS YouTube streaming started successfully on the Raspberry Pi.
 - Multiple normalized media types streamed through FFmpeg stream-copy.
@@ -1136,6 +1175,7 @@ The following have been validated at specific points in production acceptance. T
 - [Media library](media-library.md): storage, normalization, manifests, and portable-drive rules.
 - [Content catalog](content-catalog.md): catalog schema, matching, review, edits, and identity.
 - [Playlists](playlists.md): scheduling policy, diagnostics, schema, and history.
+- [V1 programming policy](programming.md): editorial controls, spotlight campaign, song-family pacing, internal patterns, and cadence.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
-- [Station supervisor](station-service.md): Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance plan.
+- [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

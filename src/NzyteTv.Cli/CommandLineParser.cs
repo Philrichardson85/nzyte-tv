@@ -22,6 +22,16 @@ public enum CommandKind
     StationValidate,
     StationRun,
     StationStatus,
+    ProgrammingHelp,
+    ProgrammingInit,
+    ProgrammingValidate,
+    ProgrammingStatus,
+    ProgrammingCampaignHelp,
+    ProgrammingCampaignSet,
+    ProgrammingCampaignClear,
+    ProgrammingAssetHelp,
+    ProgrammingAssetSet,
+    ProgrammingAssetReset,
     MediaHelp,
     MediaInit,
 }
@@ -43,6 +53,11 @@ public sealed record ParsedCommand(
     IReadOnlyList<string>? PlaylistPaths = null,
     string? ConfigPath = null,
     string? StatePath = null,
+    string? ProgrammingMediaRoot = null,
+    string? ProgrammingContentGroupId = null,
+    string? ProgrammingAssetId = null,
+    bool? ProgrammingDoNotAir = null,
+    double? ProgrammingWeightMultiplier = null,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
@@ -72,6 +87,11 @@ public static class CommandLineParser
         if (string.Equals(args[0], "station", StringComparison.OrdinalIgnoreCase))
         {
             return ParseStation(args);
+        }
+
+        if (string.Equals(args[0], "programming", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseProgramming(args);
         }
 
         if (string.Equals(args[0], "build-playlist", StringComparison.OrdinalIgnoreCase))
@@ -194,6 +214,178 @@ public static class CommandLineParser
         }
 
         return Success(new ParsedCommand(CommandKind.MediaInit, Input: args[2]));
+    }
+
+    private static CommandParseResult ParseProgramming(IReadOnlyList<string> args)
+    {
+        if (args.Count == 1 || (args.Count == 2 && IsHelp(args[1])))
+        {
+            return Success(new ParsedCommand(CommandKind.ProgrammingHelp, ShowHelp: true));
+        }
+
+        CommandKind kind;
+        int optionStart;
+        switch (args[1].ToLowerInvariant())
+        {
+            case "init":
+                kind = CommandKind.ProgrammingInit;
+                optionStart = 2;
+                break;
+            case "validate":
+                kind = CommandKind.ProgrammingValidate;
+                optionStart = 2;
+                break;
+            case "status":
+                kind = CommandKind.ProgrammingStatus;
+                optionStart = 2;
+                break;
+            case "campaign":
+                if (args.Count == 2 || (args.Count == 3 && IsHelp(args[2])))
+                {
+                    return Success(new ParsedCommand(CommandKind.ProgrammingCampaignHelp, ShowHelp: true));
+                }
+
+                kind = args[2].ToLowerInvariant() switch
+                {
+                    "set" => CommandKind.ProgrammingCampaignSet,
+                    "clear" => CommandKind.ProgrammingCampaignClear,
+                    _ => CommandKind.ProgrammingCampaignHelp,
+                };
+                if (kind == CommandKind.ProgrammingCampaignHelp)
+                {
+                    return Failure($"Unknown programming campaign command '{args[2]}'.");
+                }
+
+                optionStart = 3;
+                break;
+            case "asset":
+                if (args.Count == 2 || (args.Count == 3 && IsHelp(args[2])))
+                {
+                    return Success(new ParsedCommand(CommandKind.ProgrammingAssetHelp, ShowHelp: true));
+                }
+
+                kind = args[2].ToLowerInvariant() switch
+                {
+                    "set" => CommandKind.ProgrammingAssetSet,
+                    "reset" => CommandKind.ProgrammingAssetReset,
+                    _ => CommandKind.ProgrammingAssetHelp,
+                };
+                if (kind == CommandKind.ProgrammingAssetHelp)
+                {
+                    return Failure($"Unknown programming asset command '{args[2]}'.");
+                }
+
+                optionStart = 3;
+                break;
+            default:
+                return Failure($"Unknown programming command '{args[1]}'.");
+        }
+
+        if (args.Count == optionStart + 1 && IsHelp(args[optionStart]))
+        {
+            return Success(new ParsedCommand(kind, ShowHelp: true));
+        }
+
+        string? mediaRoot = null;
+        bool? doNotAir = null;
+        double? weight = null;
+        var positionals = new List<string>();
+        for (int index = optionStart; index < args.Count; index++)
+        {
+            string argument = args[index];
+            if (argument is "--media-root" or "--weight" or "--do-not-air")
+            {
+                if (++index >= args.Count || string.IsNullOrWhiteSpace(args[index]))
+                {
+                    return Failure($"{argument} requires a value.");
+                }
+
+                string value = args[index];
+                if (argument == "--media-root")
+                {
+                    mediaRoot = value;
+                }
+                else if (argument == "--weight")
+                {
+                    if (kind is not (CommandKind.ProgrammingCampaignSet or CommandKind.ProgrammingAssetSet))
+                    {
+                        return Failure("--weight is valid only for programming campaign set or programming asset set.");
+                    }
+
+                    if (!double.TryParse(
+                            value,
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture,
+                            out double parsedWeight)
+                        || !double.IsFinite(parsedWeight))
+                    {
+                        return Failure("--weight requires a finite number.");
+                    }
+
+                    weight = parsedWeight;
+                }
+                else
+                {
+                    if (kind != CommandKind.ProgrammingAssetSet)
+                    {
+                        return Failure("--do-not-air is valid only for programming asset set.");
+                    }
+
+                    if (!bool.TryParse(value, out bool parsedDoNotAir))
+                    {
+                        return Failure("--do-not-air requires true or false.");
+                    }
+
+                    doNotAir = parsedDoNotAir;
+                }
+            }
+            else if (argument.StartsWith("-", StringComparison.Ordinal))
+            {
+                return Failure($"Unknown option '{argument}'.");
+            }
+            else
+            {
+                positionals.Add(argument);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(mediaRoot))
+        {
+            return Failure("The programming command requires --media-root <path>.");
+        }
+
+        int requiredPositionals = kind is CommandKind.ProgrammingCampaignSet or
+            CommandKind.ProgrammingAssetSet or CommandKind.ProgrammingAssetReset
+            ? 1
+            : 0;
+        if (positionals.Count != requiredPositionals)
+        {
+            string requirement = requiredPositionals == 0
+                ? "no positional values"
+                : kind == CommandKind.ProgrammingCampaignSet
+                    ? "exactly one contentGroupId"
+                    : "exactly one assetId";
+            return Failure($"The programming command requires {requirement}.");
+        }
+
+        if (kind == CommandKind.ProgrammingAssetSet
+            && doNotAir is null
+            && weight is null)
+        {
+            return Failure("programming asset set requires --do-not-air, --weight, or both.");
+        }
+
+        return Success(new ParsedCommand(
+            kind,
+            ProgrammingMediaRoot: mediaRoot,
+            ProgrammingContentGroupId: kind == CommandKind.ProgrammingCampaignSet
+                ? positionals[0]
+                : null,
+            ProgrammingAssetId: kind is CommandKind.ProgrammingAssetSet or CommandKind.ProgrammingAssetReset
+                ? positionals[0]
+                : null,
+            ProgrammingDoNotAir: doNotAir,
+            ProgrammingWeightMultiplier: weight));
     }
 
     private static CommandParseResult ParseStation(IReadOnlyList<string> args)

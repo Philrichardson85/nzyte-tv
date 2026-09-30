@@ -2,9 +2,9 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Encoding remains independent from metadata, scheduling, and playback.
 
-Automatic playlist generation, dynamic queue discovery, application-driven service enablement, YouTube API health monitoring, and alerts remain out of scope. Boot enablement is an explicit operator action only after Checkpoint 2 Raspberry Pi acceptance.
+Rolling automatic future-block generation, dynamic queue append/discovery, application-driven service enablement, YouTube API health monitoring, and alerts remain out of scope. Boot enablement remains an explicit operator action; Checkpoint 2 Raspberry Pi acceptance, including enabled-service reboot resume, has completed.
 
 ## Operating NZYTE TV
 
@@ -17,6 +17,7 @@ Focused references:
 - [Media library and portable-drive workflow](docs/media-library.md)
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
+- [V1 programming policy and operator controls](docs/programming.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
 
@@ -88,6 +89,13 @@ nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-ru
 nzytetv station validate --config <station.json>
 nzytetv station run --config <station.json>
 nzytetv station status [--state <state.json>]
+nzytetv programming init --media-root <media-root>
+nzytetv programming validate --media-root <media-root>
+nzytetv programming status --media-root <media-root>
+nzytetv programming campaign set <contentGroupId> --media-root <media-root> [--weight <value>]
+nzytetv programming campaign clear --media-root <media-root>
+nzytetv programming asset set <assetId> --media-root <media-root> [--do-not-air true|false] [--weight <value>]
+nzytetv programming asset reset <assetId> --media-root <media-root>
 nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
 nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
 nzytetv metadata sync <source-root> <library-root>
@@ -103,7 +111,7 @@ Portrait and 9:16 sources can be normalized explicitly with `--vertical-layout b
 
 ### Initialize a portable media root
 
-`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders, including `Visualizers` and `Animated Visuals`, plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. Existing files and directories are never replaced or cleaned. Rerunning it on an existing portable root safely adds only missing category directories and preserves the descriptor, catalogs, media, manifests, metadata, playlists, and history.
+`media init <media-root>` prepares a blank or partially populated removable drive without formatting it, copying media, running metadata, invoking FFmpeg/FFprobe, or normalizing anything. It creates missing `source` category folders, including `Visualizers` and `Animated Visuals`, plus `library`, `catalog`, `playlists`, and `work`, a minimal `.nzytetv-media-root.json` descriptor, and `catalog/song-catalog.json` when absent. It deliberately does not create optional `programming.json`; `programming init` is the explicit opt-in. Existing files and directories are never replaced or cleaned. Rerunning media initialization on an existing portable root safely adds only missing category directories and preserves the descriptor, catalogs, policy, media, manifests, metadata, playlists, and history.
 
 ```powershell
 nzytetv media init "E:\"
@@ -147,7 +155,9 @@ Duplicate song titles are supported because relationships use `contentGroupId`, 
 
 `build-playlist` takes a read-only snapshot of eligible normalized library assets, discovers actual durations with FFprobe, and schedules whole assets until the requested duration is reached or exceeded. The provisional six-hour default mix is 20% music-video, 15% lyric-video, 15% visualizer, 20% animated-visual, 10% performance, 5% short-form, and 15% vlog by airtime. A fixed seed makes ordering reproducible, and bounded history carries exact-asset and same-song cooldowns across playlist files. Song-based normal assets at or below 60 seconds (and all short-form assets) use short-presentation pacing: short-to-short prefers 15 minutes with a 10-minute floor, full-to-short prefers 30 minutes with a 20-minute floor, and short-to-full prefers 30 minutes with a 15-minute floor. Full-to-full keeps its established 90/60/45-minute policy.
 
-The current small production library cannot satisfy every ideal rule for six hours. The engine therefore relaxes category targeting, exact-asset cooldown, hot preference, and single-vlog pacing before relaxing the preferred 90-minute same-song target. A controlled song relaxation may use the 60–90-minute range. Before creating vlog #3, a music-first rescue may use a song in the 45–60-minute range; sub-45-minute repeats and still-unavoidable vlog runs longer than two are explicit emergency violations. Promo, interstitial, and bumper minimum cadence spacing remains a separate eligibility invariant, so these assets cannot become generic fallback filler. Every relaxation, cadence insertion, cadence miss, and exclusion is reported. See [playlists.md](docs/playlists.md) for policy defaults, JSON schemas, history behavior, and dry-run usage.
+Without `programming.json`, the accepted legacy engine relaxes category targeting, exact-asset cooldown, hot preference, and single-vlog pacing before relaxing the preferred 90-minute same-song target. A controlled song relaxation may use the 60–90-minute range. Before creating vlog #3, a music-first rescue may use a song in the 45–60-minute range; sub-45-minute repeats and still-unavoidable vlog runs longer than two are explicit emergency violations. Promo, interstitial, and bumper minimum cadence spacing remains a separate eligibility invariant, so these assets cannot become generic fallback filler. Every relaxation, cadence insertion, cadence miss, and exclusion is reported. See [playlists.md](docs/playlists.md) for legacy and active policy defaults, JSON schemas, history behavior, and dry-run usage.
+
+When `programming.json` exists beside the supplied song catalog, Checkpoint 3A activates the V1 policy. New technically eligible assets remain eligible by default; sparse overrides can apply Do Not Air or presentation weight. Song-family selection occurs before presentation selection, preventing a song with many visuals from receiving extra baseline rotation entries. The active campaign defaults to a configurable 2.0x `contentGroupId` weight, hard substantial-item adjacency remains protected, a two-piece song-family lookback is preferred, and deterministic MUSIC-HEAVY, MIXED, and FAST-PACED lane templates add sequencing texture. When the file is absent, legacy scheduling behavior remains unchanged. See [programming.md](docs/programming.md).
 
 ### Broadcast playback
 
@@ -161,7 +171,7 @@ The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never di
 
 The station fingerprints the exact ordered validated queue with SHA-256. A stopped or interrupted schema-v2 run resumes the first item not positively known to have completed when the queue matches; that item restarts from its beginning. A stopped state with changed programming starts fresh, an interrupted state with a changed queue refuses to guess, and a completed queue starts fresh when explicitly run again. Schema-v1 state remains readable but never supplies an inferred resume cursor.
 
-The repository unit uses `Restart=on-failure` and `RestartPreventExitStatus=78`: runtime failure remains restartable, while permanent startup/configuration or resume-safety failures do not loop. Successful static-queue completion exits zero and is not replayed. Do not enable the service until the documented Checkpoint 2 Pi acceptance tests pass; afterward, boot enablement is an explicit operator action. See [Station supervisor, persistent resume, and systemd operation](docs/station-service.md).
+The repository unit uses `Restart=on-failure` and `RestartPreventExitStatus=78`: runtime failure remains restartable, while permanent startup/configuration or resume-safety failures do not loop. Successful static-queue completion exits zero and is not replayed. Checkpoint 2 passed the documented hard-crash, clean stop/start, graceful reboot, and boot-enabled reboot acceptance tests; service enablement remains an explicit operator action. See [Station supervisor, persistent resume, and systemd operation](docs/station-service.md).
 
 ## Broadcast standard
 
@@ -189,7 +199,9 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
-|-- catalog/                       versioned programming catalog
+|-- catalog/
+|   |-- song-catalog.json          stable song identity
+|   `-- programming.json           optional Checkpoint 3A policy
 |-- work/
 |-- media/                         external USB mount
 |   |-- source/                    original/master media
@@ -254,10 +266,10 @@ The [workstation setup guide](docs/workstation-setup.md) provides copy/paste Pow
 ## Architecture and testing
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
-- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, scheduling policy, cooldowns, relaxation, and playlist/history models. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist library snapshots, duration inspection, and JSON/filesystem adapters.
+- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, programming policy, deterministic lane patterns, scheduling, cooldowns, relaxation, and playlist/history models. It has no FFmpeg dependency.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist library snapshots, duration inspection, programming-policy persistence/services, and JSON/filesystem adapters.
 
-Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata idempotence, dry-run safety, review, synchronization, rename/rebind, orphan reporting, and playlist eligibility. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
+Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata workflows, playlist eligibility, programming-policy storage/validation, editorial overrides, campaign weighting, song-family selection, internal patterns, repetition, cadence, history, and station-resume regression. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
 ## Further documentation
 
@@ -267,5 +279,6 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Media library and normalization workflow](docs/media-library.md)
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
+- [V1 programming policy and operator controls](docs/programming.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Complete operations runbook](docs/operations-runbook.md)

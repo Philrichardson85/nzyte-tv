@@ -11,7 +11,7 @@ For the full novice workflow—including Pi mounting, candidate deployment, safe
 - Every playlist item points to an existing normalized `.mp4` under the supplied library root.
 - Each normalized file has its `.nzytetv.json` technical manifest.
 
-Create playlists with `build-playlist` before broadcasting. The broadcaster never generates or repairs a playlist automatically.
+Create playlists with `build-playlist` before broadcasting. A playlist generated with optional Checkpoint 3A `programming.json` still uses playlist schema version 1 and requires no broadcaster change. The broadcaster never generates, repairs, or appends a playlist automatically.
 
 ## Destination secret
 
