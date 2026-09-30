@@ -113,9 +113,10 @@ The active policy changes sequencing while retaining the same eligible snapshot,
 2. ask the current internal personality template for a lane;
 3. use category deficit and inventory capacity to prefer an asset type;
 4. enforce exact-asset protection and same-song substantial-item adjacency, then prefer a content group outside the recent substantial-piece lookback;
-5. choose one `contentGroupId` family, applying the optional Active Campaign multiplier;
-6. choose a presentation within that family using its sparse asset weight; and
-7. relax preferences deterministically when real inventory cannot satisfy them.
+5. after three consecutive short substantial pieces by default, require an available full/personality alternative without weakening the existing repetition protections;
+6. choose one `contentGroupId` family, applying the optional Active Campaign multiplier;
+7. choose a presentation within that family using its sparse asset weight; and
+8. relax preferences deterministically when real inventory cannot satisfy them.
 
 Song-family choice and presentation choice are separate. A family with twelve eligible presentations therefore receives the same ordinary family weight as a family with one presentation. The active campaign defaults to 2.0x and changes the family weight once; it never multiplies by presentation count or bypasses Do Not Air or hard adjacency.
 
@@ -127,6 +128,8 @@ The exact asset retains a configurable preferred cooldown, initially two hours. 
 Substantial content uses existing types: music-video, lyric-video, visualizer, animated-visual, performance, short-form, vlog, and special. Bumper, promo, interstitial, and advertisement insertions do not reset adjacency or the lookback.
 
 MUSIC-HEAVY, MIXED, and FAST-PACED are internal deterministic lane templates, not named shows. Missing lane inventory falls back safely. Full/short classification reuses the existing 60-second rule, short-form remains part of ordinary flow, and vlogs remain non-music personality content with consecutive-vlog protection.
+
+`maximumConsecutiveShortPieces` defaults to three. Short-form always counts; other song-based music, performance, visualizer, and animated/cinematic presentations count when they are at most 60 seconds. A full presentation, vlog, or special resets the run. Bumper, promo, advertisement, and interstitial insertions are transparent to the count, so they cannot disguise an accidental Shorts-style block. When no legal non-short substantial candidate exists, the scheduler permits a deterministic, counted relaxation instead of deadlocking. Campaign weight is evaluated after this filter and cannot override it.
 
 Bumpers rotate through least-recently-used eligible presentations and are preferred after three substantial pieces and due by five. Promo and advertisement assets share the configurable 30–45 minute mini-break interval; they are not scheduled as back-to-back commercial pods. Interstitial cadence remains separate and compatible.
 
@@ -209,6 +212,13 @@ Playlist schema version 1 is JSON with camel-case property names:
     "bumperInsertions": 0,
     "promoInsertions": 8,
     "interstitialInsertions": 0,
+    "programmingPolicyActive": true,
+    "programmingPolicyRevision": 1,
+    "programmingPatternFallbacks": 0,
+    "contentGroupClusterRelaxations": 0,
+    "contentGroupAdjacencyViolations": 0,
+    "shortRunRelaxations": 0,
+    "maximumObservedConsecutiveShortPieces": 3,
     "configuredAirtimeTargetPercentages": {
       "animated-visual": 20.0,
       "lyric-video": 15.0,
@@ -242,7 +252,7 @@ Playlist schema version 1 is JSON with camel-case property names:
 }
 ```
 
-Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. Target-planning diagnostics, the music-first rescue, cadence insertion, emergency-violation counters, `programmingPolicyActive`, `programmingPolicyRevision`, pattern fallbacks, song-cluster relaxations, and unavoidable adjacency violations are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
+Paths are library-relative and use `/` separators on every platform. Durations and offsets are seconds and retain millisecond precision. Target-planning diagnostics, the music-first rescue, cadence insertion, emergency-violation counters, `programmingPolicyActive`, `programmingPolicyRevision`, pattern fallbacks, song-cluster relaxations, unavoidable adjacency violations, short-run relaxations, and the maximum observed short run are additive summary fields in playlist schema version 1; the playlist and history schema versions are unchanged.
 
 ## History schema and playlist boundaries
 

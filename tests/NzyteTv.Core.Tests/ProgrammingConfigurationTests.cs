@@ -23,6 +23,7 @@ public sealed class ProgrammingConfigurationTests
         Assert.Equal(1, roundTrip.Revision);
         Assert.Equal(120, roundTrip.Repetition!.ExactAssetCooldownMinutes);
         Assert.Equal(2, roundTrip.Repetition.SameContentGroupLookback);
+        Assert.Equal(3, roundTrip.Repetition.MaximumConsecutiveShortPieces);
         Assert.Equal(3, roundTrip.Personalities!.Count);
         Assert.Empty(roundTrip.AssetOverrides!);
     }
@@ -116,6 +117,7 @@ public sealed class ProgrammingConfigurationTests
             {
                 ExactAssetCooldownMinutes = -1,
                 SameContentGroupLookback = 0,
+                MaximumConsecutiveShortPieces = 11,
             },
             StationImaging = new StationImagingPolicy
             {
@@ -142,9 +144,28 @@ public sealed class ProgrammingConfigurationTests
 
         Assert.Contains(errors, error => error.Contains("exactAssetCooldownMinutes", StringComparison.Ordinal));
         Assert.Contains(errors, error => error.Contains("sameContentGroupLookback", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("maximumConsecutiveShortPieces", StringComparison.Ordinal));
         Assert.Contains(errors, error => error.Contains("stationImaging", StringComparison.Ordinal));
         Assert.Contains(errors, error => error.Contains("promoCadence", StringComparison.Ordinal));
         Assert.Contains(errors, error => error.Contains("lanes[0]", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(11)]
+    public void UnreasonableMaximumConsecutiveShortPiecesIsRejected(int maximum)
+    {
+        ProgrammingConfiguration configuration = ProgrammingConfiguration.CreateDefault() with
+        {
+            Repetition = ProgrammingConfiguration.CreateDefault().Repetition! with
+            {
+                MaximumConsecutiveShortPieces = maximum,
+            },
+        };
+
+        Assert.Contains(
+            ProgrammingConfigurationValidator.GetStructuralErrors(configuration),
+            error => error.Contains("maximumConsecutiveShortPieces", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -267,6 +288,41 @@ public sealed class ProgrammingConfigurationTests
     [InlineData(AssetTypes.Advertisement, false)]
     public void SubstantialClassifierUsesExistingContentTypes(string type, bool expected) =>
         Assert.Equal(expected, ProgrammingContentClassifier.IsSubstantial(type));
+
+    [Theory]
+    [InlineData(AssetTypes.ShortForm, 300, true)]
+    [InlineData(AssetTypes.MusicVideo, 60, true)]
+    [InlineData(AssetTypes.LyricVideo, 60, true)]
+    [InlineData(AssetTypes.Visualizer, 60, true)]
+    [InlineData(AssetTypes.AnimatedVisual, 60, true)]
+    [InlineData(AssetTypes.Performance, 60, true)]
+    [InlineData(AssetTypes.MusicVideo, 61, false)]
+    [InlineData(AssetTypes.Vlog, 30, false)]
+    [InlineData(AssetTypes.Special, 30, false)]
+    [InlineData(AssetTypes.Bumper, 10, false)]
+    [InlineData(AssetTypes.Promo, 10, false)]
+    [InlineData(AssetTypes.Interstitial, 10, false)]
+    [InlineData(AssetTypes.Advertisement, 10, false)]
+    public void ShortProgrammingPieceClassifierUsesSongTypeAndCentralDurationThreshold(
+        string type,
+        double durationSeconds,
+        bool expected)
+    {
+        PlaylistAsset asset = new(
+            "asset",
+            AssetTypes.IsSongBased(type) ? "song" : null,
+            "Asset",
+            "Nzyte",
+            type,
+            null,
+            $"{type}/asset.mp4",
+            durationSeconds,
+            null);
+
+        Assert.Equal(
+            expected,
+            ProgrammingContentClassifier.IsShortProgrammingPiece(asset, new PlaylistPolicy()));
+    }
 
     private static string[] PatternStarts(ProgrammingPatternSequencer sequencer, int count)
     {

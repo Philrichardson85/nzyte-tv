@@ -41,7 +41,8 @@ Schema version 1 has this shape:
   "revision": 1,
   "repetition": {
     "exactAssetCooldownMinutes": 120,
-    "sameContentGroupLookback": 2
+    "sameContentGroupLookback": 2,
+    "maximumConsecutiveShortPieces": 3
   },
   "stationImaging": {
     "minimumSubstantialPieces": 3,
@@ -197,6 +198,7 @@ The active V1 policy separates three concerns:
 1. **Exact asset:** the same `assetId` has a configurable preferred cooldown, initially 120 minutes. Existing controlled relaxation still permits progress when inventory cannot satisfy it.
 2. **Song-family adjacency:** two adjacent substantial programming pieces never use the same `contentGroupId` while any valid alternative exists.
 3. **Song-family cluster:** the scheduler strongly prefers a group absent from the previous configurable number of substantial pieces, initially two. This is a soft preference so limited inventories remain schedulable.
+4. **Short-form pacing:** at most three consecutive short substantial programming pieces are preferred. Once that maximum is reached, the scheduler selects a full music or personality piece when one survives the existing exact-asset, song-family, vlog, and inventory rules. If no such candidate exists, playlist generation continues through a counted short-run relaxation rather than failing.
 
 An unavoidable pathological inventory can report an adjacency violation rather than deadlock, but campaign weight never causes one while another legal group exists.
 
@@ -223,6 +225,8 @@ advertisement
 ```
 
 Thus `Free Fallin video -> bumper -> Free Fallin visualizer` is still adjacent same-song programming and is rejected when another song is available. No redundant per-asset “substantial” flag is stored.
+
+The short-run rule reuses the central 60-second presentation threshold. `short-form` always counts as short; music-video, lyric-video, visualizer, animated-visual, and performance assets count when their measured duration is at most that threshold. Vlog and special assets reset the run even when brief. Full-length song presentations also reset it. Bumper, promo, interstitial, and advertisement inserts neither count as short pieces nor reset the run, so `short -> short -> promo -> short` is still a run of three short substantial pieces. Active Campaign weighting is applied only after this protection and cannot bypass it.
 
 ## Internal programming personalities
 
@@ -251,12 +255,12 @@ Checkpoint 3A extends the existing scheduler rather than creating a second one. 
 1. Honor an overdue bumper, promo/advertisement, or interstitial insertion.
 2. Ask the current internal pattern for a lane.
 3. Use configured and availability-adjusted category airtime targets to prefer a type.
-4. Apply exact-asset protection, hard substantial-item adjacency, soft song-family lookback, and vlog protection.
+4. Apply exact-asset protection, hard substantial-item adjacency, soft song-family lookback, vlog protection, and the configured maximum short run.
 5. Select a song family once, applying an optional explicit release-age weight and the one active campaign multiplier.
 6. Select an eligible presentation inside that family using sparse asset weight.
-7. Use the existing deterministic controlled fallback ladder when inventory cannot satisfy a preference.
+7. Use the existing deterministic controlled fallback ladder when inventory cannot satisfy a preference; a required extra short piece is counted as a short-run relaxation.
 
-Playlist schema remains version 1. Additive summary diagnostics identify whether programming policy was active and count lane fallbacks, song-cluster relaxations, and unavoidable adjacency violations. Generated files retain everything required by the existing broadcaster.
+Playlist schema remains version 1. Additive summary diagnostics identify whether programming policy was active and count lane fallbacks, song-cluster relaxations, unavoidable adjacency violations, and short-run relaxations. They also report the maximum observed consecutive short-piece run. Generated files retain everything required by the existing broadcaster.
 
 ## Backward compatibility and history
 

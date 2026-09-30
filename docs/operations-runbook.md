@@ -574,6 +574,8 @@ Promo, bumper, and interstitial are cadence-controlled and sit outside the norma
 
 With Checkpoint 3A policy active, the exact same `assetId` keeps the configurable two-hour preferred cooldown. Song-family pacing uses substantial pieces instead of a long time ban: the same `contentGroupId` cannot occupy adjacent substantial slots while any alternative exists, and it is strongly avoided within the previous two substantial pieces by default. Bumper, promo, interstitial, and advertisement inserts do not count as song separation. A different presentation can return after the configured lookback when the schedule permits.
 
+Short-form and song-based music/performance/animated presentations at or below the existing 60-second threshold count toward `maximumConsecutiveShortPieces`, which defaults to three. A full song, vlog, or special resets the run. Bumper, promo, interstitial, and advertisement inserts do not reset it. If a fourth short is unavoidable because no valid non-short substantial candidate survives the normal rules, generation continues and reports a `shortRunRelaxations` diagnostic; otherwise a non-short piece is selected.
+
 The following time-based same-song rules describe legacy compatibility when `programming.json` is absent.
 
 All song presentations sharing a `contentGroupId` use one same-song clock.

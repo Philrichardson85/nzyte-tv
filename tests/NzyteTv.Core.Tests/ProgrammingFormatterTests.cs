@@ -47,6 +47,7 @@ public sealed class ProgrammingFormatterTests
         Assert.Contains("Custom weight:     1", output, StringComparison.Ordinal);
         Assert.Contains("120 minutes", output, StringComparison.Ordinal);
         Assert.Contains("NEVER", output, StringComparison.Ordinal);
+        Assert.Contains("Maximum short run:   3 substantial pieces", output, StringComparison.Ordinal);
         Assert.Contains("MUSIC-HEAVY", output, StringComparison.Ordinal);
         Assert.Contains("Scheduler integration: ACTIVE", output, StringComparison.Ordinal);
         Assert.Contains("Rolling future blocks: NOT IMPLEMENTED", output, StringComparison.Ordinal);

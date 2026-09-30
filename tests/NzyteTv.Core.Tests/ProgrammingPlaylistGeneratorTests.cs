@@ -410,6 +410,163 @@ public sealed class ProgrammingPlaylistGeneratorTests
     }
 
     [Fact]
+    public void ThreeConsecutiveShortPiecesAreAllowed()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("short-three", "short-three", 30, AssetTypes.AnimatedVisual),
+                Song("full", "full", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: History(
+                (AssetTypes.ShortForm, 30),
+                (AssetTypes.Performance, 30)));
+
+        Assert.Equal("short-three", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void FourthShortPieceIsRejectedWhenAFullAlternativeExists()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("short-four", "short-four", 30, AssetTypes.AnimatedVisual),
+                Song("full", "full", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: ThreeShortPieceHistory());
+
+        Assert.Equal("full", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void ConfiguredMaximumConsecutiveShortPiecesIsApplied()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("short-two", "short-two", 30, AssetTypes.AnimatedVisual),
+                Song("full", "full", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                maximumConsecutiveShortPieces: 1),
+            TimeSpan.FromSeconds(1),
+            history: History((AssetTypes.ShortForm, 30)));
+
+        Assert.Equal("full", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void FullMusicResetsShortRun()
+    {
+        PlaylistGenerationResult full = Generate(
+            [Song("full-reset", "full-reset", 120)],
+            Config(ProgrammingLaneNames.FullMusic),
+            TimeSpan.FromSeconds(1),
+            history: ThreeShortPieceHistory());
+        PlaylistGenerationResult afterReset = Generate(
+            [Song("short-after-full", "short-after-full", 30, AssetTypes.ShortForm)],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: full.UpdatedHistory);
+
+        Assert.Equal("full-reset", full.Playlist.Items[0].AssetId);
+        Assert.Equal("short-after-full", afterReset.Playlist.Items[0].AssetId);
+        Assert.Equal(0, afterReset.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(1, afterReset.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void VlogPersonalityResetsShortRun()
+    {
+        PlaylistGenerationResult vlog = Generate(
+            [Vlog("vlog-reset", 120)],
+            Config(ProgrammingLaneNames.Personality),
+            TimeSpan.FromSeconds(1),
+            history: ThreeShortPieceHistory());
+        PlaylistGenerationResult afterReset = Generate(
+            [Song("short-after-vlog", "short-after-vlog", 30, AssetTypes.ShortForm)],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: vlog.UpdatedHistory);
+
+        Assert.Equal("vlog-reset", vlog.Playlist.Items[0].AssetId);
+        Assert.Equal("short-after-vlog", afterReset.Playlist.Items[0].AssetId);
+        Assert.Equal(0, afterReset.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(1, afterReset.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Theory]
+    [InlineData(AssetTypes.Bumper)]
+    [InlineData(AssetTypes.Promo)]
+    [InlineData(AssetTypes.Interstitial)]
+    [InlineData(AssetTypes.Advertisement)]
+    public void InsertionDoesNotResetShortRun(string insertionType)
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("short-four", "short-four", 30, AssetTypes.AnimatedVisual),
+                Song("full", "full", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: History(
+                (AssetTypes.ShortForm, 30),
+                (AssetTypes.Performance, 30),
+                (insertionType, 10),
+                (AssetTypes.AnimatedVisual, 30)));
+
+        Assert.Equal("full", result.Playlist.Items[0].AssetId);
+        Assert.Equal(3, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void ShortRunUsesControlledRelaxationWhenNoNonShortCandidateExists()
+    {
+        PlaylistGenerationResult result = Generate(
+            [Song("only-short", "only-short", 30, AssetTypes.AnimatedVisual)],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: ThreeShortPieceHistory());
+
+        Assert.Equal("only-short", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(4, result.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+    }
+
+    [Fact]
+    public void ActiveCampaignCannotBypassMaximumShortRun()
+    {
+        ProgrammingConfiguration configuration = Config(ProgrammingLaneNames.ShortPerformance) with
+        {
+            ActiveCampaign = new ActiveCampaign
+            {
+                Enabled = true,
+                ContentGroupId = "campaign-short",
+                WeightMultiplier = 10,
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("campaign-short", "campaign-short", 30, AssetTypes.ShortForm),
+                Song("full-alternative", "full-alternative", 120),
+            ],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            history: ThreeShortPieceHistory());
+
+        Assert.Equal("full-alternative", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
     public void ActiveProgrammingGenerationIsDeterministicForFixedInputs()
     {
         PlaylistAsset[] assets =
@@ -431,6 +588,12 @@ public sealed class ProgrammingPlaylistGeneratorTests
             first.Playlist.Items.Select(item => item.AssetId),
             second.Playlist.Items.Select(item => item.AssetId));
         Assert.Equal(first.UpdatedHistory.Plays, second.UpdatedHistory.Plays);
+        Assert.Equal(
+            first.Playlist.Summary.ShortRunRelaxations,
+            second.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(
+            first.Playlist.Summary.MaximumObservedConsecutiveShortPieces,
+            second.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
     }
 
     [Fact]
@@ -514,7 +677,8 @@ public sealed class ProgrammingPlaylistGeneratorTests
         ProgrammingConfiguration configuration,
         TimeSpan target,
         int seed = 19,
-        IReadOnlyDictionary<string, double>? categoryTargets = null)
+        IReadOnlyDictionary<string, double>? categoryTargets = null,
+        PlaylistHistoryDocument? history = null)
     {
         IReadOnlyDictionary<string, double> targets = categoryTargets ?? assets
             .Where(asset => ProgrammingContentClassifier.IsSubstantial(asset.Type))
@@ -530,7 +694,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
         return new PlaylistGenerator().Generate(
             assets,
             [],
-            PlaylistHistoryDocument.Empty,
+            history ?? PlaylistHistoryDocument.Empty,
             policy,
             seed,
             Now,
@@ -543,7 +707,8 @@ public sealed class ProgrammingPlaylistGeneratorTests
         int bumperMinimum = 3,
         int bumperMaximum = 5,
         int promoMinimumMinutes = 30,
-        int promoMaximumMinutes = 45)
+        int promoMaximumMinutes = 45,
+        int maximumConsecutiveShortPieces = 3)
     {
         return ProgrammingConfiguration.CreateDefault() with
         {
@@ -551,6 +716,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
             {
                 ExactAssetCooldownMinutes = 1,
                 SameContentGroupLookback = lookback,
+                MaximumConsecutiveShortPieces = maximumConsecutiveShortPieces,
             },
             StationImaging = new StationImagingPolicy
             {
@@ -616,6 +782,22 @@ public sealed class ProgrammingPlaylistGeneratorTests
         $"Vlog Episodes/{assetId}.mp4",
         seconds,
         null);
+
+    private static PlaylistHistoryDocument ThreeShortPieceHistory() => History(
+        (AssetTypes.ShortForm, 30),
+        (AssetTypes.Performance, 30),
+        (AssetTypes.AnimatedVisual, 30));
+
+    private static PlaylistHistoryDocument History(params (string Type, double DurationSeconds)[] plays) => new()
+    {
+        ScheduleEndUtc = Now,
+        Plays = plays.Select((play, index) => new PlaylistHistoryEntry(
+            $"history-{index}",
+            AssetTypes.IsSongBased(play.Type) ? $"history-group-{index}" : null,
+            play.Type,
+            Now.AddMinutes(index - plays.Length),
+            play.DurationSeconds)).ToArray(),
+    };
 
     private static void AssertNoAdjacentSubstantialSong(IReadOnlyList<PlaylistItem> items)
     {

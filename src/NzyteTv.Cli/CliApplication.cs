@@ -740,6 +740,8 @@ public static class CliApplication
             Console.WriteLine($"    pattern fallback:       {summary.ProgrammingPatternFallbacks}");
             Console.WriteLine($"    song cluster lookback:  {summary.ContentGroupClusterRelaxations}");
             Console.WriteLine($"    song adjacency:         {summary.ContentGroupAdjacencyViolations}");
+            Console.WriteLine($"    short-run relaxation:   {summary.ShortRunRelaxations}");
+            Console.WriteLine($"    maximum short run:      {summary.MaximumObservedConsecutiveShortPieces}");
         }
         Console.WriteLine();
         Console.WriteLine("Cadence misses:");

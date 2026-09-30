@@ -138,6 +138,8 @@ public sealed class PlaylistGenerator
                     playTime,
                     vlogAtOrAboveTarget,
                     musicBelowCombinedTarget,
+                    state.ConsecutiveShortProgrammingPieces
+                        >= programmingConfiguration.Repetition!.MaximumConsecutiveShortPieces,
                     random);
             CandidateEvaluation selected = selection.Candidate;
             if (!selected.CategoryPreferred)
@@ -208,6 +210,11 @@ public sealed class PlaylistGenerator
             if (selection.ContentGroupAdjacencyViolationUsed)
             {
                 relaxation.ContentGroupAdjacency++;
+            }
+
+            if (selection.ShortRunRelaxationUsed)
+            {
+                relaxation.ShortRun++;
             }
 
             if (!selected.ContentGroupPreferred && selected.ContentGroupFloorAllowed)
@@ -291,6 +298,10 @@ public sealed class PlaylistGenerator
             ProgrammingPatternFallbacks = relaxation.ProgrammingPatternFallback,
             ContentGroupClusterRelaxations = relaxation.ContentGroupCluster,
             ContentGroupAdjacencyViolations = relaxation.ContentGroupAdjacency,
+            ShortRunRelaxations = relaxation.ShortRun,
+            MaximumObservedConsecutiveShortPieces = programmingConfiguration is null
+                ? 0
+                : state.MaximumObservedConsecutiveShortPieces,
             ConfiguredAirtimeTargetPercentages = ToPercentages(targetPlan.ConfiguredTargets),
             EffectiveAirtimeTargetPercentages = ToPercentages(targetPlan.EffectiveTargets),
             PracticalCategoryCapacitySeconds = targetPlan.PracticalCapacitySeconds,
@@ -475,6 +486,7 @@ public sealed class PlaylistGenerator
         DateTimeOffset playTime,
         bool vlogAtOrAboveTarget,
         bool musicBelowCombinedTarget,
+        bool maximumShortRunReached,
         StableRandom random)
     {
         CandidateEvaluation[] overdueCadence = candidates
@@ -502,6 +514,7 @@ public sealed class PlaylistGenerator
                 vlogAtOrAboveTarget);
         }
 
+        CandidateEvaluation[]? preferredShortFallback = null;
         for (int stage = 0; stage <= 10; stage++)
         {
             CandidateEvaluation[] available = candidates
@@ -545,6 +558,34 @@ public sealed class PlaylistGenerator
                     _ => true,
                 })
                 .ToArray();
+
+            bool shortRunRelaxationUsed = false;
+            if (maximumShortRunReached)
+            {
+                CandidateEvaluation[] nonShort = available
+                    .Where(candidate => !candidate.ShortPresentation)
+                    .ToArray();
+                if (nonShort.Length > 0)
+                {
+                    available = nonShort;
+                }
+                else if (stage < 3)
+                {
+                    preferredShortFallback ??= available.Length > 0 ? available : null;
+                    continue;
+                }
+                else if (stage == 3 && (available.Length > 0 || preferredShortFallback is not null))
+                {
+                    preferredShortFallback ??= available;
+                    available = preferredShortFallback;
+                    shortRunRelaxationUsed = true;
+                }
+                else if (available.Length > 0)
+                {
+                    shortRunRelaxationUsed = true;
+                }
+            }
+
             if (available.Length == 0)
             {
                 continue;
@@ -589,7 +630,8 @@ public sealed class PlaylistGenerator
                 PatternFallbackUsed: ProgrammingContentClassifier.IsSubstantial(selected.Asset.Type)
                     && !selected.LanePreferred,
                 ContentGroupClusterRelaxationUsed: !selected.ContentGroupClusterPreferred,
-                ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed);
+                ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed,
+                ShortRunRelaxationUsed: shortRunRelaxationUsed && selected.ShortPresentation);
         }
 
         throw new InvalidOperationException("Playlist scheduling made no progress because no candidates are available.");
@@ -1440,7 +1482,8 @@ public sealed class PlaylistGenerator
         bool LongMusicAirtimeEfficiencySubstitutionUsed = false,
         bool PatternFallbackUsed = false,
         bool ContentGroupClusterRelaxationUsed = false,
-        bool ContentGroupAdjacencyViolationUsed = false);
+        bool ContentGroupAdjacencyViolationUsed = false,
+        bool ShortRunRelaxationUsed = false);
 
     private sealed record ProgrammingFamily(
         string Key,
@@ -1489,6 +1532,8 @@ public sealed class PlaylistGenerator
         public int ContentGroupCluster { get; set; }
 
         public int ContentGroupAdjacency { get; set; }
+
+        public int ShortRun { get; set; }
 
         public void CountPreferred(GroupPacingKind kind)
         {
@@ -1556,6 +1601,15 @@ public sealed class PlaylistGenerator
             ConsecutiveVlogCount = vlogContext.Reverse()
                 .TakeWhile(play => play.Type == AssetTypes.Vlog)
                 .Count();
+            ConsecutiveShortProgrammingPieces = prior
+                .Where(play => ProgrammingContentClassifier.IsSubstantial(play.Type))
+                .Reverse()
+                .TakeWhile(play => ProgrammingContentClassifier.IsShortProgrammingPiece(
+                    play.Type,
+                    play.DurationSeconds,
+                    policy))
+                .Count();
+            MaximumObservedConsecutiveShortPieces = ConsecutiveShortProgrammingPieces;
             LastPromoAt = prior.LastOrDefault(play => policy.PromoInsertionTypes.Contains(play.Type))?.PlayedAtUtc
                 ?? scheduleStart;
             LastInterstitialAt = prior.LastOrDefault(play => play.Type == AssetTypes.Interstitial)?.PlayedAtUtc
@@ -1570,6 +1624,10 @@ public sealed class PlaylistGenerator
         public Dictionary<string, PresentationPlay> LastContentGroupPresentation { get; } = new(StringComparer.Ordinal);
 
         public int ConsecutiveVlogCount { get; private set; }
+
+        public int ConsecutiveShortProgrammingPieces { get; private set; }
+
+        public int MaximumObservedConsecutiveShortPieces { get; private set; }
 
         public int NormalProgramsSinceBumper { get; private set; }
 
@@ -1615,6 +1673,12 @@ public sealed class PlaylistGenerator
             if (ProgrammingContentClassifier.IsSubstantial(asset.Type))
             {
                 _substantialContentGroups.Add(asset.ContentGroupId);
+                ConsecutiveShortProgrammingPieces = ProgrammingContentClassifier.IsShortProgrammingPiece(asset, policy)
+                    ? ConsecutiveShortProgrammingPieces + 1
+                    : 0;
+                MaximumObservedConsecutiveShortPieces = Math.Max(
+                    MaximumObservedConsecutiveShortPieces,
+                    ConsecutiveShortProgrammingPieces);
             }
 
             if (asset.Type == AssetTypes.Bumper)

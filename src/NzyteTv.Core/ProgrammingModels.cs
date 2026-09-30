@@ -39,6 +39,9 @@ public sealed record ProgrammingRepetitionPolicy
 
     [JsonRequired]
     public int SameContentGroupLookback { get; init; } = 2;
+
+    [JsonRequired]
+    public int MaximumConsecutiveShortPieces { get; init; } = 3;
 }
 
 public sealed record StationImagingPolicy
@@ -293,6 +296,11 @@ public static class ProgrammingConfigurationValidator
         {
             errors.Add("repetition.sameContentGroupLookback must be between 1 and 20 substantial pieces.");
         }
+
+        if (repetition.MaximumConsecutiveShortPieces is < 1 or > 10)
+        {
+            errors.Add("repetition.maximumConsecutiveShortPieces must be between 1 and 10 substantial pieces.");
+        }
     }
 
     private static void ValidateStationImaging(
@@ -480,10 +488,21 @@ public static class ProgrammingContentClassifier
     public static bool IsCommercialInsertion(string? type) =>
         type is AssetTypes.Promo or AssetTypes.Advertisement;
 
+    public static bool IsShortProgrammingPiece(PlaylistAsset asset, PlaylistPolicy policy) =>
+        IsShortProgrammingPiece(asset.Type, asset.DurationSeconds, policy);
+
+    public static bool IsShortProgrammingPiece(
+        string? type,
+        double? durationSeconds,
+        PlaylistPolicy policy) =>
+        type is not null
+        && AssetTypes.IsSongBased(type)
+        && (type == AssetTypes.ShortForm
+            || durationSeconds is double duration
+                && duration <= policy.ShortSongPresentationMaximumDuration.TotalSeconds);
+
     public static bool IsShortSongPresentation(PlaylistAsset asset, PlaylistPolicy policy) =>
-        AssetTypes.IsSongBased(asset.Type)
-        && (asset.Type == AssetTypes.ShortForm
-            || asset.DurationSeconds <= policy.ShortSongPresentationMaximumDuration.TotalSeconds);
+        IsShortProgrammingPiece(asset, policy);
 
     public static bool MatchesLane(PlaylistAsset asset, string lane, PlaylistPolicy policy)
     {

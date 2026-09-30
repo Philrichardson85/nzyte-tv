@@ -75,6 +75,7 @@ public static class ProgrammingFormatters
         output.AppendLine($"    Exact asset:       {configuration.Repetition!.ExactAssetCooldownMinutes} minutes preferred");
         output.AppendLine("    Same-song adjacent: NEVER when a valid alternative exists");
         output.AppendLine($"    Same-song lookback:{configuration.Repetition.SameContentGroupLookback,3} substantial pieces");
+        output.AppendLine($"    Maximum short run: {configuration.Repetition.MaximumConsecutiveShortPieces,3} substantial pieces");
         output.AppendLine();
         output.AppendLine("Cadence:");
         output.AppendLine($"    Bumper:            {configuration.StationImaging!.MinimumSubstantialPieces}-{configuration.StationImaging.MaximumSubstantialPieces} substantial pieces");

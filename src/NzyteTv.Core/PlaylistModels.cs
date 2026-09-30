@@ -92,6 +92,10 @@ public sealed class PlaylistSummary
 
     public int ContentGroupAdjacencyViolations { get; init; }
 
+    public int ShortRunRelaxations { get; init; }
+
+    public int MaximumObservedConsecutiveShortPieces { get; init; }
+
     public IReadOnlyDictionary<string, double> ConfiguredAirtimeTargetPercentages { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal);
 
