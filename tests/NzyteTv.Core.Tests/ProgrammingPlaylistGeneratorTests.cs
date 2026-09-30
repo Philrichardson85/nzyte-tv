@@ -447,6 +447,200 @@ public sealed class ProgrammingPlaylistGeneratorTests
     }
 
     [Fact]
+    public void FullBreakerOutsideExactAssetCooldownIsSelectedNormally()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("preferred-short", "preferred-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "full-breaker", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(1),
+            history: ShortCapHistoryWithEarlierPlay(
+                "full-breaker",
+                "full-breaker",
+                minutesAgo: 121));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void FullBreakerInsideExactAssetCooldownIsPreferredToFourthShort()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("preferred-short", "preferred-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "full-breaker", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(1),
+            history: ShortCapHistoryWithEarlierPlay(
+                "full-breaker",
+                "full-breaker",
+                minutesAgo: 105));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void FullBreakerMayRelaxSoftSongClusterPreferenceBeforeFourthShort()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("preferred-short", "preferred-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "breaker-song", 120),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance, lookback: 2),
+            TimeSpan.FromSeconds(1),
+            history: HistoryWithOffsets(
+                ("history-short-one", "history-one", AssetTypes.ShortForm, 30, 3),
+                ("breaker-short-presentation", "breaker-song", AssetTypes.AnimatedVisual, 30, 2),
+                ("history-short-three", "history-three", AssetTypes.Performance, 30, 1)));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ContentGroupClusterRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void CampaignWeightCannotBeatFullBreakerInsideExactAssetCooldown()
+    {
+        ProgrammingConfiguration configuration = Config(
+            ProgrammingLaneNames.ShortPerformance,
+            exactAssetCooldownMinutes: 120) with
+        {
+            ActiveCampaign = new ActiveCampaign
+            {
+                Enabled = true,
+                ContentGroupId = "campaign-short",
+                WeightMultiplier = 10,
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("campaign-short", "campaign-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "full-breaker", 120),
+            ],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            history: ShortCapHistoryWithEarlierPlay(
+                "full-breaker",
+                "full-breaker",
+                minutesAgo: 105));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void PresentationWeightCannotBeatFullBreakerInsideExactAssetCooldown()
+    {
+        PlaylistAsset favoredShort = Song(
+            "favored-short",
+            "favored-short",
+            30,
+            AssetTypes.AnimatedVisual);
+        ProgrammingConfiguration configuration = Config(
+            ProgrammingLaneNames.ShortPerformance,
+            exactAssetCooldownMinutes: 120) with
+        {
+            AssetOverrides = new Dictionary<string, AssetEditorialOverride>
+            {
+                [favoredShort.AssetId] = new() { WeightMultiplier = 10 },
+            },
+        };
+        PlaylistGenerationResult result = Generate(
+            [favoredShort, Song("full-breaker", "full-breaker", 120)],
+            configuration,
+            TimeSpan.FromSeconds(1),
+            history: ShortCapHistoryWithEarlierPlay(
+                "full-breaker",
+                "full-breaker",
+                minutesAgo: 105));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void LaneAndCategoryPreferenceCannotBeatFullBreakerInsideExactAssetCooldown()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("preferred-short", "preferred-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "full-breaker", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(1),
+            categoryTargets: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                [AssetTypes.AnimatedVisual] = 0.99,
+                [AssetTypes.MusicVideo] = 0.01,
+            },
+            history: ShortCapHistoryWithEarlierPlay(
+                "full-breaker",
+                "full-breaker",
+                minutesAgo: 105));
+
+        Assert.Equal("full-breaker", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void AdjacentFullCandidateIsNotUsedAsShortRunBreakerWhenSafeShortExists()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("adjacent-full", "last-song", 120),
+                Song("safe-short", "safe-short", 30, AssetTypes.AnimatedVisual),
+            ],
+            Config(ProgrammingLaneNames.ShortPerformance),
+            TimeSpan.FromSeconds(1),
+            history: HistoryWithOffsets(
+                ("history-short-one", "history-one", AssetTypes.ShortForm, 30, 3),
+                ("history-short-two", "history-two", AssetTypes.Performance, 30, 2),
+                ("history-short-three", "last-song", AssetTypes.AnimatedVisual, 30, 1)));
+
+        Assert.Equal("safe-short", result.Playlist.Items[0].AssetId);
+        Assert.Equal(1, result.Playlist.Summary.ShortRunRelaxations);
+        Assert.Equal(0, result.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
+    public void ExactAssetCooldownRemainsPreferredBeforeShortCapIsReached()
+    {
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("recent-full", "recent-full", 120),
+                Song("fresh-full", "fresh-full", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.FullMusic,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(1),
+            history: HistoryWithOffsets(
+                ("recent-full", "recent-full", AssetTypes.MusicVideo, 120, 105),
+                ("personality-reset", null, AssetTypes.Vlog, 90, 1)));
+
+        Assert.Equal("fresh-full", result.Playlist.Items[0].AssetId);
+        Assert.Equal(0, result.Playlist.Summary.ExactAssetCooldownRelaxations);
+    }
+
+    [Fact]
     public void ConfiguredMaximumConsecutiveShortPiecesIsApplied()
     {
         PlaylistGenerationResult result = Generate(
@@ -885,6 +1079,90 @@ public sealed class ProgrammingPlaylistGeneratorTests
     }
 
     [Fact]
+    public void PlannedHistoryUsesExactCooldownRelaxationForCrossPlaylistBreaker()
+    {
+        ProgrammingConfiguration fullConfiguration = Config(
+            ProgrammingLaneNames.FullMusic,
+            exactAssetCooldownMinutes: 120);
+        PlaylistGenerationResult fullBlock = Generate(
+            [Song("full-breaker", "full-breaker", 120)],
+            fullConfiguration,
+            TimeSpan.FromSeconds(1));
+        PlaylistGenerationResult shortBlock = Generate(
+            [
+                Song("short-a", "short-a", 30, AssetTypes.ShortForm),
+                Song("short-b", "short-b", 30, AssetTypes.AnimatedVisual),
+                Song("short-c", "short-c", 30, AssetTypes.Performance),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(90),
+            history: fullBlock.UpdatedHistory);
+        PlaylistGenerationResult resumedProgramming = Generate(
+            [
+                Song("preferred-short", "preferred-short", 30, AssetTypes.AnimatedVisual),
+                Song("full-breaker", "full-breaker", 120),
+            ],
+            Config(
+                ProgrammingLaneNames.ShortPerformance,
+                exactAssetCooldownMinutes: 120),
+            TimeSpan.FromSeconds(1),
+            history: shortBlock.UpdatedHistory);
+
+        Assert.Equal(3, CalculateMaximumShortRun(shortBlock.Playlist.Items));
+        Assert.Equal("full-breaker", resumedProgramming.Playlist.Items[0].AssetId);
+        Assert.Equal(1, resumedProgramming.Playlist.Summary.ExactAssetCooldownRelaxations);
+        Assert.Equal(0, resumedProgramming.Playlist.Summary.ShortRunRelaxations);
+    }
+
+    [Fact]
+    public void ProductionShapedShortInventoryRelaxesExactCooldownInsteadOfBuildingLongRun()
+    {
+        PlaylistAsset[] assets =
+        [
+            .. Enumerable.Range(1, 30).Select(index => Song(
+                $"short-{index}",
+                $"short-group-{index}",
+                30,
+                AssetTypes.AnimatedVisual)),
+            Song("full-one", "full-one", 158, AssetTypes.AnimatedVisual),
+            Song("full-two", "full-two", 158, AssetTypes.AnimatedVisual),
+            Vlog("limited-vlog", 90),
+        ];
+        ProgrammingConfiguration configuration = Config(
+            ProgrammingLaneNames.ShortPerformance,
+            exactAssetCooldownMinutes: 120);
+        IReadOnlyDictionary<string, double> targets = new Dictionary<string, double>(StringComparer.Ordinal)
+        {
+            [AssetTypes.AnimatedVisual] = 0.95,
+            [AssetTypes.Vlog] = 0.05,
+        };
+
+        PlaylistGenerationResult first = Generate(
+            assets,
+            configuration,
+            TimeSpan.FromMinutes(30),
+            seed: 20260930,
+            categoryTargets: targets);
+        PlaylistGenerationResult second = Generate(
+            assets,
+            configuration,
+            TimeSpan.FromMinutes(30),
+            seed: 20260930,
+            categoryTargets: targets);
+
+        Assert.Equal(first.Playlist.Items, second.Playlist.Items);
+        Assert.True(first.Playlist.Summary.ExactAssetCooldownRelaxations > 0);
+        Assert.Equal(0, first.Playlist.Summary.ShortRunRelaxations);
+        Assert.True(first.Playlist.Summary.MaximumObservedConsecutiveShortPieces <= 3);
+        Assert.Equal(
+            CalculateMaximumShortRun(first.Playlist.Items),
+            first.Playlist.Summary.MaximumObservedConsecutiveShortPieces);
+        Assert.Equal(0, first.Playlist.Summary.ContentGroupAdjacencyViolations);
+    }
+
+    [Fact]
     public void ActiveProgrammingGenerationIsDeterministicForFixedInputs()
     {
         PlaylistAsset[] assets =
@@ -1136,6 +1414,32 @@ public sealed class ProgrammingPlaylistGeneratorTests
                 Now.AddMinutes(index - plays.Length),
                 play.DurationSeconds)).ToArray(),
         };
+
+    private static PlaylistHistoryDocument ShortCapHistoryWithEarlierPlay(
+        string assetId,
+        string contentGroupId,
+        double minutesAgo) => HistoryWithOffsets(
+            (assetId, contentGroupId, AssetTypes.MusicVideo, 120, minutesAgo),
+            ("history-short-one", "history-one", AssetTypes.ShortForm, 30, 3),
+            ("history-short-two", "history-two", AssetTypes.Performance, 30, 2),
+            ("history-short-three", "history-three", AssetTypes.AnimatedVisual, 30, 1));
+
+    private static PlaylistHistoryDocument HistoryWithOffsets(
+        params (
+            string AssetId,
+            string? ContentGroupId,
+            string Type,
+            double DurationSeconds,
+            double MinutesAgo)[] plays) => new()
+            {
+                ScheduleEndUtc = Now,
+                Plays = plays.Select(play => new PlaylistHistoryEntry(
+                    play.AssetId,
+                    play.ContentGroupId,
+                    play.Type,
+                    Now.AddMinutes(-play.MinutesAgo),
+                    play.DurationSeconds)).ToArray(),
+            };
 
     private static int CalculateMaximumShortRun(IReadOnlyList<PlaylistItem> items)
     {

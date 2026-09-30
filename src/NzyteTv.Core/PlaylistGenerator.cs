@@ -2,6 +2,9 @@ namespace NzyteTv.Core;
 
 public sealed class PlaylistGenerator
 {
+    private const int LastAdjacencySafeProgrammingStage = 8;
+    private const int FinalProgrammingStage = 10;
+
     public PlaylistGenerationResult Generate(
         IReadOnlyCollection<PlaylistAsset> eligibleAssets,
         IReadOnlyCollection<PlaylistExclusion> exclusions,
@@ -522,21 +525,77 @@ public sealed class PlaylistGenerator
                 vlogAtOrAboveTarget);
         }
 
-        for (int stage = 0; stage <= 10; stage++)
+        if (maximumShortRunReached)
+        {
+            // Exhaust adjacency-safe lane/category, cluster, and exact-cooldown fallbacks
+            // before permitting another short programming piece.
+            CandidateEvaluation[] fullMusicBreakers = candidates
+                .Where(candidate => candidate.MusicOriented
+                    && ProgrammingContentClassifier.IsSubstantial(candidate.Asset.Type)
+                    && !candidate.ShortPresentation)
+                .ToArray();
+            CandidateSelection? breaker = TrySelectProgrammingCandidate(
+                fullMusicBreakers,
+                policy,
+                programmingConfiguration,
+                playTime,
+                vlogAtOrAboveTarget,
+                musicBelowCombinedTarget,
+                maximumStage: LastAdjacencySafeProgrammingStage,
+                random);
+            if (breaker is not null)
+            {
+                return breaker;
+            }
+
+            CandidateEvaluation[] personalityBreakers = candidates
+                .Where(candidate => !candidate.MusicOriented
+                    && ProgrammingContentClassifier.IsSubstantial(candidate.Asset.Type)
+                    && !candidate.ShortPresentation)
+                .ToArray();
+            breaker = TrySelectProgrammingCandidate(
+                personalityBreakers,
+                policy,
+                programmingConfiguration,
+                playTime,
+                vlogAtOrAboveTarget,
+                musicBelowCombinedTarget,
+                maximumStage: LastAdjacencySafeProgrammingStage,
+                random);
+            if (breaker is not null)
+            {
+                return breaker;
+            }
+        }
+
+        return TrySelectProgrammingCandidate(
+            candidates,
+            policy,
+            programmingConfiguration,
+            playTime,
+            vlogAtOrAboveTarget,
+            musicBelowCombinedTarget,
+            maximumStage: FinalProgrammingStage,
+            random)
+            ?? throw new InvalidOperationException(
+                "Playlist scheduling made no progress because no candidates are available.");
+    }
+
+    private static CandidateSelection? TrySelectProgrammingCandidate(
+        IReadOnlyList<CandidateEvaluation> candidates,
+        PlaylistPolicy policy,
+        ProgrammingConfiguration programmingConfiguration,
+        DateTimeOffset playTime,
+        bool vlogAtOrAboveTarget,
+        bool musicBelowCombinedTarget,
+        int maximumStage,
+        StableRandom random)
+    {
+        for (int stage = 0; stage <= maximumStage; stage++)
         {
             CandidateEvaluation[] constraintSafe = candidates
                 .Where(candidate => IsProgrammingCandidateAllowedAtStage(candidate, stage))
                 .ToArray();
-            if (maximumShortRunReached
-                && constraintSafe.Any(candidate =>
-                    ProgrammingContentClassifier.IsSubstantial(candidate.Asset.Type)
-                    && !candidate.ShortPresentation))
-            {
-                constraintSafe = constraintSafe
-                    .Where(candidate => !candidate.ShortPresentation)
-                    .ToArray();
-            }
-
             CandidateEvaluation[] available = constraintSafe
                 .Where(candidate => IsProgrammingCandidatePreferredAtStage(candidate, stage))
                 .ToArray();
@@ -587,7 +646,7 @@ public sealed class PlaylistGenerator
                 ContentGroupAdjacencyViolationUsed: !selected.ContentGroupAdjacentAllowed);
         }
 
-        throw new InvalidOperationException("Playlist scheduling made no progress because no candidates are available.");
+        return null;
     }
 
     private static CandidateSelection CreateProgrammingSelection(
