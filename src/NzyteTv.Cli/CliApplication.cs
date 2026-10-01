@@ -43,6 +43,14 @@ public static class CliApplication
                 return await RunProgrammingCommandAsync(command, cancellationToken).ConfigureAwait(false);
             }
 
+            if (command.Kind is CommandKind.ProgrammingRollingInit
+                or CommandKind.ProgrammingRollingMaintain
+                or CommandKind.ProgrammingRollingValidate
+                or CommandKind.ProgrammingRollingStatus)
+            {
+                return await RunRollingProgrammingCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             if (command.Kind == CommandKind.MediaInit)
             {
                 return await RunMediaInitAsync(command.Input!, cancellationToken).ConfigureAwait(false);
@@ -474,6 +482,59 @@ public static class CliApplication
                         cancellationToken).ConfigureAwait(false);
                     Console.Write(ProgrammingFormatters.FormatMutation(result));
                     return 0;
+                }
+            default:
+                return 2;
+        }
+    }
+
+    private static async Task<int> RunRollingProgrammingCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        string mediaRoot = command.ProgrammingMediaRoot!;
+        switch (command.Kind)
+        {
+            case CommandKind.ProgrammingRollingInit:
+                {
+                    var planner = new RollingProgrammingPlanner();
+                    RollingInitializationResult result = await planner.InitializeAsync(
+                        new RollingInitializationRequest(
+                            mediaRoot,
+                            command.RollingHistoryPath,
+                            command.RollingBaseSeed),
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(RollingProgrammingFormatters.FormatInitialization(result));
+                    return 0;
+                }
+            case CommandKind.ProgrammingRollingMaintain:
+                {
+                    string ffprobe = await new MediaToolLocator().LocateFfprobeAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    var snapshotService = new PlaylistPlanningSnapshotService(
+                        new SongCatalogStore(),
+                        new PlaylistLibraryLoader(new MediaAnalyzer(ffprobe, new ProcessRunner())),
+                        new PlaylistGenerator());
+                    var planner = new RollingProgrammingPlanner(snapshotService: snapshotService);
+                    RollingMaintainResult result = await planner.MaintainAsync(
+                        mediaRoot,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.Write(RollingProgrammingFormatters.FormatMaintenance(result));
+                    return result.TargetSatisfied ? 0 : 1;
+                }
+            case CommandKind.ProgrammingRollingValidate:
+                {
+                    var planner = new RollingProgrammingPlanner();
+                    RollingValidationResult result = planner.Validate(mediaRoot);
+                    Console.Write(RollingProgrammingFormatters.FormatValidation(result));
+                    return result.IsValid ? 0 : 1;
+                }
+            case CommandKind.ProgrammingRollingStatus:
+                {
+                    var planner = new RollingProgrammingPlanner();
+                    RollingProgrammingStatus status = planner.GetStatus(mediaRoot);
+                    Console.Write(RollingProgrammingFormatters.FormatStatus(status));
+                    return status.Validation.IsValid ? 0 : 1;
                 }
             default:
                 return 2;
@@ -971,7 +1032,7 @@ public static class CliApplication
             Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
             Console.WriteLine("  nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
             Console.WriteLine("  nzytetv station <validate|run|status> ...");
-            Console.WriteLine("  nzytetv programming <init|validate|status|campaign|asset> ...");
+            Console.WriteLine("  nzytetv programming <init|validate|status|campaign|asset|rolling> ...");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
             Console.WriteLine();
@@ -1050,6 +1111,7 @@ public static class CliApplication
                 Console.WriteLine("  nzytetv programming status --media-root <media-root>");
                 Console.WriteLine("  nzytetv programming campaign <set|clear> ...");
                 Console.WriteLine("  nzytetv programming asset <set|reset> ...");
+                Console.WriteLine("  nzytetv programming rolling <init|maintain|validate|status> ...");
                 Console.WriteLine();
                 Console.WriteLine("The portable configuration is <media-root>/catalog/programming.json.");
                 Console.WriteLine("It contains policy and editorial controls only, never runtime state or secrets.");
@@ -1093,6 +1155,36 @@ public static class CliApplication
             case CommandKind.ProgrammingAssetReset:
                 Console.WriteLine("Usage: nzytetv programming asset reset <assetId> --media-root <media-root>");
                 Console.WriteLine("Remove the sparse editorial override so the asset returns to programming defaults.");
+                break;
+            case CommandKind.ProgrammingRollingHelp:
+                Console.WriteLine("NZYTE TV rolling programming planner (Checkpoint 3B1)");
+                Console.WriteLine();
+                Console.WriteLine("Usage:");
+                Console.WriteLine("  nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]");
+                Console.WriteLine("  nzytetv programming rolling maintain --media-root <media-root>");
+                Console.WriteLine("  nzytetv programming rolling validate --media-root <media-root>");
+                Console.WriteLine("  nzytetv programming rolling status --media-root <media-root>");
+                Console.WriteLine();
+                Console.WriteLine("This prepares immutable six-hour blocks. Rolling station execution/handoff is not implemented.");
+                break;
+            case CommandKind.ProgrammingRollingInit:
+                Console.WriteLine("Usage: nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]");
+                Console.WriteLine("Initialize one planner lineage with explicit imported planned history or, when --history is omitted, an empty genesis.");
+                Console.WriteLine("Initialization is idempotent and never overwrites an existing manifest.");
+                break;
+            case CommandKind.ProgrammingRollingMaintain:
+                Console.WriteLine("Usage: nzytetv programming rolling maintain --media-root <media-root>");
+                Console.WriteLine("Reconcile interrupted work and idempotently prepare the initial three immutable six-hour blocks.");
+                Console.WriteLine("This command never starts FFmpeg or changes a station queue.");
+                break;
+            case CommandKind.ProgrammingRollingValidate:
+                Console.WriteLine("Usage: nzytetv programming rolling validate --media-root <media-root>");
+                Console.WriteLine("Read-only validation of manifest chains, hashes, snapshots, history, media readiness, and broadcast plans.");
+                break;
+            case CommandKind.ProgrammingRollingStatus:
+                Console.WriteLine("Usage: nzytetv programming rolling status --media-root <media-root>");
+                Console.WriteLine("Report planner lineage, buffer, block identities/revisions, staging, quarantine, and validation health.");
+                Console.WriteLine("Rolling execution/handoff remains not implemented in Checkpoint 3B1.");
                 break;
             case CommandKind.MediaHelp:
                 Console.WriteLine("NZYTE TV portable media-root tools");

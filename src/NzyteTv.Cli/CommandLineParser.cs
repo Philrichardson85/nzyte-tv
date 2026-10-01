@@ -32,6 +32,11 @@ public enum CommandKind
     ProgrammingAssetHelp,
     ProgrammingAssetSet,
     ProgrammingAssetReset,
+    ProgrammingRollingHelp,
+    ProgrammingRollingInit,
+    ProgrammingRollingMaintain,
+    ProgrammingRollingValidate,
+    ProgrammingRollingStatus,
     MediaHelp,
     MediaInit,
 }
@@ -58,6 +63,8 @@ public sealed record ParsedCommand(
     string? ProgrammingAssetId = null,
     bool? ProgrammingDoNotAir = null,
     double? ProgrammingWeightMultiplier = null,
+    string? RollingHistoryPath = null,
+    int? RollingBaseSeed = null,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
@@ -223,6 +230,11 @@ public static class CommandLineParser
             return Success(new ParsedCommand(CommandKind.ProgrammingHelp, ShowHelp: true));
         }
 
+        if (string.Equals(args[1], "rolling", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseProgrammingRolling(args);
+        }
+
         CommandKind kind;
         int optionStart;
         switch (args[1].ToLowerInvariant())
@@ -386,6 +398,102 @@ public static class CommandLineParser
                 : null,
             ProgrammingDoNotAir: doNotAir,
             ProgrammingWeightMultiplier: weight));
+    }
+
+    private static CommandParseResult ParseProgrammingRolling(IReadOnlyList<string> args)
+    {
+        if (args.Count == 2 || (args.Count == 3 && IsHelp(args[2])))
+        {
+            return Success(new ParsedCommand(CommandKind.ProgrammingRollingHelp, ShowHelp: true));
+        }
+
+        CommandKind? kind = args[2].ToLowerInvariant() switch
+        {
+            "init" => CommandKind.ProgrammingRollingInit,
+            "maintain" => CommandKind.ProgrammingRollingMaintain,
+            "validate" => CommandKind.ProgrammingRollingValidate,
+            "status" => CommandKind.ProgrammingRollingStatus,
+            _ => null,
+        };
+        if (kind is null)
+        {
+            return Failure($"Unknown programming rolling command '{args[2]}'.");
+        }
+
+        if (args.Count == 4 && IsHelp(args[3]))
+        {
+            return Success(new ParsedCommand(kind.Value, ShowHelp: true));
+        }
+
+        string? mediaRoot = null;
+        string? historyPath = null;
+        int? baseSeed = null;
+        for (int index = 3; index < args.Count; index++)
+        {
+            string argument = args[index];
+            if (argument is not ("--media-root" or "--history" or "--base-seed"))
+            {
+                return Failure($"Unknown option '{argument}' for programming rolling {args[2]}.");
+            }
+
+            if (++index >= args.Count || string.IsNullOrWhiteSpace(args[index]))
+            {
+                return Failure($"{argument} requires a value.");
+            }
+
+            string value = args[index];
+            switch (argument)
+            {
+                case "--media-root":
+                    if (mediaRoot is not null) return Failure("--media-root may be specified only once.");
+                    if (value.StartsWith("-", StringComparison.Ordinal))
+                    {
+                        return Failure("--media-root requires a path.");
+                    }
+
+                    mediaRoot = value;
+                    break;
+                case "--history":
+                    if (kind != CommandKind.ProgrammingRollingInit)
+                    {
+                        return Failure("--history is valid only for programming rolling init.");
+                    }
+
+                    if (historyPath is not null) return Failure("--history may be specified only once.");
+                    if (value.StartsWith("-", StringComparison.Ordinal))
+                    {
+                        return Failure("--history requires a path.");
+                    }
+
+                    historyPath = value;
+                    break;
+                case "--base-seed":
+                    if (kind != CommandKind.ProgrammingRollingInit)
+                    {
+                        return Failure("--base-seed is valid only for programming rolling init.");
+                    }
+
+                    if (baseSeed is not null) return Failure("--base-seed may be specified only once.");
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedSeed))
+                    {
+                        return Failure("--base-seed requires an integer.");
+                    }
+
+                    baseSeed = parsedSeed;
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(mediaRoot))
+        {
+            return Failure("The programming rolling command requires --media-root <path>.");
+        }
+
+        return Success(new ParsedCommand(
+            kind.Value,
+            ProgrammingMediaRoot: mediaRoot,
+            RollingHistoryPath: historyPath,
+            RollingBaseSeed: baseSeed));
     }
 
     private static CommandParseResult ParseStation(IReadOnlyList<string> args)

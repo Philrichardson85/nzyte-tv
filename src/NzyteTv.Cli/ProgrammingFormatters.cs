@@ -90,7 +90,8 @@ public static class ProgrammingFormatters
         output.AppendLine();
         output.AppendLine($"Release-age rotation: {(configuration.ReleaseAgeHotRotationEnabled ? "ENABLED" : "OFF")}");
         output.AppendLine("Scheduler integration: ACTIVE");
-        output.AppendLine("Rolling future blocks: NOT IMPLEMENTED");
+        output.AppendLine("Rolling block planning: AVAILABLE (Checkpoint 3B1)");
+        output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
         AppendDiagnostics(output, "Errors", result.Errors);
         AppendDiagnostics(output, "Warnings", result.Warnings);
         return output.ToString();

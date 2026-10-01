@@ -50,7 +50,8 @@ public sealed class ProgrammingFormatterTests
         Assert.Contains("Maximum short run:   3 substantial pieces", output, StringComparison.Ordinal);
         Assert.Contains("MUSIC-HEAVY", output, StringComparison.Ordinal);
         Assert.Contains("Scheduler integration: ACTIVE", output, StringComparison.Ordinal);
-        Assert.Contains("Rolling future blocks: NOT IMPLEMENTED", output, StringComparison.Ordinal);
+        Assert.Contains("Rolling block planning: AVAILABLE", output, StringComparison.Ordinal);
+        Assert.Contains("Rolling execution/handoff: NOT IMPLEMENTED", output, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
         Assert.DoesNotContain("NZYTE_TV_RTMP_URL", output, StringComparison.Ordinal);
     }

@@ -122,7 +122,7 @@ Inspect the operator-facing policy summary:
   --media-root /srv/nzyte-tv/media
 ```
 
-Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It also says `Rolling future blocks: NOT IMPLEMENTED` so a valid policy is not mistaken for dynamic 24/7 queue generation.
+Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It identifies 3B1 rolling block planning as available while explicitly saying `Rolling execution/handoff: NOT IMPLEMENTED`, so a valid policy or prepared buffer is not mistaken for dynamic 24/7 station operation.
 
 ## Default-on eligibility and editorial controls
 
@@ -270,11 +270,17 @@ Existing generated playlist JSON remains valid. The broadcaster, station queue i
 
 `playlists/history.json` remains planned scheduling history. It carries scheduled asset/group starts across generated playlist boundaries; it is not rewritten into an actual air log and is not merged with station runtime state. Checkpoint 3A does not record what actually aired.
 
+## Rolling planning integration
+
+Checkpoint 3B1 reuses this accepted policy and the same `PlaylistGenerator` through a frozen planning-snapshot service. `programming rolling maintain` can prepare immutable six-hour blocks under `<media-root>/playlists/rolling`; each block captures the exact policy revision (or explicit legacy marker), catalog, eligible inventory, durations, readiness, and planned-history input that produced it. A later policy or editorial change affects only the next block that has not been generated. It never rewrites a committed block.
+
+The rolling manifest and content-addressed history snapshots are transaction artifacts for planned programming. They are not station runtime state or an air log. See [rolling-programming.md](rolling-programming.md) for commands, identity, atomicity, reconciliation, and the Pi acceptance plan.
+
 ## Current scope boundary
 
-Checkpoint 3A does not implement:
+Checkpoint 3B1 prepares future blocks but does not implement:
 
-- rolling automatic future-block generation;
+- rolling station execution or automatic block handoff;
 - dynamic station queue append or directory watching;
 - actual air-history logging;
 - Skip or Force Play controls;
@@ -287,4 +293,4 @@ Checkpoint 3A does not implement:
 - YouTube API monitoring or alerts; or
 - archive preservation.
 
-Generate and inspect finite six-hour blocks with the existing `build-playlist` command. A later checkpoint may call the same programming services from a lightweight Program Director UI or rolling queue generator; neither is created here.
+Generate and inspect an individual finite block with `build-playlist`, or prepare the immutable three-block 3B1 buffer with `programming rolling maintain`. A later checkpoint may consume the reusable services from a lightweight Program Director UI; no Web UI is created here.

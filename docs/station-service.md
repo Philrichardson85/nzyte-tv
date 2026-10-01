@@ -1,6 +1,6 @@
 # Station supervisor, persistent resume, and systemd operation
 
-NZYTE TV v0.5.0 Checkpoint 2 extends the station foundation with safe item-level resume across a full station-process restart. It has passed Raspberry Pi acceptance for hard parent failure, clean stop/start, graceful reboot, and boot-enabled reboot. It still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover or generate future playlists.
+NZYTE TV v0.5.0 Checkpoint 2 extends the station foundation with safe item-level resume across a full station-process restart. It has passed Raspberry Pi acceptance for hard parent failure, clean stop/start, graceful reboot, and boot-enabled reboot. It still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover or consume future playlists. Checkpoint 3B1 may prepare immutable rolling blocks separately, but those artifacts do not activate rolling station behavior.
 
 The supervisor continues to wrap, rather than replace, the existing resilient broadcaster:
 
@@ -18,7 +18,7 @@ FFmpeg recovery and persistent resume are separate:
 - `resumeCount` counts cold resumes across station-process starts.
 - Both restart the interrupted item from its beginning. Neither seeks to an exact timestamp or frame.
 
-Checkpoint 2 does not add automatic playlist generation, dynamic queue discovery, scheduling-history mutation, continuous queue advancement, YouTube API monitoring, or alerts. YouTube monitoring remains `NOT CONFIGURED`.
+Checkpoint 2 does not add dynamic queue discovery, scheduling-history mutation, continuous queue advancement, YouTube API monitoring, or alerts. The separate Checkpoint 3B1 planner can generate future blocks, but station execution/handoff is reserved for 3B2. YouTube monitoring remains `NOT CONFIGURED`.
 
 ## Station configuration and destination secret
 
@@ -214,4 +214,4 @@ Reboot while the station is running. Verify automatic service startup, persisted
 
 ## Current limitations
 
-Checkpoint 2 is durable resume for the explicitly configured static queue, not unattended continuous programming. Checkpoint 3A can improve playlists before they are supplied to the station, but it does not generate or discover another playlist while broadcasting or append to the active queue. The station does not mutate `playlists/history.json`, persist an exact media timestamp, call YouTube APIs, monitor remote stream health, or alert an operator. Scheduler history remains planned-programming history; station state remains actual runtime progress.
+Checkpoint 2 is durable resume for the explicitly configured static queue, not unattended continuous programming. Checkpoint 3B1 can prepare future playlists before they are supplied to the station, but the station does not discover them, append to the active queue, or hand off between blocks. It does not mutate ordinary or rolling planned history, persist an exact media timestamp, call YouTube APIs, monitor remote stream health, or alert an operator. Scheduler history remains planned-programming history; station state remains actual runtime progress. See [rolling-programming.md](rolling-programming.md) for the deliberately separate planning side.

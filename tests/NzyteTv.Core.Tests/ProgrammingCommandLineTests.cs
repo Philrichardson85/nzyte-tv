@@ -117,4 +117,64 @@ public sealed class ProgrammingCommandLineTests
         Assert.False(result.IsSuccess);
         Assert.NotNull(result.Error);
     }
+
+    [Theory]
+    [InlineData("init", CommandKind.ProgrammingRollingInit)]
+    [InlineData("maintain", CommandKind.ProgrammingRollingMaintain)]
+    [InlineData("validate", CommandKind.ProgrammingRollingValidate)]
+    [InlineData("status", CommandKind.ProgrammingRollingStatus)]
+    public void Parse_RollingCommandsRequireMediaRoot(string verb, CommandKind expected)
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+            ["programming", "rolling", verb, "--media-root", "/media"]);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal(expected, result.Command!.Kind);
+        Assert.Equal("/media", result.Command.ProgrammingMediaRoot);
+    }
+
+    [Fact]
+    public void Parse_RollingInitAcceptsExplicitGenesisAndSignedBaseSeed()
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        [
+            "programming", "rolling", "init",
+            "--media-root", "/media",
+            "--history", "/planned/history.json",
+            "--base-seed", "-123",
+        ]);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal("/planned/history.json", result.Command!.RollingHistoryPath);
+        Assert.Equal(-123, result.Command.RollingBaseSeed);
+    }
+
+    [Theory]
+    [InlineData("programming rolling --help", CommandKind.ProgrammingRollingHelp)]
+    [InlineData("programming rolling init --help", CommandKind.ProgrammingRollingInit)]
+    [InlineData("programming rolling maintain --help", CommandKind.ProgrammingRollingMaintain)]
+    [InlineData("programming rolling validate --help", CommandKind.ProgrammingRollingValidate)]
+    [InlineData("programming rolling status --help", CommandKind.ProgrammingRollingStatus)]
+    public void Parse_RollingHelpIsSupported(string command, CommandKind kind)
+    {
+        CommandParseResult result = CommandLineParser.Parse(command.Split(' '));
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.True(result.Command!.ShowHelp);
+        Assert.Equal(kind, result.Command.Kind);
+    }
+
+    [Theory]
+    [InlineData("programming rolling maintain")]
+    [InlineData("programming rolling init --media-root /media --base-seed nope")]
+    [InlineData("programming rolling maintain --media-root /media --history h.json")]
+    [InlineData("programming rolling status --media-root /media --base-seed 2")]
+    [InlineData("programming rolling unknown --media-root /media")]
+    public void Parse_InvalidRollingArgumentsAreRejected(string command)
+    {
+        CommandParseResult result = CommandLineParser.Parse(command.Split(' '));
+
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.Error);
+    }
 }

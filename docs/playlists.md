@@ -279,8 +279,10 @@ Missing history starts cleanly. Malformed, unsupported, or internally inconsiste
 
 History remains planned programming history under Checkpoint 3A. It is not an air log and is never merged with schema-v2 station resume state. Programming configuration changes affect only later normal playlist-generation writes.
 
-During ongoing station operation, generate each next playlist block with the same current history path. Do not delete or reset history casually: doing so discards the cross-playlist exact-asset and same-song cooldown context.
+For manual/static operation, generate each next playlist block with the same current history path. Do not delete or reset history casually: doing so discards the cross-playlist exact-asset and same-song cooldown context.
+
+Checkpoint 3B1 offers a safer rolling-planning transaction for future use. It imports an explicit planned-history genesis once, then stores immutable content-addressed before/after history snapshots and commits each generated six-hour block with the same atomic manifest replacement. It calls the same accepted `PlaylistGenerator`, emits the same playlist schema version 1, and validates each result through the existing `BroadcastPlanner`. Ordinary `history.json` is not the rolling transaction authority. See [rolling-programming.md](rolling-programming.md).
 
 ## Scope boundary
 
-Playlist generation produces finite schedules and bounded planned history only. The separate `broadcast` and station commands can play supplied playlist files, but Checkpoint 3A does not generate or append future blocks while broadcasting, create an air log, add Skip/Force Play controls, provide a Web UI, define dayparts or named shows, monitor YouTube, or watch the filesystem.
+Playlist generation produces finite schedules and bounded planned history only. Checkpoint 3B1 can prepare immutable future blocks, but the separate `broadcast` and station commands do not consume or append them automatically. Rolling handoff, an air log, Skip/Force Play controls, a Web UI, dayparts, named shows, YouTube monitoring, and filesystem-driven changes to a running queue remain unimplemented.

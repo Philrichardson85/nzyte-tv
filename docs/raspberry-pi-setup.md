@@ -370,6 +370,7 @@ The deployed layout separates source, published application files, mutable worki
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
+|   `-- rolling/                   when /srv/nzyte-tv is selected as the 3B1 media root
 |-- catalog/
 |   |-- song-catalog.json          stable song identity
 |   `-- programming.json           optional Checkpoint 3A policy
@@ -525,6 +526,11 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv programming status --help
 /opt/nzyte-tv/app/nzytetv programming campaign --help
 /opt/nzyte-tv/app/nzytetv programming asset --help
+/opt/nzyte-tv/app/nzytetv programming rolling --help
+/opt/nzyte-tv/app/nzytetv programming rolling init --help
+/opt/nzyte-tv/app/nzytetv programming rolling maintain --help
+/opt/nzyte-tv/app/nzytetv programming rolling validate --help
+/opt/nzyte-tv/app/nzytetv programming rolling status --help
 /opt/nzyte-tv/app/nzytetv metadata --help
 /opt/nzyte-tv/app/nzytetv metadata initialize --help
 /opt/nzyte-tv/app/nzytetv metadata review --help
@@ -542,6 +548,8 @@ Checkpoint 2 uses the repository-owned systemd unit and examples under `deploy/`
 Schema-version-2 state preserves a deterministic queue identity and the first item not positively known to have completed. A matching stopped/interrupted queue resumes that item from its beginning; schema-version-1 state starts fresh, stopped state with changed programming starts fresh, and interrupted state with a changed queue refuses to guess.
 
 Checkpoint 2 passed the documented hard parent-crash, clean stop/start, graceful disabled-service reboot, and final boot-enabled reboot tests on Raspberry Pi. Boot enablement remains an explicit operator action; no NZYTE TV code or install step enables the unit.
+
+Checkpoint 3B1 is separate from the service. Its `programming rolling` commands prepare a portable manifest, frozen inputs, content-addressed planned history, and immutable six-hour blocks under the selected `<media-root>/playlists/rolling`. They do not start FFmpeg, alter the unit, or change `station.json`. Follow the [rolling programming planner](rolling-programming.md) acceptance procedure to initialize with an explicit empty/imported genesis, prepare three blocks, verify idempotent hashes/mtimes, test locking and interrupted-work reconciliation, and prove policy/new-media changes affect only later ungenerated blocks.
 
 Inspect a quoted source-master path through the convenience symlink:
 
@@ -690,5 +698,5 @@ The current broadcaster automates this stream-copy path and still never stores o
 - A dummy HDMI plug as a replacement for the physical monitor.
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
-- Checkpoint 3A programming-policy playlist inspection against the live production inventory on Raspberry Pi.
-- Automatic playlist queue regeneration and remote stream-health monitoring.
+- Checkpoint 3B1 rolling-planner acceptance against the live production inventory on Raspberry Pi.
+- Automatic station consumption/handoff of prepared blocks and remote stream-health monitoring.

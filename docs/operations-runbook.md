@@ -97,6 +97,9 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `programming validate` | Validates policy values plus referenced catalog groups and library asset IDs. | Before playlist generation and after policy edits. |
 | `programming status` | Summarizes campaign, overrides, repetition, cadence, and internal patterns. | Inspect the active finite-block policy. |
 | `programming campaign` / `programming asset` | Manages the spotlight record and sparse per-asset editorial overrides. | Routine programming changes without hand-editing JSON. |
+| `programming rolling init` | Creates one portable rolling-planner lineage with an explicit empty or imported planned-history genesis. | Once, before preparing the 3B1 buffer. |
+| `programming rolling maintain` | Reconciles interrupted work and prepares three immutable six-hour blocks. It never starts FFmpeg. | Prepare or verify the pre-cutover buffer. |
+| `programming rolling validate` / `status` | Validates hashes, chains, media readiness, and broadcast plans; reports buffer/audit state. | After maintenance and before later acceptance work. |
 | `build-playlist` | Creates a deterministic airtime-aware schedule and optionally updates history. | After the eligible library changes or another programming block is needed. |
 | `broadcast` | Validates playlist files, concatenates normalized assets, and stream-copies them to RTMP/RTMPS using FFmpeg. | Dry-run first; then start the live stream. |
 | `station validate` | Validates non-secret station configuration and the existing broadcast readiness checks without launching FFmpeg. | Before every station/service start or after configuration changes. |
@@ -286,7 +289,7 @@ This creates five distinct situations:
 1. **Preparing content elsewhere:** the Pi may keep broadcasting while another computer or drive receives and normalizes new masters.
 2. **Removing the production USB:** stop the broadcaster and unmount first. FFmpeg is actively reading from that drive.
 3. **Updating the mounted production USB:** adding a brand-new file at a path not used by the active queue does not dynamically affect playback. Editing a source master alone does not alter the normalized copy already playing, but a later normalization may replace its stale library destination. Never replace, rename, or remove an active library file while FFmpeg may read it; stop first.
-4. **Generating future playlists:** this may be done while an existing queue runs, but the new JSON is only a future plan and history must be handled carefully.
+4. **Generating future playlists:** this may be done while an existing queue runs. Manual blocks must share the correct ordinary history; 3B1 rolling blocks use their own manifest-committed content-addressed planned history. Either way, the new JSON is only a future plan.
 5. **Using the new playlists:** restart the broadcaster later with those playlist paths. The running process does not discover them.
 
 For the current single-USB production workflow, the same physical drive contains `source/`, `library/`, `catalog/`, `playlists/`, and history and is mounted at `/srv/nzyte-tv/media`. If that USB must go to the Windows i9 workstation, **yes—stop the station first**.
@@ -376,6 +379,8 @@ Bash template:
 Replace both angle-bracket placeholders before running the command. Use the current history file for continuity.
 
 History is updated when playlists are generated. It is programming/scheduling history, **not** a live database of which item FFmpeg has finished playing. Stopping midway through already-generated blocks and regenerating can therefore make planned history differ from what actually aired. In the current manual workflow, prefer completing the planned block or deliberately choosing a maintenance boundary before replacing future schedules.
+
+Do not use ordinary `history.json` as the transaction authority for a rolling lineage. `programming rolling maintain` advances that lineage's `historyHead` only when the same atomic manifest commit adds its immutable block. Prepared rolling blocks are still not discovered or aired by the current station.
 
 After media and future playlists are ready, configure `NZYTE_TV_RTMP_URL` again using the silent procedure in [Configure the RTMPS destination safely](#15-configure-the-rtmps-destination-safely), then start a new queue:
 
@@ -552,7 +557,30 @@ Bash:
 
 Do not casually delete or reset history while operating a station; doing so discards cross-playlist cooldown context.
 
-### 10.3 Configured and effective airtime targets
+### 10.3 Prepare the Checkpoint 3B1 rolling buffer
+
+The rolling planner is optional and does not replace the manual commands above. Initialize it once, explicitly choosing either an imported planned history or empty genesis. This example chooses empty genesis and a fixed base seed:
+
+```bash
+/opt/nzyte-tv/app/nzytetv programming rolling init \
+  --media-root /srv/nzyte-tv/media \
+  --base-seed 20261001
+
+/opt/nzyte-tv/app/nzytetv programming rolling maintain \
+  --media-root /srv/nzyte-tv/media
+
+/opt/nzyte-tv/app/nzytetv programming rolling validate \
+  --media-root /srv/nzyte-tv/media
+
+/opt/nzyte-tv/app/nzytetv programming rolling status \
+  --media-root /srv/nzyte-tv/media
+```
+
+Omit `--history` only when an empty planned-history genesis is intentional. To import, add `--history <existing-planned-history.json>` to `rolling init`; the planner never searches for one automatically. The first maintenance run commits an activation candidate plus two future blocks under `playlists/rolling`. Repeating it at the target is a no-op. New eligible content and policy changes affect the next block not yet generated and never rewrite committed blocks.
+
+Checkpoint 3B1 does not put those blocks on air, change the static `station.json` queue, start FFmpeg, or hand off at a block boundary. Continue using the accepted static station workflow until Checkpoint 3B2 is implemented and accepted. See [Rolling programming planner](rolling-programming.md) for the transaction model and manual Pi acceptance plan.
+
+### 10.4 Configured and effective airtime targets
 
 **Configured targets** are the desired station mix. They remain:
 
@@ -570,7 +598,7 @@ Do not casually delete or reset history while operating a station; doing so disc
 
 Promo, bumper, and interstitial are cadence-controlled and sit outside the normal-program percentage mix.
 
-### 10.4 Song pacing in plain language
+### 10.5 Song pacing in plain language
 
 With Checkpoint 3A policy active, the exact same `assetId` keeps the configurable two-hour preferred cooldown. Song-family pacing uses substantial pieces instead of a long time ban: the same `contentGroupId` cannot occupy adjacent substantial slots while any alternative exists, and it is strongly avoided within the previous two substantial pieces by default. Bumper, promo, interstitial, and advertisement inserts do not count as song separation. A different presentation can return after the configured lookback when the schedule permits.
 
@@ -597,7 +625,7 @@ Directional short-presentation spacing is:
 
 The exact same asset has a separate approximately two-hour replay preference. A relaxed song-group preference never means the identical clip should repeat immediately.
 
-### 10.5 Cadence content is not filler
+### 10.6 Cadence content is not filler
 
 - Promo: blocked below 30 minutes, preferred at 30–45 minutes, overdue after 45 minutes. Under Checkpoint 3A, `promo` and `advertisement` share this mini-break timer.
 - Interstitial: blocked below 20 minutes, preferred at 20—30 minutes, overdue after 30 minutes.
@@ -1071,6 +1099,8 @@ Use `lsblk -f` and `findmnt` to confirm the UUID and stable mount. Do not rely o
 
 Use the same current `history.json` so cooldown state crosses the boundary.
 
+For a 3B1 rolling lineage, do not edit or copy its history files manually. Run `programming rolling maintain`; only `manifest.json` commits a block and advances its content-addressed planned-history head.
+
 ### I want to close SSH while streaming
 
 Run the broadcast inside tmux and detach with Ctrl+B, D.
@@ -1178,6 +1208,7 @@ The following have been validated at specific points in production acceptance. T
 - [Content catalog](content-catalog.md): catalog schema, matching, review, edits, and identity.
 - [Playlists](playlists.md): scheduling policy, diagnostics, schema, and history.
 - [V1 programming policy](programming.md): editorial controls, spotlight campaign, song-family pacing, internal patterns, and cadence.
+- [Rolling programming planner](rolling-programming.md): immutable blocks, manifest transactions, deterministic retry, recovery, and Pi acceptance.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

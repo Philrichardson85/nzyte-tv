@@ -2,9 +2,9 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks without changing station execution. Encoding remains independent from metadata, scheduling, and playback.
 
-Rolling automatic future-block generation, dynamic queue append/discovery, application-driven service enablement, YouTube API health monitoring, and alerts remain out of scope. Boot enablement remains an explicit operator action; Checkpoint 2 Raspberry Pi acceptance, including enabled-service reboot resume, has completed.
+Rolling station execution/handoff, dynamic queue append/discovery, application-driven service enablement, YouTube API health monitoring, and alerts remain out of scope. The 3B1 planner can prepare future blocks, but it cannot put them on air. Boot enablement remains an explicit operator action; Checkpoint 2 Raspberry Pi acceptance, including enabled-service reboot resume, has completed.
 
 ## Operating NZYTE TV
 
@@ -18,6 +18,7 @@ Focused references:
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [V1 programming policy and operator controls](docs/programming.md)
+- [Rolling programming planner](docs/rolling-programming.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
 
@@ -96,6 +97,10 @@ nzytetv programming campaign set <contentGroupId> --media-root <media-root> [--w
 nzytetv programming campaign clear --media-root <media-root>
 nzytetv programming asset set <assetId> --media-root <media-root> [--do-not-air true|false] [--weight <value>]
 nzytetv programming asset reset <assetId> --media-root <media-root>
+nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]
+nzytetv programming rolling maintain --media-root <media-root>
+nzytetv programming rolling validate --media-root <media-root>
+nzytetv programming rolling status --media-root <media-root>
 nzytetv metadata initialize <source-root> <library-root> --catalog <catalog-path> [--dry-run]
 nzytetv metadata review <source-root> <library-root> --catalog <catalog-path>
 nzytetv metadata sync <source-root> <library-root>
@@ -159,6 +164,8 @@ Without `programming.json`, the accepted legacy engine relaxes category targetin
 
 When `programming.json` exists beside the supplied song catalog, Checkpoint 3A activates the V1 policy. New technically eligible assets remain eligible by default; sparse overrides can apply Do Not Air or presentation weight. Song-family selection occurs before presentation selection, preventing a song with many visuals from receiving extra baseline rotation entries. The active campaign defaults to a configurable 2.0x `contentGroupId` weight, hard substantial-item adjacency remains protected, a two-piece song-family lookback is preferred, and deterministic MUSIC-HEAVY, MIXED, and FAST-PACED lane templates add sequencing texture. A configurable three-piece default short-run maximum prevents accidental Shorts-style blocks while allowing a counted relaxation when the available inventory cannot supply a legal full/personality alternative. When the file is absent, legacy scheduling behavior remains unchanged. See [programming.md](docs/programming.md).
 
+Checkpoint 3B1 can prepare an immutable three-block pre-cutover buffer under `<media-root>/playlists/rolling`. Its versioned manifest is the sole commit point; content-addressed planned-history snapshots carry programming context across blocks, deterministic per-sequence seeds make retries reproducible, and frozen intents prevent a crashed attempt from silently adopting newer inputs. Every committed block remains playlist schema version 1 and passes the existing `BroadcastPlanner`. The planner never starts FFmpeg or changes a running or static station queue. See [rolling-programming.md](docs/rolling-programming.md).
+
 ### Broadcast playback
 
 `broadcast` validates one or more generated schema-version-1 playlists and plays them sequentially from the normalized library. It uses an FFmpeg concat input with real-time pacing, `-c copy`, and FLV output, so playback does not re-encode or filter media. Library-relative paths are resolved safely beneath the supplied root; missing MP4 files, missing technical manifests, traversal attempts, malformed playlists, and invalid sequences prevent broadcast startup.
@@ -199,6 +206,7 @@ See [broadcast-standard.md](docs/broadcast-standard.md) for encoding settings, t
 /srv/nzyte-tv/
 |-- logs/
 |-- playlists/
+|   `-- rolling/                   optional Checkpoint 3B1 ledger and immutable blocks
 |-- catalog/
 |   |-- song-catalog.json          stable song identity
 |   `-- programming.json           optional Checkpoint 3A policy
@@ -266,10 +274,10 @@ The [workstation setup guide](docs/workstation-setup.md) provides copy/paste Pow
 ## Architecture and testing
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
-- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, programming policy, deterministic lane patterns, scheduling, cooldowns, relaxation, and playlist/history models. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist library snapshots, duration inspection, programming-policy persistence/services, and JSON/filesystem adapters.
+- `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, programming policy, deterministic lane patterns, scheduling, cooldowns, relaxation, playlist/history models, and rolling block identity/seed rules. It has no FFmpeg dependency.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist planning snapshots, duration inspection, programming-policy persistence/services, and the rolling manifest/intent/transaction store.
 
-Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata workflows, playlist eligibility, programming-policy storage/validation, editorial overrides, campaign weighting, song-family selection, internal patterns, repetition, cadence, history, and station-resume regression. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
+Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata workflows, playlist eligibility, programming-policy storage/validation, editorial overrides, campaign weighting, song-family selection, internal patterns, repetition, cadence, history, rolling identity/seeds, frozen-input retry, manifest atomicity, orphan reconciliation, locking, immutable buffers, and station-resume regression. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
 ## Further documentation
 
@@ -280,5 +288,6 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [V1 programming policy and operator controls](docs/programming.md)
+- [Rolling programming planner](docs/rolling-programming.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Complete operations runbook](docs/operations-runbook.md)
