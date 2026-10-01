@@ -23,7 +23,10 @@ public sealed class RollingStationFormatterTests
         Assert.Contains($"Destination env:     {expected}", output, StringComparison.Ordinal);
         Assert.DoesNotContain(Secret, output, StringComparison.Ordinal);
         Assert.DoesNotContain("stream key", output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Automatic block replenishment: NOT IMPLEMENTED", output, StringComparison.Ordinal);
+        Assert.Contains(
+            "Automatic block replenishment: ACTIVE DURING ROLLING RUN",
+            output,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -51,6 +54,12 @@ public sealed class RollingStationFormatterTests
         Assert.Contains("Coordinator:         STOPPED", output, StringComparison.Ordinal);
         Assert.Contains("Active block:        2", output, StringComparison.Ordinal);
         Assert.Contains("Last completed:      1", output, StringComparison.Ordinal);
+        Assert.Contains("Highest committed:   4", output, StringComparison.Ordinal);
+        Assert.Contains("Committed future:    2", output, StringComparison.Ordinal);
+        Assert.Contains("Future target:       2", output, StringComparison.Ordinal);
+        Assert.Contains("Required through:    4", output, StringComparison.Ordinal);
+        Assert.Contains("Buffer deficit:      0", output, StringComparison.Ordinal);
+        Assert.Contains("Automatic replenish: HEALTHY", output, StringComparison.Ordinal);
         Assert.Contains("Destination env:     CONFIGURED / VALID", output, StringComparison.Ordinal);
         Assert.Contains("YouTube monitoring:  NOT CONFIGURED", output, StringComparison.Ordinal);
         Assert.DoesNotContain(Secret, output, StringComparison.Ordinal);
@@ -117,6 +126,30 @@ public sealed class RollingStationFormatterTests
             FfmpegAvailable: true,
             destinationStatus,
             Errors: [],
-            Warnings: []);
+            Warnings: [])
+        {
+            Buffer = new RollingBufferSnapshot(
+                NextRequiredSequence: 2,
+                AnchorSequence: 2,
+                HighestCommittedSequence: 4,
+                FutureBlockTarget: 2,
+                CommittedFutureBlockCount: 2,
+                RequiredHighestSequence: 4,
+                BufferDeficit: 0,
+                RollingBufferHealth.Healthy),
+            ReplenishmentState = new RollingReplenishmentState
+            {
+                PlannerId = rollingConfiguration.PlannerId,
+                Health = RollingReplenishmentHealth.Healthy,
+                AnchorSequence = 2,
+                HighestCommittedSequence = 4,
+                RequiredHighestSequence = 4,
+                FutureBlockTarget = 2,
+                BufferDeficit = 0,
+                LastSuccessAtUtc = now,
+                ErrorClassification = RollingReplenishmentErrorClassification.None,
+                UpdatedAtUtc = now,
+            },
+        };
     }
 }

@@ -109,6 +109,45 @@ public sealed class RollingStationInspectionTests
             error.Contains("hash mismatch", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task Status_RecomputesBufferFromAuthoritiesAndTreatsBlockedFuturePlanningAsAdvisory()
+    {
+        using InspectionFixture fixture = await InspectionFixture.CreateAsync();
+        string sidecarPath = RollingReplenishmentStateStore.GetPath(fixture.RollingStatePath);
+        DateTimeOffset now = DateTimeOffset.Parse("2026-10-01T12:00:00Z");
+        await new RollingReplenishmentStateStore().WriteAsync(
+            sidecarPath,
+            new RollingReplenishmentState
+            {
+                PlannerId = fixture.Configuration.PlannerId,
+                Health = RollingReplenishmentHealth.Blocked,
+                AnchorSequence = 50,
+                HighestCommittedSequence = 99,
+                RequiredHighestSequence = 52,
+                FutureBlockTarget = 2,
+                BufferDeficit = 0,
+                LastAttemptAtUtc = now,
+                LastErrorAtUtc = now,
+                ErrorClassification = RollingReplenishmentErrorClassification.PlanningBlocked,
+                LastError = "future policy is invalid",
+                UpdatedAtUtc = now,
+            },
+            CancellationToken.None);
+
+        RollingStationStatusSnapshot status = fixture.CreateService().GetStatus(
+            fixture.RollingConfigurationPath,
+            configuredDestination: null);
+
+        Assert.True(status.Validation.IsReady, string.Join("; ", status.Validation.Errors));
+        Assert.NotNull(status.Validation.Buffer);
+        Assert.Equal(1, status.Validation.Buffer.HighestCommittedSequence);
+        Assert.Equal(3, status.Validation.Buffer.RequiredHighestSequence);
+        Assert.Equal(2, status.Validation.Buffer.BufferDeficit);
+        Assert.Equal(99, status.Validation.ReplenishmentState!.HighestCommittedSequence);
+        Assert.Contains(status.Validation.Warnings, warning =>
+            warning.Contains("blocked", StringComparison.OrdinalIgnoreCase));
+    }
+
     private sealed class InspectionFixture : IDisposable
     {
         private static readonly JsonSerializerOptions JsonOptions = new()

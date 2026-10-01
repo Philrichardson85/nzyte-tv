@@ -36,6 +36,186 @@ public sealed class RollingStationCoordinatorTests
         Enum.GetValues<RollingCoordinatorCheckpoint>());
 
     [Fact]
+    public async Task SixBlockSimulation_ReplenishesThroughEightWithoutReplayOrSkip()
+    {
+        using var fixture = new CoordinatorFixture(initialBlockCount: 3, availableBlockCount: 8);
+        var cancellation = new CancellationTokenSource();
+        var trigger = new RollingReplenishmentTrigger();
+        var signalingStore = new SignalingRollingStationStateStore(fixture.RollingStore, trigger);
+        var ownership = new RollingCoordinatorOwnershipSignal();
+        var lockProvider = new SignalingRollingCoordinatorLockProvider(
+            new RollingCoordinatorLockProvider(),
+            ownership);
+        var executor = new ScriptedExecutor(async (sequence, configuration, plan, token) =>
+        {
+            if (sequence == 6)
+            {
+                while (fixture.PlanStore.Manifest.Blocks!.Count < 8)
+                {
+                    await Task.Delay(1, token);
+                }
+            }
+
+            return await fixture.CompleteExecution(sequence, configuration, plan, token);
+        });
+        var fault = new CancelAtFault(
+            RollingCoordinatorCheckpoint.AfterRollingCompletionPersistence,
+            sequence: 6,
+            cancellation);
+        RollingStationCoordinator coordinator = fixture.CreateCoordinator(
+            executor,
+            faultInjector: fault,
+            rollingStateStore: signalingStore,
+            lockProvider: lockProvider);
+        var maintainer = new CoordinatorFakeMaintainer(fixture);
+        var replenisher = new RollingProgrammingReplenisher(
+            maintainer,
+            trigger,
+            rollingConfigurationLoader: new FixedRollingConfigurationLoader(fixture.Configuration),
+            stationConfigurationLoader: new FixedStationConfigurationLoader(fixture.StationConfiguration),
+            rollingStateStore: signalingStore,
+            planStore: fixture.PlanStore,
+            timeProvider: new FixedTimeProvider(fixture.Now),
+            consistencyCheckInterval: TimeSpan.FromMilliseconds(25));
+        var host = new RollingStationRuntimeHost(coordinator, replenisher, ownership);
+        Dictionary<string, (byte[] Content, DateTime Mtime)> immutablePrefix = Enumerable
+            .Range(1, 3)
+            .Select(sequence => Path.Combine(fixture.Root, $"block-{sequence}.json"))
+            .ToDictionary(
+                path => path,
+                path => (File.ReadAllBytes(path), File.GetLastWriteTimeUtc(path)));
+
+        RollingStationRunResult result = await host.RunAsync(
+            fixture.ConfigurationPath,
+            false,
+            cancellation.Token);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"{result.Error}; calls={string.Join(',', executor.Calls)}; " +
+            $"phase={result.FinalState?.Phase}; active={result.FinalState?.ActiveBlockSequence}");
+        Assert.Equal([1L, 2L, 3L, 4L, 5L, 6L], executor.Calls);
+        Assert.Equal(6, executor.Calls.Distinct().Count());
+        Assert.Equal(8, fixture.PlanStore.Manifest.Blocks!.Count);
+        Assert.Equal(9, fixture.PlanStore.Manifest.NextSequence);
+        Assert.Equal(6, result.FinalState!.LastCompletedBlockSequence);
+        Assert.Null(result.FinalState.ActiveBlockSequence);
+        Assert.Contains(8, maintainer.Targets);
+        for (int index = 0; index < fixture.PlanStore.Manifest.Blocks.Count - 1; index++)
+        {
+            Assert.Equal(
+                fixture.PlanStore.Manifest.Blocks[index].HistoryAfter,
+                fixture.PlanStore.Manifest.Blocks[index + 1].HistoryBefore);
+        }
+
+        foreach ((string path, (byte[] content, DateTime mtime)) in immutablePrefix)
+        {
+            Assert.Equal(content, File.ReadAllBytes(path));
+            Assert.Equal(mtime, File.GetLastWriteTimeUtc(path));
+        }
+
+        StationRuntimeState cp2 = fixture.StationStore.Read(fixture.StationStatePath);
+        Assert.Equal(fixture.Resolved[6].QueueId, cp2.QueueId);
+        Assert.Equal(6, fixture.CompletedStates.Count);
+    }
+
+    [Fact]
+    public async Task IntegratedRestart_RecoversInterruptedExecutionAndTransientPlanningThenReachesBlockEight()
+    {
+        using var fixture = new CoordinatorFixture(initialBlockCount: 3, availableBlockCount: 8);
+        var maintainer = new CoordinatorFakeMaintainer(fixture);
+        maintainer.Exceptions.Enqueue(
+            new RollingPlannerLockUnavailableException("simulated planner interruption", new IOException("held")));
+        var firstTrigger = new RollingReplenishmentTrigger();
+        var firstStore = new SignalingRollingStationStateStore(fixture.RollingStore, firstTrigger);
+        var firstOwnership = new RollingCoordinatorOwnershipSignal();
+        var firstExecutor = new ScriptedExecutor(async (sequence, configuration, plan, token) =>
+        {
+            if (sequence == 1)
+            {
+                return await fixture.CompleteExecution(sequence, configuration, plan, token);
+            }
+
+            StationRuntimeState partial = fixture.CreateStationState(
+                plan,
+                StationState.Broadcasting,
+                completedIndex: 0);
+            await fixture.StationStore.WriteAsync(
+                fixture.StationStatePath,
+                partial,
+                CancellationToken.None);
+            throw new RollingCoordinatorSimulatedCrashException(
+                "simulated process interruption during block two");
+        });
+        var firstCoordinator = fixture.CreateCoordinator(
+            firstExecutor,
+            rollingStateStore: firstStore,
+            lockProvider: new SignalingRollingCoordinatorLockProvider(
+                new RollingCoordinatorLockProvider(),
+                firstOwnership));
+        var firstReplenisher = new RollingProgrammingReplenisher(
+            maintainer,
+            firstTrigger,
+            rollingConfigurationLoader: new FixedRollingConfigurationLoader(fixture.Configuration),
+            stationConfigurationLoader: new FixedStationConfigurationLoader(fixture.StationConfiguration),
+            rollingStateStore: firstStore,
+            planStore: fixture.PlanStore,
+            timeProvider: new FixedTimeProvider(fixture.Now),
+            consistencyCheckInterval: TimeSpan.FromMilliseconds(25));
+        var firstHost = new RollingStationRuntimeHost(
+            firstCoordinator,
+            firstReplenisher,
+            firstOwnership);
+
+        await Assert.ThrowsAsync<RollingCoordinatorSimulatedCrashException>(() =>
+            firstHost.RunAsync(fixture.ConfigurationPath, false, CancellationToken.None));
+
+        Assert.Equal([1L, 2L], firstExecutor.Calls);
+        Assert.Equal(1, fixture.StationStore.Read(fixture.StationStatePath).ResumeGlobalIndex);
+        Assert.Contains(maintainer.Targets, target => target == 3);
+
+        using var cancellation = new CancellationTokenSource();
+        var secondTrigger = new RollingReplenishmentTrigger();
+        var secondStore = new SignalingRollingStationStateStore(fixture.RollingStore, secondTrigger);
+        var secondOwnership = new RollingCoordinatorOwnershipSignal();
+        var secondExecutor = new ScriptedExecutor(fixture.CompleteExecution);
+        var secondCoordinator = fixture.CreateCoordinator(
+            secondExecutor,
+            faultInjector: new CancelAtFault(
+                RollingCoordinatorCheckpoint.AfterRollingCompletionPersistence,
+                sequence: 6,
+                cancellation),
+            rollingStateStore: secondStore,
+            lockProvider: new SignalingRollingCoordinatorLockProvider(
+                new RollingCoordinatorLockProvider(),
+                secondOwnership));
+        var secondReplenisher = new RollingProgrammingReplenisher(
+            maintainer,
+            secondTrigger,
+            rollingConfigurationLoader: new FixedRollingConfigurationLoader(fixture.Configuration),
+            stationConfigurationLoader: new FixedStationConfigurationLoader(fixture.StationConfiguration),
+            rollingStateStore: secondStore,
+            planStore: fixture.PlanStore,
+            timeProvider: new FixedTimeProvider(fixture.Now),
+            consistencyCheckInterval: TimeSpan.FromMilliseconds(25));
+        var secondHost = new RollingStationRuntimeHost(
+            secondCoordinator,
+            secondReplenisher,
+            secondOwnership);
+
+        RollingStationRunResult result = await secondHost.RunAsync(
+            fixture.ConfigurationPath,
+            false,
+            cancellation.Token);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal([2L, 3L, 4L, 5L, 6L], secondExecutor.Calls);
+        Assert.Equal(8, fixture.PlanStore.Manifest.Blocks!.Count);
+        Assert.Equal(6, result.FinalState!.LastCompletedBlockSequence);
+        Assert.Contains(maintainer.Targets, target => target == 8);
+    }
+
+    [Fact]
     public async Task Crash01_BeforeClaim_LeavesCoordinatorUninitializedAndDoesNotSkipBlock()
     {
         using var fixture = new CoordinatorFixture();
@@ -917,14 +1097,17 @@ public sealed class RollingStationCoordinatorTests
         public RollingStationCoordinator CreateCoordinator(
             IRollingBlockExecutor executor,
             IRollingCoordinatorFaultInjector? faultInjector = null,
-            Func<TimeSpan, CancellationToken, Task>? delay = null) => new(
+            Func<TimeSpan, CancellationToken, Task>? delay = null,
+            IRollingStationStateStore? rollingStateStore = null,
+            IRollingCoordinatorLockProvider? lockProvider = null) => new(
             executor,
             rollingConfigurationLoader: new FixedRollingConfigurationLoader(Configuration),
             stationConfigurationLoader: new FixedStationConfigurationLoader(StationConfiguration),
-            rollingStateStore: RollingStore,
+            rollingStateStore: rollingStateStore ?? RollingStore,
             stationStateStore: StationStore,
             planStore: PlanStore,
             blockResolver: Resolver,
+            lockProvider: lockProvider,
             processExistence: new FixedProcessExistence([.. _livePids]),
             faultInjector: faultInjector,
             timeProvider: new FixedTimeProvider(Now),
@@ -1192,6 +1375,36 @@ public sealed class RollingStationCoordinatorTests
                     .Replace("block-", string.Empty, StringComparison.Ordinal));
             Calls.Add(sequence);
             return _execute(sequence, configuration, plan, cancellationToken);
+        }
+    }
+
+    private sealed class CoordinatorFakeMaintainer(CoordinatorFixture fixture)
+        : IRollingBlockMaintainer
+    {
+        public List<long> Targets { get; } = [];
+
+        public Queue<Exception> Exceptions { get; } = [];
+
+        public Task<RollingMaintainResult> EnsureCommittedThroughAsync(
+            string mediaRoot,
+            long requiredHighestSequence,
+            CancellationToken cancellationToken)
+        {
+            Targets.Add(requiredHighestSequence);
+            if (Exceptions.TryDequeue(out Exception? exception))
+            {
+                throw exception;
+            }
+
+            fixture.PublishThrough(Math.Max(
+                fixture.PlanStore.Manifest.Blocks!.Count,
+                checked((int)requiredHighestSequence)));
+            return Task.FromResult(new RollingMaintainResult(
+                RollingProgrammingPaths.FromMediaRoot(mediaRoot),
+                fixture.PlanStore.Manifest,
+                0,
+                0,
+                true));
         }
     }
 

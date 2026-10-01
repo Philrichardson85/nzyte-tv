@@ -51,6 +51,14 @@ public interface IRollingPlannerLockProvider
     IRollingPlannerLock Acquire(string path);
 }
 
+public sealed class RollingPlannerLockUnavailableException : InvalidOperationException
+{
+    public RollingPlannerLockUnavailableException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 public sealed class RollingPlannerLockProvider : IRollingPlannerLockProvider
 {
     public IRollingPlannerLock Acquire(string path)
@@ -71,7 +79,7 @@ public sealed class RollingPlannerLockProvider : IRollingPlannerLockProvider
         }
         catch (IOException exception)
         {
-            throw new InvalidOperationException(
+            throw new RollingPlannerLockUnavailableException(
                 "Another rolling programming planner currently holds the exclusive planner lock.",
                 exception);
         }

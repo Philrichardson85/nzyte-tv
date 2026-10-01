@@ -1,6 +1,6 @@
 # Rolling programming planner (Checkpoint 3B1)
 
-Checkpoint 3B1 prepares immutable six-hour programming blocks ahead of station execution. It is a planning system, not a rolling station. Its commands never start FFmpeg, change `station.json`, append to a running Checkpoint 2 queue, or advance runtime state. Static station and manual `build-playlist` operation remain unchanged. Checkpoint 3B2-A now provides a separate opt-in coordinator that may consume these committed blocks; see [rolling-station.md](rolling-station.md).
+Checkpoint 3B1 prepares immutable six-hour programming blocks ahead of station execution. It is a planning system, not a rolling station. Its commands never start FFmpeg, change `station.json`, append to a running Checkpoint 2 queue, or advance runtime state. Static station and manual `build-playlist` operation remain unchanged. Checkpoint 3B2-A provides a separate opt-in coordinator that consumes committed blocks, and Checkpoint 3B2-B invokes this same accepted planner asynchronously to replenish that coordinator's future buffer; see [rolling-station.md](rolling-station.md).
 
 For a new lineage before its first execution claim, the default target is three committed blocks:
 
@@ -10,7 +10,7 @@ future block 1
 future block 2
 ```
 
-When the separate 3B2-A coordinator is used, that policy can be interpreted as one active block plus two committed future blocks. The execution cursor is not part of 3B1 or its portable manifest; it lives in a separate runtime document.
+During rolling execution, the policy is interpreted as one active (or next-required) block plus two committed future blocks. The execution cursor is not part of 3B1 or its portable manifest; it lives in a separate runtime document.
 
 ## Commands
 
@@ -46,7 +46,17 @@ Prepare the initial buffer, validate it, and inspect it:
   --media-root /srv/nzyte-tv/media
 ```
 
-`maintain` generates sequentially until three blocks are committed. It uses FFprobe through the accepted library loader to capture actual media durations, but never invokes FFmpeg or reads an RTMP destination. Repeating it at that target changes no committed playlist, history, input snapshot, descriptor, hash, or modification time. `validate` and `status` are read-only. Status reports the lineage, schema, base seed, target duration, buffer target, committed range, next sequence, history-head prefix, nominal and actual prepared duration, per-block policy revision, currently visible policy revision, staging/quarantine counts, and validation health. It states that execution/handoff is not performed by the planner.
+`maintain` generates sequentially until the manifest's default three-block minimum is satisfied. The target means "ensure at least this many contiguous committed blocks": if automatic replenishment has already extended the manifest beyond three, ordinary `maintain` still reconciles staging/orphans and succeeds without shrinking or rewriting anything. It uses FFprobe through the accepted library loader only when generation is required, never invokes FFmpeg, and never reads an RTMP destination. Repeating it at a satisfied target changes no committed playlist, history, input snapshot, descriptor, hash, or modification time. `validate` and `status` are read-only. Status reports the lineage, schema, base seed, target duration, buffer target, committed range, next sequence, history-head prefix, nominal and actual prepared duration, per-block policy revision, currently visible policy revision, staging/quarantine counts, and validation health. It states that execution/handoff is not performed by the planner.
+
+## Automatic relative replenishment
+
+`station rolling run` now hosts a background replenisher after, and only after, the rolling coordinator has acquired its lifetime lock. The coordinator and planner remain independent: execution owns the coordinator and CP2 locks; generation owns the existing planner lock. No component holds the station lock while generating or the planner lock while broadcasting.
+
+Let `W` be the manifest prepared-window target (currently 3), so the future target is `F = W - 1` (currently 2). The replenisher anchors on the complete active claim when one exists, otherwise on the next sequence after the last positively completed block. It requires commitment through `anchor + F`. Thus active block 1 requires blocks through 3, active block 2 requires blocks through 4, and a completed block 3 awaiting block 4 requires blocks through 6. It never moves the execution cursor to satisfy this planning target.
+
+At process startup the planner performs its accepted reconciliation even when the buffer is healthy; expensive FFprobe and snapshot-generation dependencies are initialized lazily only when a real deficit remains. Durable rolling-state changes wake the replenisher, while a 45-second consistency check catches missed signals and blocks appended by another process. Transient failures retry after approximately 5, 15, 30, and then 60 seconds. Manual and automatic maintenance serialize through the same exclusive planner lock.
+
+A planner failure does not remove or invalidate an already committed executable block. Invalid visible policy or insufficient inventory blocks only future generation; frozen-intent mismatches retain the accepted deterministic retry evidence; committed-chain corruption stops automatic append rather than guessing. If the buffer reaches zero, the execution coordinator remains in `waitingForBlock` while replenishment continues trying the exact missing sequence.
 
 ## Portable layout
 
@@ -138,7 +148,7 @@ On restart, incomplete disposable `.partial` files are removed. A durable intent
 
 Committed blocks are immutable. If three blocks already exist and a new eligible asset arrives, or a campaign, Do Not Air, presentation weight, or other `programming.json` setting changes, all three stay byte-for-byte unchanged. The latest valid catalog, library, and programming policy is captured only for the next block that has not yet been generated.
 
-That means pre-cutover operational latency can be roughly the entire prepared window. This is intentional for safe V1 operation. Urgent withdrawal of a prepared block is not implemented in 3B1.
+That means operational latency can be roughly the entire prepared future window. This is intentional for safe V1 operation. Urgent withdrawal of a prepared block is not implemented: automatic replenishment never regenerates or withdraws committed blocks.
 
 ## Raspberry Pi acceptance procedure
 
@@ -161,4 +171,4 @@ These steps are a future real-Pi acceptance plan, not a claim that they have alr
 
 ## Scope boundary
 
-Checkpoint 3B1 does not consume blocks, choose an active block, update `station.json`, start FFmpeg, enable systemd, create an air-history log, withdraw committed programming, or monitor YouTube. The separate Checkpoint 3B2-A coordinator adds safe activation and handoff while preserving Checkpoint 2's immutable queue epoch and item-level resume guarantees; it does not replenish the planner buffer or install a production service.
+Checkpoint 3B1 does not consume blocks, choose an active block, update `station.json`, start FFmpeg, enable systemd, create an air-history log, withdraw committed programming, or monitor YouTube. The separate Checkpoint 3B2-A coordinator adds safe activation and handoff while preserving Checkpoint 2's immutable queue epoch and item-level resume guarantees. Checkpoint 3B2-B composes automatic future-buffer replenishment around those accepted services; it does not alter an active queue, install a production service, preserve one FFmpeg connection across block boundaries, or perform YouTube boundary acceptance.

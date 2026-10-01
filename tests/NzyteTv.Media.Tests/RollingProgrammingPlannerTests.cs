@@ -127,6 +127,74 @@ public sealed class RollingProgrammingPlannerTests
     }
 
     [Fact]
+    public async Task Maintain_TargetBelowCommittedCount_ReconcilesAndSucceedsWithoutRewriting()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        await fixture.InitializeAsync(planner);
+        RollingMaintainResult extended = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 4);
+        Dictionary<string, (byte[] Bytes, DateTime Write)> before = Directory
+            .EnumerateFiles(extended.Paths.RollingRoot, "*.json", SearchOption.AllDirectories)
+            .ToDictionary(
+                path => path,
+                path => (File.ReadAllBytes(path), File.GetLastWriteTimeUtc(path)),
+                GetPathComparer());
+
+        RollingMaintainResult result = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 2);
+
+        Assert.True(result.TargetSatisfied);
+        Assert.Equal(4, result.Manifest.Blocks!.Count);
+        Assert.Equal(0, result.GeneratedBlockCount);
+        Assert.Equal(0, result.AdoptedBlockCount);
+        Assert.Equal(before.Keys.Order(), Directory
+            .EnumerateFiles(extended.Paths.RollingRoot, "*.json", SearchOption.AllDirectories).Order());
+        foreach ((string path, (byte[] bytes, DateTime write)) in before)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+            Assert.Equal(write, File.GetLastWriteTimeUtc(path));
+        }
+    }
+
+    [Fact]
+    public async Task Maintain_DefaultThreeBlockTarget_SucceedsAfterAutomaticExtension()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        await fixture.InitializeAsync(planner);
+        await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 4);
+
+        RollingMaintainResult result = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None);
+
+        Assert.True(result.TargetSatisfied);
+        Assert.Equal(4, result.Manifest.Blocks!.Count);
+        Assert.Equal(0, result.GeneratedBlockCount);
+    }
+
+    [Fact]
+    public async Task Maintain_NegativeTarget_IsRejected()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        await fixture.InitializeAsync(planner);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: -1));
+    }
+
+    [Fact]
     public async Task Maintain_CommittedBlocksStayImmutableAndFourthUsesLatestProgrammingRevision()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);

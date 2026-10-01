@@ -758,11 +758,35 @@ public static class CliApplication
             destination,
             line => Console.Error.WriteLine(line),
             PrintBroadcastRecoveryUpdate);
-        var coordinator = new RollingStationCoordinator(executor);
+        var replenishmentTrigger = new RollingReplenishmentTrigger();
+        var rollingStateStore = new RollingStationStateStore();
+        var signalingStateStore = new SignalingRollingStationStateStore(
+            rollingStateStore,
+            replenishmentTrigger);
+        var ownership = new RollingCoordinatorOwnershipSignal();
+        var signalingLockProvider = new SignalingRollingCoordinatorLockProvider(
+            new RollingCoordinatorLockProvider(),
+            ownership);
+        var coordinator = new RollingStationCoordinator(
+            executor,
+            rollingStateStore: signalingStateStore,
+            lockProvider: signalingLockProvider);
+        Action<string> replenishmentDiagnostic = message => Console.Error.WriteLine(
+            $"Rolling replenishment: {StationSecretRedactor.RedactRtmpUrls(message)}");
+        var replenisher = new RollingProgrammingReplenisher(
+            new RollingBlockMaintainer(),
+            replenishmentTrigger,
+            rollingStateStore: signalingStateStore,
+            diagnostic: replenishmentDiagnostic);
+        var host = new RollingStationRuntimeHost(
+            coordinator,
+            replenisher,
+            ownership,
+            replenishmentDiagnostic);
 
         Console.WriteLine();
         Console.WriteLine("Rolling station starting. Press Ctrl+C to stop.");
-        RollingStationRunResult result = await coordinator.RunAsync(
+        RollingStationRunResult result = await host.RunAsync(
             command.ConfigPath!,
             command.AcceptStoppedStaticCutover,
             cancellationToken).ConfigureAwait(false);
@@ -1194,14 +1218,14 @@ public static class CliApplication
                 Console.WriteLine("Process command lines and destination credentials are never displayed.");
                 break;
             case CommandKind.StationRollingHelp:
-                Console.WriteLine("NZYTE TV rolling station coordinator (Checkpoint 3B2-A)");
+                Console.WriteLine("NZYTE TV rolling station coordinator and replenisher (Checkpoints 3B2-A/B)");
                 Console.WriteLine();
                 Console.WriteLine("  nzytetv station rolling validate --config <rolling-station.json>");
                 Console.WriteLine("  nzytetv station rolling status --config <rolling-station.json>");
                 Console.WriteLine("  nzytetv station rolling run --config <rolling-station.json> [--accept-stopped-static-cutover]");
                 Console.WriteLine();
                 Console.WriteLine("Consumes immutable committed blocks through the existing StationSupervisor.");
-                Console.WriteLine("Automatic rolling-planner replenishment is not implemented.");
+                Console.WriteLine("Rolling run asynchronously maintains two committed future blocks through the accepted planner.");
                 break;
             case CommandKind.StationRollingValidate:
                 Console.WriteLine("Usage: nzytetv station rolling validate --config <rolling-station.json>");
@@ -1209,11 +1233,11 @@ public static class CliApplication
                 break;
             case CommandKind.StationRollingStatus:
                 Console.WriteLine("Usage: nzytetv station rolling status --config <rolling-station.json>");
-                Console.WriteLine("Read-only combined rolling-manifest, rolling-execution, and CP2 station status.");
+                Console.WriteLine("Read-only combined rolling-manifest, rolling-execution, CP2 station, buffer, and replenishment status.");
                 break;
             case CommandKind.StationRollingRun:
                 Console.WriteLine("Usage: nzytetv station rolling run --config <rolling-station.json> [--accept-stopped-static-cutover]");
-                Console.WriteLine("Claims and executes immutable rolling blocks through the accepted resilient station supervisor.");
+                Console.WriteLine("Claims and executes immutable rolling blocks through the accepted resilient station supervisor while replenishing the future buffer asynchronously.");
                 Console.WriteLine("The cutover option is valid only for the first claim from a dead STOPPED schema-v2 static queue.");
                 Console.WriteLine($"Requires {BroadcastDestination.DefaultEnvironmentVariable}; its value is never displayed or serialized.");
                 break;
@@ -1289,7 +1313,7 @@ public static class CliApplication
                 break;
             case CommandKind.ProgrammingRollingMaintain:
                 Console.WriteLine("Usage: nzytetv programming rolling maintain --media-root <media-root>");
-                Console.WriteLine("Reconcile interrupted work and idempotently prepare the initial three immutable six-hour blocks.");
+                Console.WriteLine("Reconcile interrupted work and idempotently ensure the manifest's three-block minimum without shrinking an extended buffer.");
                 Console.WriteLine("This command never starts FFmpeg or changes a station queue.");
                 break;
             case CommandKind.ProgrammingRollingValidate:

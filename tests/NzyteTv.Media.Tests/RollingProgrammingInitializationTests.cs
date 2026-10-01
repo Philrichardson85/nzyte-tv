@@ -232,7 +232,10 @@ public sealed class RollingProgrammingInitializationTests
         var provider = new RollingPlannerLockProvider();
 
         using IRollingPlannerLock first = provider.Acquire(paths.PlannerLockPath);
-        Assert.Throws<InvalidOperationException>(() => provider.Acquire(paths.PlannerLockPath));
+        RollingPlannerLockUnavailableException exception =
+            Assert.Throws<RollingPlannerLockUnavailableException>(() =>
+                provider.Acquire(paths.PlannerLockPath));
+        Assert.IsAssignableFrom<InvalidOperationException>(exception);
         first.Dispose();
         using IRollingPlannerLock afterRelease = provider.Acquire(paths.PlannerLockPath);
     }

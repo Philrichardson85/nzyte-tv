@@ -1,16 +1,18 @@
-# Rolling station coordinator (Checkpoint 3B2-A)
+# Rolling station coordinator and replenishment (Checkpoints 3B2-A/B)
 
-Checkpoint 3B2-A is an opt-in execution coordinator for immutable blocks already committed by the [rolling programming planner](rolling-programming.md). It claims exactly one six-hour block, delegates that block to the accepted Checkpoint 2 `StationSupervisor`, confirms durable completion, and then claims the next manifest block. It never appends to or rewrites the active queue.
+Checkpoint 3B2-A is an opt-in execution coordinator for immutable blocks committed by the [rolling programming planner](rolling-programming.md). It claims exactly one six-hour block, delegates that block to the accepted Checkpoint 2 `StationSupervisor`, confirms durable completion, and then claims the next manifest block. Checkpoint 3B2-B adds an asynchronous runtime host that asks the accepted planner to retain two committed future blocks beyond the active or next-required sequence. Neither component appends to or rewrites the active queue.
 
-This checkpoint does not run the planner, replenish the prepared buffer, install or change a systemd unit, enable a service, keep one FFmpeg connection across block boundaries, or provide production YouTube boundary acceptance. Those responsibilities remain deferred to 3B2-B and 3B2-C.
+The coordinator itself still does not run the planner. The outer runtime host owns the coordinator/background-task lifecycle and delegates all generation to the existing planner. No rolling systemd unit is installed or enabled, one FFmpeg connection is not preserved across block boundaries, and production YouTube boundary acceptance remains deferred to 3B2-C.
 
 ## Two separate authorities
 
-Three durable documents have deliberately different jobs:
+Three authoritative durable documents have deliberately different jobs:
 
 - `<media-root>/playlists/rolling/manifest.json` is the sole authority for committed block order and immutable block artifacts.
 - `/var/lib/nzyte-tv/state.json` remains Checkpoint 2 schema version 2 and is the sole authority for item-level playback progress, FFmpeg recovery state, and the first item not positively completed.
 - `/var/lib/nzyte-tv/rolling-state.json` is schema version 1 and records only block ownership and handoff progress.
+
+An optional `/var/lib/nzyte-tv/rolling-state.json.replenishment.json` schema-version-1 sidecar records advisory buffer/retry health. It is atomically written, secret-redacted, and never authorizes a claim, completion, or manifest append. A sidecar write failure cannot stop healthy execution or corrupt planning state.
 
 There is no multi-file transaction across them. Recovery is idempotent and follows this authority order: verify the manifest block, bind it to the rolling claim, inspect CP2 durable evidence, and only then advance rolling state.
 
@@ -51,11 +53,30 @@ Neither configuration contains `NZYTE_TV_RTMP_URL`. A live run still reads that 
   --config /etc/nzyte-tv/rolling-station.json
 ```
 
-`validate` and `status` are read-only. Validation checks both configurations, planner lineage, every committed block's hashes and immutable descriptor, history/input references, path containment, selected-media readiness, the existing `BroadcastPlanner`, rolling/CP2 consistency, FFmpeg availability, and destination classification. It uses each block's frozen programming snapshot; a newly broken or changed visible `programming.json` does not invalidate a block already committed.
+`validate` and `status` are read-only and never invoke the planner or create files. Validation checks both configurations, planner lineage, every committed block's hashes and immutable descriptor, history/input references, path containment, selected-media readiness, the existing `BroadcastPlanner`, rolling/CP2 consistency, FFmpeg availability, and destination classification. It uses each block's frozen programming snapshot; a newly broken or changed visible `programming.json` does not invalidate a block already committed. Future-generation health is reported separately from committed execution readiness.
 
 The destination is reported only as `NOT CONFIGURED`, `CONFIGURED / VALID`, or `CONFIGURED / INVALID`. Validation may inspect non-secret state without a destination. `run` requires a valid RTMP/RTMPS destination.
 
-No rolling systemd service is supplied in 3B2-A. Do not repoint or modify the accepted static `nzyte-tv.service` as part of this checkpoint.
+No rolling systemd service is supplied in 3B2-A/B. Do not repoint or modify the accepted static `nzyte-tv.service` as part of this checkpoint.
+
+## Runtime host and moving buffer
+
+`station rolling run` first starts the accepted coordinator and waits until its lifetime lock is confirmed. Only the lock owner starts the background replenisher; a competing rolling process cannot generate under the guise of execution. When the coordinator exits, the host cancels and awaits replenishment and returns the coordinator's original exit result. Background exceptions are observed and redacted rather than becoming unobserved task failures.
+
+The prepared-window target comes from the manifest and is not duplicated in rolling configuration. With the current window `W = 3`, the future target is `F = W - 1 = 2`. The durable buffer calculation is:
+
+```text
+next required = (last completed sequence + 1), or 1
+anchor        = complete active claim, otherwise next required
+required      = anchor + F
+deficit       = max(0, required - highest contiguous committed sequence)
+```
+
+`claimed`, `executing`, `stopped`, and restartable `failed` states with a complete claim anchor on that active sequence. `advancing` and `waitingForBlock` anchor on the next required sequence. Contradictory or partial identities are rejected rather than guessed. Planned history is never interpreted as execution evidence.
+
+Durable execution-state writes coalesce wake-ups for the replenisher. A 45-second periodic read remains a fallback for missed signals and externally appended blocks. At startup the accepted planner first reconciles staging and exact orphans; FFprobe and generation dependencies stay lazy if the buffer is already healthy. After generation the target is recalculated because execution may have advanced while planning ran.
+
+Execution, planning, and CP2 recovery retain separate locks. The coordinator lifetime lock does not replace the planner lock; manual and automatic maintenance serialize through the same planner lock. The replenisher never holds the CP2 station lock, and the coordinator never holds the planner lock, so generation cannot block active FFmpeg execution through nested lock ownership.
 
 ## Runtime-state schema and phases
 
@@ -135,7 +156,9 @@ Rollback before any rolling state is persisted is simply continued static operat
 
 ## Missing blocks and failures
 
-When the exact next sequence is absent, the coordinator enters `waitingForBlock` and polls after approximately 5, 15, 30, and then at most 60 seconds. It remains cancellable, never invokes the planner, never replays the completed block, and never skips to another sequence.
+When the exact next sequence is absent, the coordinator enters `waitingForBlock` and polls after approximately 5, 15, 30, and then at most 60 seconds. It remains cancellable, never invokes the planner directly, never replays the completed block, and never skips to another sequence. The background replenisher independently continues trying to publish that exact missing sequence through the accepted atomic planner; a later manifest publication is observed by normal coordinator polling.
+
+Replenishment retries transient planner-lock, mount, I/O, and media-tool failures after approximately 5, 15, 30, and then 60 seconds. Backoff resets after successful maintenance or observable manifest progress. Invalid visible programming configuration or insufficient eligible inventory is reported as `BLOCKED` for future generation without invalidating committed blocks. Frozen-intent recovery remains authoritative. Committed-chain corruption is a `SAFETY FAILURE`: automatic append stops and no replacement sequence is guessed, while an already independently handed-off current block is not killed solely for that future-planning error.
 
 Exit codes are:
 
@@ -162,7 +185,7 @@ Missing/corrupt committed artifacts, identity replacement, contradictory CP2 sta
 | Required next block absent | Wait with bounded polling. |
 | Required next block corrupt/replaced | Fail permanently; do not substitute another block. |
 | Media mount unavailable | Return restartable failure when recognized as temporary; do not change claim. |
-| Planner unavailable | Prepared committed blocks remain executable; 3B2-A never calls the planner. |
+| Planner unavailable or future policy invalid | Prepared committed blocks remain executable; replenishment records degraded/blocked health and retries as appropriate. |
 | Static station already running | Refuse through shared state/process/lock checks. |
 | Second rolling coordinator | Refuse through the coordinator lifetime lock. |
 | CP2 and rolling state disagree | Fail permanently without starting execution. |
@@ -181,8 +204,8 @@ The first prints only matching PIDs and the second only a count.
 
 ## Development and Pi acceptance boundary
 
-Automated tests use a fake `IRollingBlockExecutor` that writes realistic CP2 states and injects crashes at claim, execution, final-item, sealing, rolling-completion, and next-claim boundaries. Production execution uses a thin adapter around the unchanged `StationSupervisor`; the fake is not another broadcaster.
+Automated tests use a fake `IRollingBlockExecutor` that writes realistic CP2 states and injects crashes at claim, execution, final-item, sealing, rolling-completion, and next-claim boundaries. A separate fake maintainer exercises moving targets, retries, cancellation, and six-block execution without generating six-hour media. Production execution uses a thin adapter around the unchanged `StationSupervisor`, and production replenishment delegates to the unchanged rolling planner; neither fake is another broadcaster or scheduler.
 
 For later Raspberry Pi acceptance, keep the existing production unit unchanged and run the opt-in command manually. Validate the configuration first, record both status documents, stop static service execution, then test clean cancellation, process kill/restart, and a block boundary with non-production credentials. Confirm one FFmpeg process, item-level restart within the same block, exactly-once logical advancement, and no credential in output or JSON. Do not treat that procedure as completed acceptance until it has actually been run.
 
-Checkpoint 3B2-B will replenish the future-block buffer. Checkpoint 3B2-C will evaluate the FFmpeg/RTMPS reconnect at a six-hour boundary against YouTube. No production service is installed or enabled by 3B2-A.
+Checkpoint 3B2-B now replenishes the future-block buffer during opt-in rolling execution. Checkpoint 3B2-C will evaluate the FFmpeg/RTMPS reconnect at a six-hour boundary against YouTube. No production service is installed or enabled by 3B2-A/B.

@@ -2,7 +2,7 @@
 
 Checkpoint 3A adds an optional, operator-managed programming policy to the existing deterministic playlist generator. Its goal is a deliberately paced, Nzyte-only classic MTV/BET-style music television channel rather than a random list of videos.
 
-This checkpoint still generates finite playlist JSON files on demand. It does not generate another block while the station is running, append to the active station queue, create named shows or dayparts, or expose any viewer-facing graphics.
+The programming engine still generates finite immutable playlist JSON blocks. It never appends to or rewrites the active station queue, creates named shows or dayparts, or exposes viewer-facing graphics. Checkpoint 3B2-B may invoke the same accepted generator in the background for a later ungenerated rolling block; that orchestration does not change these policy semantics.
 
 ## Identity remains authoritative
 
@@ -122,7 +122,7 @@ Inspect the operator-facing policy summary:
   --media-root /srv/nzyte-tv/media
 ```
 
-Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It identifies 3B1 rolling block planning as available and rolling execution as a separate opt-in station command, so a valid policy or prepared buffer is not mistaken for automatically replenished 24/7 station operation.
+Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It identifies 3B1 rolling block planning as available and rolling execution as a separate opt-in station command. Programming-policy status alone is not rolling execution or replenishment health; use `station rolling status` for the live relative buffer.
 
 ## Default-on eligibility and editorial controls
 
@@ -272,16 +272,17 @@ Existing generated playlist JSON remains valid. The broadcaster, station queue i
 
 ## Rolling planning integration
 
-Checkpoint 3B1 reuses this accepted policy and the same `PlaylistGenerator` through a frozen planning-snapshot service. `programming rolling maintain` can prepare immutable six-hour blocks under `<media-root>/playlists/rolling`; each block captures the exact policy revision (or explicit legacy marker), catalog, eligible inventory, durations, readiness, and planned-history input that produced it. A later policy or editorial change affects only the next block that has not been generated. It never rewrites a committed block.
+Checkpoint 3B1 reuses this accepted policy and the same `PlaylistGenerator` through a frozen planning-snapshot service. `programming rolling maintain` can prepare immutable six-hour blocks under `<media-root>/playlists/rolling`; each block captures the exact policy revision (or explicit legacy marker), catalog, eligible inventory, durations, readiness, and planned-history input that produced it. Checkpoint 3B2-B delegates automatic future-buffer maintenance to that same planner. A later policy or editorial change affects only the next block that has not been generated. It never rewrites a committed block.
 
 The rolling manifest and content-addressed history snapshots are transaction artifacts for planned programming. They are not station runtime state or an air log. See [rolling-programming.md](rolling-programming.md) for commands, identity, atomicity, reconciliation, and the Pi acceptance plan.
 
 ## Current scope boundary
 
-Checkpoint 3B1 prepares future blocks but does not implement:
+The rolling checkpoints now prepare, replenish, and hand off immutable future blocks, but they do not implement:
 
-- rolling station execution or automatic block handoff;
 - dynamic station queue append or directory watching;
+- persistent FFmpeg ingest across block boundaries or completed production YouTube boundary acceptance;
+- a production rolling systemd service;
 - actual air-history logging;
 - Skip or Force Play controls;
 - a Web UI;

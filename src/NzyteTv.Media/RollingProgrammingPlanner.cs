@@ -216,11 +216,11 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
         using IRollingPlannerLock plannerLock = _lockProvider.Acquire(paths.PlannerLockPath);
         RollingProgrammingManifest manifest = _store.LoadManifest(paths.ManifestPath);
         int target = committedBlockTarget ?? manifest.TargetPreparedBlockCount;
-        if (target < manifest.Blocks!.Count)
+        if (target < 0)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(committedBlockTarget),
-                "A maintenance target cannot be lower than the committed block count.");
+                "A maintenance target cannot be negative.");
         }
 
         int adopted = await ReconcileAsync(paths, manifest, cancellationToken).ConfigureAwait(false);

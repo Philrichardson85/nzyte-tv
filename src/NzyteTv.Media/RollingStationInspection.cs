@@ -13,6 +13,10 @@ public sealed record RollingStationValidationResult(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Warnings)
 {
+    public RollingBufferSnapshot? Buffer { get; init; }
+
+    public RollingReplenishmentState? ReplenishmentState { get; init; }
+
     public bool IsReady => Errors.Count == 0
         && FfmpegAvailable
         && DestinationStatus != BroadcastDestinationStatus.Invalid;
@@ -46,6 +50,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
     private readonly IRollingCommittedBlockResolver _blockResolver;
     private readonly IStationCompletionEvidenceService _completionEvidence;
     private readonly IProcessExistence _processExistence;
+    private readonly IRollingReplenishmentStateStore _replenishmentStateStore;
     private readonly Func<string> _locateFfmpeg;
     private readonly TimeProvider _timeProvider;
 
@@ -58,6 +63,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
         IRollingCommittedBlockResolver? blockResolver = null,
         IStationCompletionEvidenceService? completionEvidence = null,
         IProcessExistence? processExistence = null,
+        IRollingReplenishmentStateStore? replenishmentStateStore = null,
         Func<string>? locateFfmpeg = null,
         TimeProvider? timeProvider = null)
     {
@@ -72,6 +78,8 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
             _planStore,
             broadcastPlanner: new BroadcastPlanner());
         _processExistence = processExistence ?? new ProcessExistence();
+        _replenishmentStateStore = replenishmentStateStore
+            ?? new RollingReplenishmentStateStore();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _completionEvidence = completionEvidence ?? new StationCompletionEvidenceService(
             _stationStateStore,
@@ -91,6 +99,8 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
         RollingProgrammingManifest? manifest = null;
         RollingStationRuntimeState? rollingState = null;
         StationRuntimeState? stationState = null;
+        RollingBufferSnapshot? buffer = null;
+        RollingReplenishmentState? replenishmentState = null;
 
         try
         {
@@ -122,6 +132,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
 
             rollingState = _rollingStateStore.ReadIfExists(configuration.RollingStatePath);
             stationState = _stationStateStore.ReadIfExists(stationConfiguration.StatePath);
+            buffer = RollingBufferPolicy.Calculate(manifest, rollingState);
             ValidateExecutionConsistency(
                 configuration,
                 stationConfiguration,
@@ -130,6 +141,38 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
                 rollingState,
                 stationState,
                 warnings);
+
+            string replenishmentPath = RollingReplenishmentStateStore.GetPath(
+                configuration.RollingStatePath);
+            try
+            {
+                replenishmentState = _replenishmentStateStore.ReadIfExists(replenishmentPath);
+                if (replenishmentState is not null
+                    && !string.Equals(
+                        replenishmentState.PlannerId,
+                        configuration.PlannerId,
+                        StringComparison.Ordinal))
+                {
+                    warnings.Add(
+                        "Replenishment diagnostics belong to a different planner lineage and were ignored.");
+                    replenishmentState = null;
+                }
+                else if (replenishmentState?.Health is RollingReplenishmentHealth.Blocked)
+                {
+                    warnings.Add(
+                        "Future rolling programming generation is blocked; committed execution readiness is unchanged.");
+                }
+                else if (replenishmentState?.Health is RollingReplenishmentHealth.SafetyFailure)
+                {
+                    warnings.Add(
+                        "Automatic replenishment stopped after a planning safety failure; committed execution readiness is reported separately.");
+                }
+            }
+            catch (Exception exception) when (exception is
+                FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                warnings.Add($"Replenishment diagnostics are unavailable: {Safe(exception.Message)}");
+            }
         }
         catch (Exception exception) when (exception is
             FileNotFoundException or DirectoryNotFoundException or InvalidDataException or
@@ -158,21 +201,28 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
             ffmpegAvailable,
             BroadcastDestination.GetStatus(configuredDestination),
             errors,
-            warnings);
+            warnings)
+        {
+            Buffer = buffer,
+            ReplenishmentState = replenishmentState,
+        };
     }
 
     public RollingStationStatusSnapshot GetStatus(
         string configurationPath,
         string? configuredDestination)
     {
-        RollingStationValidationResult validation = Validate(
+        RollingStationValidationResult validation = ReadConsistentValidation(
             configurationPath,
             configuredDestination);
-        long nextSequence = validation.RollingState?.ActiveBlockSequence
+        long nextSequence = validation.Buffer?.NextRequiredSequence
+            ?? validation.RollingState?.ActiveBlockSequence
             ?? checked((validation.RollingState?.LastCompletedBlockSequence ?? 0) + 1);
-        bool nextCommitted = validation.Manifest?.Blocks is { } blocks
-            && nextSequence >= 1
-            && nextSequence <= blocks.Count;
+        bool nextCommitted = validation.Buffer is { } buffer
+            ? buffer.HighestCommittedSequence >= nextSequence
+            : validation.Manifest?.Blocks is { } blocks
+                && nextSequence >= 1
+                && nextSequence <= blocks.Count;
         StationStatusSnapshot? stationStatus = null;
         if (validation.StationConfiguration is not null
             && validation.StationState is not null)
@@ -189,6 +239,74 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
             nextCommitted,
             stationStatus,
             _timeProvider.GetUtcNow());
+    }
+
+    private RollingStationValidationResult ReadConsistentValidation(
+        string configurationPath,
+        string? configuredDestination)
+    {
+        RollingStationValidationResult? latest = null;
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            latest = Validate(configurationPath, configuredDestination);
+            if (latest.Configuration is null || latest.StationConfiguration is null)
+            {
+                return latest;
+            }
+
+            RollingStationRuntimeState? stateAfter;
+            RollingProgrammingManifest manifestAfter;
+            try
+            {
+                stateAfter = _rollingStateStore.ReadIfExists(
+                    latest.Configuration.RollingStatePath);
+                RollingProgrammingPaths paths = RollingProgrammingPaths.FromMediaRoot(
+                    latest.StationConfiguration.MediaRoot);
+                manifestAfter = _planStore.LoadManifest(paths.ManifestPath);
+            }
+            catch (Exception exception) when (exception is
+                FileNotFoundException or DirectoryNotFoundException or InvalidDataException or
+                IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return latest;
+            }
+            if (latest.RollingState == stateAfter
+                && ManifestMatches(latest.Manifest, manifestAfter))
+            {
+                return latest;
+            }
+        }
+
+        return latest! with
+        {
+            Errors =
+            [
+                .. latest.Errors,
+                "Rolling execution or manifest state changed repeatedly while status was sampled.",
+            ],
+        };
+    }
+
+    private static bool ManifestMatches(
+        RollingProgrammingManifest? left,
+        RollingProgrammingManifest right)
+    {
+        if (left is null
+            || !string.Equals(left.PlannerId, right.PlannerId, StringComparison.Ordinal)
+            || left.TargetPreparedBlockCount != right.TargetPreparedBlockCount
+            || left.NextSequence != right.NextSequence
+            || left.Blocks?.Count != right.Blocks?.Count)
+        {
+            return false;
+        }
+
+        return left.Blocks!.Zip(right.Blocks!).All(pair =>
+            pair.First.Sequence == pair.Second.Sequence
+            && string.Equals(pair.First.BlockId, pair.Second.BlockId, StringComparison.Ordinal)
+            && string.Equals(
+                pair.First.PlaylistSha256,
+                pair.Second.PlaylistSha256,
+                StringComparison.Ordinal));
     }
 
     private void ValidateExecutionConsistency(

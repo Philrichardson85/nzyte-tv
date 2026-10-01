@@ -21,6 +21,8 @@ public static class RollingStationFormatters
         output.AppendLine($"CP2 state:           {result.StationState?.StationState.ToString().ToUpperInvariant() ?? "NOT PRESENT"}");
         output.AppendLine($"FFmpeg:              {(result.FfmpegAvailable ? "AVAILABLE" : "NOT AVAILABLE")}");
         output.AppendLine($"Destination env:     {FormatDestination(result.DestinationStatus)}");
+        output.AppendLine($"Buffer health:       {FormatBufferHealth(result.Buffer)}");
+        output.AppendLine($"Replenishment:       {FormatReplenishmentHealth(result.ReplenishmentState)}");
         output.AppendLine();
         output.AppendLine("Status:");
         output.AppendLine($"    {(result.IsReady ? "READY" : "NOT READY")}");
@@ -36,7 +38,7 @@ public static class RollingStationFormatters
 
         output.AppendLine();
         output.AppendLine("Rolling execution/handoff: CONFIGURED BY CHECKPOINT 3B2-A");
-        output.AppendLine("Automatic block replenishment: NOT IMPLEMENTED");
+        output.AppendLine("Automatic block replenishment: ACTIVE DURING ROLLING RUN");
         return output.ToString();
     }
 
@@ -53,6 +55,15 @@ public static class RollingStationFormatters
         output.AppendLine($"Committed blocks:    {validation.Manifest?.Blocks?.Count ?? 0}");
         output.AppendLine($"Next required:       {snapshot.NextRequiredSequence.ToString(CultureInfo.InvariantCulture)}");
         output.AppendLine($"Next committed:      {(snapshot.NextBlockCommitted ? "YES" : "NO")}");
+        if (validation.Buffer is RollingBufferSnapshot buffer)
+        {
+            output.AppendLine($"Highest committed:   {buffer.HighestCommittedSequence.ToString(CultureInfo.InvariantCulture)}");
+            output.AppendLine($"Committed future:    {buffer.CommittedFutureBlockCount.ToString(CultureInfo.InvariantCulture)}");
+            output.AppendLine($"Future target:       {buffer.FutureBlockTarget.ToString(CultureInfo.InvariantCulture)}");
+            output.AppendLine($"Required through:    {buffer.RequiredHighestSequence.ToString(CultureInfo.InvariantCulture)}");
+            output.AppendLine($"Buffer deficit:      {buffer.BufferDeficit.ToString(CultureInfo.InvariantCulture)}");
+            output.AppendLine($"Buffer health:       {buffer.Health.ToString().ToUpperInvariant()}");
+        }
         if (state?.ActiveBlockSequence is long activeSequence)
         {
             output.AppendLine($"Active block:        {activeSequence} ({Prefix(state.ActiveBlockId)})");
@@ -84,7 +95,16 @@ public static class RollingStationFormatters
         output.AppendLine($"FFmpeg:              {(validation.FfmpegAvailable ? "AVAILABLE" : "NOT AVAILABLE")}");
         output.AppendLine($"Destination env:     {FormatDestination(validation.DestinationStatus)}");
         output.AppendLine("YouTube monitoring:  NOT CONFIGURED");
-        output.AppendLine("Automatic replenish: NOT IMPLEMENTED");
+        output.AppendLine($"Automatic replenish: {FormatReplenishmentHealth(validation.ReplenishmentState)}");
+        if (validation.ReplenishmentState is RollingReplenishmentState replenishment)
+        {
+            output.AppendLine($"Last replenish:      {FormatTimestamp(replenishment.LastSuccessAtUtc)}");
+            if (!string.IsNullOrWhiteSpace(replenishment.LastError))
+            {
+                output.AppendLine(
+                    $"Last replenish error: {StationSecretRedactor.RedactRtmpUrls(replenishment.LastError)}");
+            }
+        }
         if (!string.IsNullOrWhiteSpace(state?.LastTransitionError))
         {
             output.AppendLine($"Last transition:     {StationSecretRedactor.RedactRtmpUrls(state.LastTransitionError)}");
@@ -113,6 +133,20 @@ public static class RollingStationFormatters
     private static string FormatTimestamp(DateTimeOffset? value) => value is null
         ? "NONE"
         : value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static string FormatBufferHealth(RollingBufferSnapshot? buffer) =>
+        buffer?.Health.ToString().ToUpperInvariant() ?? "UNKNOWN";
+
+    private static string FormatReplenishmentHealth(RollingReplenishmentState? state) =>
+        state?.Health switch
+        {
+            RollingReplenishmentHealth.Healthy => "HEALTHY",
+            RollingReplenishmentHealth.Degraded => "DEGRADED",
+            RollingReplenishmentHealth.Blocked => "BLOCKED",
+            RollingReplenishmentHealth.SafetyFailure => "SAFETY FAILURE",
+            null => "NOT YET OBSERVED",
+            _ => "UNKNOWN",
+        };
 
     private static string FormatDestination(BroadcastDestinationStatus status) => status switch
     {
