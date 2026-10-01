@@ -94,6 +94,11 @@ public sealed class ProgrammingPlaylistGeneratorTests
             .. Enumerable.Range(1, 12).Select(index => Song($"a-{index}", "song-a", 30)),
             Song("b-one", "song-b", 30),
         ];
+        PlaylistAsset[] manyPresentationsForB =
+        [
+            Song("a-one", "song-a", 30),
+            .. Enumerable.Range(1, 12).Select(index => Song($"b-{index}", "song-b", 30)),
+        ];
         ProgrammingConfiguration normal = Config(ProgrammingLaneNames.FullMusic);
         ProgrammingConfiguration campaign = normal with
         {
@@ -107,7 +112,7 @@ public sealed class ProgrammingPlaylistGeneratorTests
 
         foreach (ProgrammingConfiguration configuration in new[] { normal, campaign })
         {
-            foreach (int seed in Enumerable.Range(1, 50))
+            foreach (int seed in Enumerable.Range(1, 300))
             {
                 string? one = Generate(
                     onePresentationPerGroup,
@@ -119,9 +124,163 @@ public sealed class ProgrammingPlaylistGeneratorTests
                     configuration,
                     TimeSpan.FromSeconds(1),
                     seed).Playlist.Items[0].ContentGroupId;
+                string? manyPeer = Generate(
+                    manyPresentationsForB,
+                    configuration,
+                    TimeSpan.FromSeconds(1),
+                    seed).Playlist.Items[0].ContentGroupId;
                 Assert.Equal(one, many);
+                Assert.Equal(one, manyPeer);
             }
         }
+    }
+
+    [Fact]
+    public void CampaignWeightMateriallyChangesEmittedFamilyDistribution()
+    {
+        PlaylistAsset[] assets =
+        [
+            Song("target", "target", 120),
+            Song("peer", "peer", 120),
+        ];
+        ProgrammingConfiguration normal = Config(ProgrammingLaneNames.FullMusic);
+        ProgrammingConfiguration campaign = WithCampaign(normal, "target", 2);
+        const int seedCount = 600;
+
+        int baselineTarget = CountFirstFamilySelections(assets, normal, "target", seedCount);
+        int campaignTarget = CountFirstFamilySelections(assets, campaign, "target", seedCount);
+
+        Assert.InRange(baselineTarget, 270, 330);
+        Assert.True(
+            campaignTarget >= baselineTarget + 70,
+            $"Expected campaign uplift; baseline={baselineTarget}, campaign={campaignTarget}.");
+        Assert.True(campaignTarget > seedCount - campaignTarget);
+    }
+
+    [Fact]
+    public void CampaignMultiplierProducesMonotonicEmittedFamilyDistribution()
+    {
+        PlaylistAsset[] assets =
+        [
+            Song("target", "target", 120),
+            Song("peer", "peer", 120),
+        ];
+        ProgrammingConfiguration normal = Config(ProgrammingLaneNames.FullMusic);
+        ProgrammingConfiguration one = WithCampaign(normal, "target", 1);
+        ProgrammingConfiguration two = WithCampaign(normal, "target", 2);
+        ProgrammingConfiguration three = WithCampaign(normal, "target", 3);
+        const int seedCount = 600;
+
+        string?[] normalSelections = FirstFamilySelections(assets, normal, seedCount);
+        string?[] oneSelections = FirstFamilySelections(assets, one, seedCount);
+        int normalTarget = normalSelections.Count(group => group == "target");
+        int oneTarget = oneSelections.Count(group => group == "target");
+        int twoTarget = CountFirstFamilySelections(assets, two, "target", seedCount);
+        int threeTarget = CountFirstFamilySelections(assets, three, "target", seedCount);
+
+        Assert.Equal(normalSelections, oneSelections);
+        Assert.Equal(normalTarget, oneTarget);
+        Assert.True(oneTarget < twoTarget);
+        Assert.True(twoTarget < threeTarget);
+    }
+
+    [Fact]
+    public void AssetWeightChangesPresentationOnlyAfterFamilySelection()
+    {
+        PlaylistAsset favored = Song("target-favored", "target", 120);
+        PlaylistAsset ordinary = Song("target-ordinary", "target", 120);
+        PlaylistAsset peer = Song("peer", "peer", 120);
+        ProgrammingConfiguration campaign = WithCampaign(
+            Config(ProgrammingLaneNames.FullMusic),
+            "target",
+            2);
+        ProgrammingConfiguration weighted = campaign with
+        {
+            AssetOverrides = new Dictionary<string, AssetEditorialOverride>
+            {
+                [favored.AssetId] = new() { WeightMultiplier = 10 },
+                [ordinary.AssetId] = new() { WeightMultiplier = 0.1 },
+            },
+        };
+        const int seedCount = 300;
+
+        PlaylistItem[] normalSelections = Enumerable.Range(1, seedCount)
+            .Select(seed => Generate(
+                [favored, ordinary, peer],
+                campaign,
+                TimeSpan.FromSeconds(1),
+                seed).Playlist.Items[0])
+            .ToArray();
+        PlaylistItem[] weightedSelections = Enumerable.Range(1, seedCount)
+            .Select(seed => Generate(
+                [favored, ordinary, peer],
+                weighted,
+                TimeSpan.FromSeconds(1),
+                seed).Playlist.Items[0])
+            .ToArray();
+
+        Assert.Equal(
+            normalSelections.Select(item => item.ContentGroupId),
+            weightedSelections.Select(item => item.ContentGroupId));
+        int targetWins = weightedSelections.Count(item => item.ContentGroupId == "target");
+        int favoredWins = weightedSelections.Count(item => item.AssetId == favored.AssetId);
+        Assert.True(targetWins > 150);
+        Assert.True(favoredWins >= targetWins * 0.9);
+    }
+
+    [Fact]
+    public void CampaignCannotForceShortPresentationIntoFullMusicLane()
+    {
+        ProgrammingConfiguration configuration = WithCampaign(
+            Config(ProgrammingLaneNames.FullMusic),
+            "campaign-short",
+            10);
+
+        PlaylistGenerationResult result = Generate(
+            [
+                Song("campaign-short", "campaign-short", 30, AssetTypes.ShortForm),
+                Song("full-peer", "full-peer", 120),
+            ],
+            configuration,
+            TimeSpan.FromSeconds(1));
+
+        Assert.Equal("full-peer", result.Playlist.Items[0].AssetId);
+    }
+
+    [Fact]
+    public void CampaignChangesRepeatedFamilySelectionAfterHistoryAccumulates()
+    {
+        PlaylistAsset[] assets = Enumerable.Range(1, 8)
+            .Select(index => Song($"family-{index}", $"family-{index}", 120))
+            .ToArray();
+        ProgrammingConfiguration normal = Config(
+            ProgrammingLaneNames.FullMusic,
+            exactAssetCooldownMinutes: 120);
+        ProgrammingConfiguration campaign = WithCampaign(normal, "family-1", 2);
+        int baselineTarget = 0;
+        int campaignTarget = 0;
+
+        foreach (int seed in Enumerable.Range(1, 20))
+        {
+            PlaylistGenerationResult baseline = Generate(
+                assets,
+                normal,
+                TimeSpan.FromHours(2),
+                seed);
+            PlaylistGenerationResult spotlight = Generate(
+                assets,
+                campaign,
+                TimeSpan.FromHours(2),
+                seed);
+            baselineTarget += baseline.Playlist.Items.Count(item => item.ContentGroupId == "family-1");
+            campaignTarget += spotlight.Playlist.Items.Count(item => item.ContentGroupId == "family-1");
+            Assert.Equal(0, baseline.Playlist.Summary.ContentGroupAdjacencyViolations);
+            Assert.Equal(0, spotlight.Playlist.Summary.ContentGroupAdjacencyViolations);
+        }
+
+        Assert.True(
+            campaignTarget >= baselineTarget * 1.25,
+            $"Expected history-aware campaign uplift; baseline={baselineTarget}, campaign={campaignTarget}.");
     }
 
     [Fact]
@@ -1332,6 +1491,64 @@ public sealed class ProgrammingPlaylistGeneratorTests
     }
 
     [Fact]
+    public void ProductionShapedCampaignProducesMaterialAggregateUpliftWithoutSafetyRegressions()
+    {
+        PlaylistAsset[] assets = ProductionCampaignAssets();
+        ProgrammingConfiguration normal = ProgrammingConfiguration.CreateDefault();
+        ProgrammingConfiguration campaign = WithCampaign(normal, "family-01", 2);
+        IReadOnlyDictionary<string, double> targets = new Dictionary<string, double>(StringComparer.Ordinal)
+        {
+            [AssetTypes.MusicVideo] = 0.4,
+            [AssetTypes.AnimatedVisual] = 0.2,
+            [AssetTypes.Visualizer] = 0.15,
+            [AssetTypes.Performance] = 0.1,
+            [AssetTypes.ShortForm] = 0.1,
+            [AssetTypes.Vlog] = 0.05,
+        };
+        int baselineTarget = 0;
+        int campaignTarget = 0;
+
+        foreach (int seed in Enumerable.Range(1, 20))
+        {
+            PlaylistGenerationResult baseline = Generate(
+                assets,
+                normal,
+                TimeSpan.FromHours(6),
+                seed,
+                targets);
+            PlaylistGenerationResult spotlight = Generate(
+                assets,
+                campaign,
+                TimeSpan.FromHours(6),
+                seed,
+                targets);
+            PlaylistGenerationResult repeat = Generate(
+                assets,
+                campaign,
+                TimeSpan.FromHours(6),
+                seed,
+                targets);
+
+            baselineTarget += baseline.Playlist.Items.Count(item => item.ContentGroupId == "family-01");
+            campaignTarget += spotlight.Playlist.Items.Count(item => item.ContentGroupId == "family-01");
+            Assert.Equal(spotlight.Playlist.Items, repeat.Playlist.Items);
+            Assert.True(baseline.Playlist.Summary.MaximumObservedConsecutiveShortPieces <= 3);
+            Assert.True(spotlight.Playlist.Summary.MaximumObservedConsecutiveShortPieces <= 3);
+            Assert.Equal(0, baseline.Playlist.Summary.ShortRunRelaxations);
+            Assert.Equal(0, spotlight.Playlist.Summary.ShortRunRelaxations);
+            Assert.Equal(0, baseline.Playlist.Summary.ContentGroupAdjacencyViolations);
+            Assert.Equal(0, spotlight.Playlist.Summary.ContentGroupAdjacencyViolations);
+        }
+
+        Assert.True(
+            campaignTarget >= baselineTarget * 1.15,
+            $"Expected production-shaped campaign uplift; baseline={baselineTarget}, campaign={campaignTarget}.");
+        Assert.True(
+            campaignTarget >= baselineTarget + 20,
+            $"Expected material production-shaped uplift; baseline={baselineTarget}, campaign={campaignTarget}.");
+    }
+
+    [Fact]
     public void ActiveProgrammingGenerationIsDeterministicForFixedInputs()
     {
         PlaylistAsset[] assets =
@@ -1609,6 +1826,72 @@ public sealed class ProgrammingPlaylistGeneratorTests
                     Now.AddMinutes(-play.MinutesAgo),
                     play.DurationSeconds)).ToArray(),
             };
+
+    private static ProgrammingConfiguration WithCampaign(
+        ProgrammingConfiguration configuration,
+        string contentGroupId,
+        double weightMultiplier) => configuration with
+        {
+            ActiveCampaign = new ActiveCampaign
+            {
+                Enabled = true,
+                ContentGroupId = contentGroupId,
+                WeightMultiplier = weightMultiplier,
+            },
+        };
+
+    private static string?[] FirstFamilySelections(
+        IReadOnlyCollection<PlaylistAsset> assets,
+        ProgrammingConfiguration configuration,
+        int seedCount) => Enumerable.Range(1, seedCount)
+            .Select(seed => Generate(
+                assets,
+                configuration,
+                TimeSpan.FromSeconds(1),
+                seed).Playlist.Items[0].ContentGroupId)
+            .ToArray();
+
+    private static int CountFirstFamilySelections(
+        IReadOnlyCollection<PlaylistAsset> assets,
+        ProgrammingConfiguration configuration,
+        string contentGroupId,
+        int seedCount) => FirstFamilySelections(assets, configuration, seedCount)
+            .Count(selected => selected == contentGroupId);
+
+    private static PlaylistAsset[] ProductionCampaignAssets()
+    {
+        var assets = new List<PlaylistAsset>();
+        foreach (int index in Enumerable.Range(1, 12))
+        {
+            string group = $"family-{index:00}";
+            assets.Add(Song($"{group}-full", group, 150 + index, AssetTypes.MusicVideo));
+            if (index == 1 || index % 2 == 0)
+            {
+                assets.Add(Song($"{group}-short", group, 30, AssetTypes.AnimatedVisual));
+            }
+
+            if (index == 1 || index % 3 == 0)
+            {
+                assets.Add(Song($"{group}-visualizer", group, 105, AssetTypes.Visualizer));
+            }
+
+            if (index == 1 || index % 4 == 0)
+            {
+                assets.Add(Song($"{group}-performance", group, 45, AssetTypes.Performance));
+            }
+
+            if (index % 5 == 0)
+            {
+                assets.Add(Song($"{group}-short-form", group, 25, AssetTypes.ShortForm));
+            }
+        }
+
+        assets.AddRange(Enumerable.Range(1, 3).Select(index => Vlog($"vlog-{index}", 180)));
+        assets.AddRange(Enumerable.Range(1, 5).Select(index => Bumper($"bumper-{index}")));
+        assets.Add(Promo("promo-one"));
+        assets.Add(Promo("promo-two", AssetTypes.Advertisement));
+        return [.. assets];
+    }
 
     private static int CalculateMaximumShortRun(IReadOnlyList<PlaylistItem> items)
     {

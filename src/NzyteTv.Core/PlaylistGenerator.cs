@@ -411,7 +411,8 @@ public sealed class PlaylistGenerator
                 candidates,
                 stage,
                 vlogAtOrAboveTarget,
-                musicBelowCombinedTarget);
+                musicBelowCombinedTarget,
+                applyContentGroupAgePreference: true);
             CandidateEvaluation selected = WeightedChoice(preference.Candidates, policy, playTime, random);
             bool hotPreferenceBypassed = MaximumRotationWeight(baseCandidates, policy, playTime)
                 > MaximumRotationWeight(preference.Candidates, policy, playTime);
@@ -614,12 +615,16 @@ public sealed class PlaylistGenerator
                 continue;
             }
 
+            // Active programming already applies explicit adjacency and cluster policy.
+            // Keeping the legacy oldest-group filter here collapses the family lottery
+            // before campaign weighting can participate.
             CandidatePreference preference = ApplyCandidatePreferences(
                 available,
                 constraintSafe,
                 stage >= 5 ? 2 : 0,
                 vlogAtOrAboveTarget,
-                musicBelowCombinedTarget);
+                musicBelowCombinedTarget,
+                applyContentGroupAgePreference: false);
             IReadOnlyList<CandidateEvaluation> preferred = preference.Candidates.Count > 0
                 ? preference.Candidates
                 : available;
@@ -839,7 +844,8 @@ public sealed class PlaylistGenerator
         IReadOnlyCollection<CandidateEvaluation> constraintSafeCandidates,
         int stage,
         bool vlogAtOrAboveTarget,
-        bool musicBelowCombinedTarget)
+        bool musicBelowCombinedTarget,
+        bool applyContentGroupAgePreference)
     {
         CandidateEvaluation[] preferred = [.. available];
         bool musicFirstSubstitutionAvailable = false;
@@ -920,42 +926,45 @@ public sealed class PlaylistGenerator
         }
 
         var cooldownAgePreferredCandidates = new HashSet<CandidateEvaluation>();
-        var ageRanked = new HashSet<CandidateEvaluation>();
-        foreach (IGrouping<
-            (string Type, bool ShortPresentation, bool CategoryBelowTarget, double RotationWeight),
-            CandidateEvaluation> group
-            in preferred
-                .Where(candidate => candidate.MusicOriented
-                    && !string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId))
-                .GroupBy(candidate => (
-                    candidate.Asset.Type,
-                    candidate.ShortPresentation,
-                    candidate.CategoryBelowTarget,
-                    candidate.RotationWeight)))
+        if (applyContentGroupAgePreference)
         {
-            DateTimeOffset oldest = group.Min(candidate =>
-                candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue);
-            CandidateEvaluation[] oldestCandidates = group
-                .Where(candidate => (candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue) == oldest)
-                .ToArray();
-            foreach (CandidateEvaluation candidate in oldestCandidates)
+            var ageRanked = new HashSet<CandidateEvaluation>();
+            foreach (IGrouping<
+                (string Type, bool ShortPresentation, bool CategoryBelowTarget, double RotationWeight),
+                CandidateEvaluation> group
+                in preferred
+                    .Where(candidate => candidate.MusicOriented
+                        && !string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId))
+                    .GroupBy(candidate => (
+                        candidate.Asset.Type,
+                        candidate.ShortPresentation,
+                        candidate.CategoryBelowTarget,
+                        candidate.RotationWeight)))
             {
-                ageRanked.Add(candidate);
+                DateTimeOffset oldest = group.Min(candidate =>
+                    candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue);
+                CandidateEvaluation[] oldestCandidates = group
+                    .Where(candidate => (candidate.LastContentGroupPlayedAt ?? DateTimeOffset.MinValue) == oldest)
+                    .ToArray();
+                foreach (CandidateEvaluation candidate in oldestCandidates)
+                {
+                    ageRanked.Add(candidate);
+                }
+
+                if (oldestCandidates.Length < group.Count())
+                {
+                    cooldownAgePreferredCandidates.UnionWith(oldestCandidates);
+                }
             }
 
-            if (oldestCandidates.Length < group.Count())
+            if (ageRanked.Count > 0)
             {
-                cooldownAgePreferredCandidates.UnionWith(oldestCandidates);
+                preferred = preferred
+                    .Where(candidate => !candidate.MusicOriented
+                        || string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId)
+                        || ageRanked.Contains(candidate))
+                    .ToArray();
             }
-        }
-
-        if (ageRanked.Count > 0)
-        {
-            preferred = preferred
-                .Where(candidate => !candidate.MusicOriented
-                    || string.IsNullOrWhiteSpace(candidate.Asset.ContentGroupId)
-                    || ageRanked.Contains(candidate))
-                .ToArray();
         }
 
         return new CandidatePreference(
