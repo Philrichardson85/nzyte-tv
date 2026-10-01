@@ -63,6 +63,45 @@ public sealed class RollingProgrammingFaultTests
     }
 
     [Fact]
+    public async Task CrashAfterIntent_TestLineageRetainsFrozenDurationSeedAndSnapshot()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        var fault = new ThrowOnceFault(RollingPlannerCheckpoint.AfterIntent, 1);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner(fault);
+        await fixture.InitializeAsync(planner, TimeSpan.FromMinutes(4));
+
+        await Assert.ThrowsAsync<InjectedRollingFailure>(() => planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 1));
+        RollingProgrammingPaths paths = RollingProgrammingPaths.FromMediaRoot(fixture.Root);
+        string stage = Path.Combine(paths.StagingDirectory, "000000000001");
+        RollingGenerationIntent frozenIntent = RollingProgrammingJson.Deserialize<RollingGenerationIntent>(
+            File.ReadAllText(Path.Combine(stage, "intent.json")),
+            "test frozen intent");
+        string frozenInputJson = File.ReadAllText(Path.Combine(stage, "input.json"));
+        RollingPlanningInputSnapshot frozenInput = RollingProgrammingJson.Deserialize<RollingPlanningInputSnapshot>(
+            frozenInputJson,
+            "test frozen input");
+
+        RollingMaintainResult recovered = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 1);
+        RollingCommittedBlock block = recovered.Manifest.Blocks!.Single();
+        string publishedInput = File.ReadAllText(RollingPathSafety.ResolveExistingFile(
+            recovered.Paths.RollingRoot,
+            block.InputSnapshotPath!));
+
+        Assert.Equal(240, frozenIntent.TargetDurationSeconds);
+        Assert.Equal(240, frozenInput.TargetDurationSeconds);
+        Assert.Equal(frozenIntent.Seed, block.Seed);
+        Assert.Equal(frozenIntent.GeneratedAtUtc, block.GeneratedAtUtc);
+        Assert.Equal(frozenInputJson, publishedInput);
+        Assert.Equal(240, block.TargetDurationSeconds);
+    }
+
+    [Fact]
     public async Task CrashAfterPlaylistStage_RetryFinishesFrozenIntent()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);

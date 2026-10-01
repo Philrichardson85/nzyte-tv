@@ -37,6 +37,84 @@ public sealed class RollingProgrammingPlannerTests
     }
 
     [Fact]
+    public async Task Maintain_TestDurationProducesThreeFullyCommittedResolvableBlocks()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        RollingInitializationResult initialized = await fixture.InitializeAsync(
+            planner,
+            TimeSpan.FromMinutes(4));
+
+        RollingMaintainResult result = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None);
+
+        Assert.Equal(240, initialized.Manifest.TargetBlockDurationSeconds);
+        Assert.Equal(3, result.GeneratedBlockCount);
+        IReadOnlyList<RollingCommittedBlock> blocks = result.Manifest.Blocks!;
+        Assert.Equal([1L, 2L, 3L], blocks.Select(block => block.Sequence));
+        var store = new RollingPlanStore();
+        var resolver = new RollingCommittedBlockResolver();
+        for (int index = 0; index < blocks.Count; index++)
+        {
+            RollingCommittedBlock block = blocks[index];
+            ResolvedRollingCommittedBlock resolved = resolver.ResolveManifestBlock(
+                result.Paths,
+                result.Manifest,
+                block.Sequence,
+                fixture.LibraryRoot);
+            RollingPlanningInputSnapshot input = fixture.ReadInput(block);
+            RollingBlockDescriptor descriptor = store.Read<RollingBlockDescriptor>(
+                RollingPathSafety.ResolveExistingFile(result.Paths.RollingRoot, block.DescriptorPath!),
+                $"test rolling block {block.Sequence} descriptor");
+
+            Assert.Equal(240, block.TargetDurationSeconds);
+            Assert.Equal(240, input.TargetDurationSeconds);
+            Assert.Equal(240, descriptor.Block!.TargetDurationSeconds);
+            Assert.Equal(240, resolved.Playlist.TargetDurationSeconds);
+            Assert.True(resolved.Playlist.ActualDurationSeconds >= 240);
+            Assert.Equal(block.ActualDurationSeconds, resolved.Playlist.ActualDurationSeconds);
+            Assert.True(resolved.BroadcastPlan.IsReady);
+            Assert.Equal(block.ItemCount, resolved.BroadcastPlan.Items.Count);
+            Assert.Equal(
+                block.BlockId,
+                RollingBlockIdentity.Calculate(new RollingBlockIdentityInput(
+                    result.Manifest.PlannerId!,
+                    block.Sequence,
+                    block.ParentBlockId,
+                    block.Seed,
+                    block.TargetDurationSeconds,
+                    resolved.Playlist,
+                    block.HistoryBefore!.Sha256,
+                    block.HistoryAfter!.Sha256,
+                    block.CatalogSnapshotHash!,
+                    block.ProgrammingSnapshotHash!,
+                    block.InventorySnapshotHash!,
+                    block.PlannerAlgorithmVersion!)));
+
+            if (index > 0)
+            {
+                RollingCommittedBlock previous = blocks[index - 1];
+                Assert.Equal(previous.HistoryAfter, block.HistoryBefore);
+                Assert.Equal(
+                    fixture.ReadHistory(previous.HistoryAfter!).Plays,
+                    input.HistoryBefore!.Plays);
+            }
+        }
+
+        Assert.Equal(blocks[^1].HistoryAfter, result.Manifest.HistoryHead);
+        Assert.True(planner.Validate(fixture.Root).IsValid);
+        string artifacts = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(result.Paths.RollingRoot, "*.json", SearchOption.AllDirectories)
+                .Select(File.ReadAllText));
+        Assert.DoesNotContain("rtmp://", artifacts, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rtmps://", artifacts, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("NZYTE_TV_RTMP_URL", artifacts, StringComparison.Ordinal);
+        Assert.DoesNotContain("resumeGlobalIndex", artifacts, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Maintain_CarriesExactPlannedHistoryAcrossEveryBlockBoundary()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
@@ -433,9 +511,14 @@ internal sealed class RollingLibraryFixture : IDisposable
             new PlaylistLibraryLoader(new StubAnalyzer(_durations)),
             new PlaylistGenerator());
 
-    public Task<RollingInitializationResult> InitializeAsync(RollingProgrammingPlanner planner) =>
+    public Task<RollingInitializationResult> InitializeAsync(
+        RollingProgrammingPlanner planner,
+        TimeSpan? testBlockDuration = null) =>
         planner.InitializeAsync(
-            new RollingInitializationRequest(Root, BaseSeed: 20260930),
+            new RollingInitializationRequest(
+                Root,
+                BaseSeed: 20260930,
+                TestBlockDuration: testBlockDuration),
             CancellationToken.None);
 
     public async Task AddSongAssetAsync(

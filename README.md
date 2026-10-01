@@ -20,6 +20,7 @@ Focused references:
 - [V1 programming policy and operator controls](docs/programming.md)
 - [Rolling programming planner](docs/rolling-programming.md)
 - [Rolling station coordinator](docs/rolling-station.md)
+- [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
 
@@ -101,7 +102,7 @@ nzytetv programming campaign set <contentGroupId> --media-root <media-root> [--w
 nzytetv programming campaign clear --media-root <media-root>
 nzytetv programming asset set <assetId> --media-root <media-root> [--do-not-air true|false] [--weight <value>]
 nzytetv programming asset reset <assetId> --media-root <media-root>
-nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]
+nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>] [--test-block-duration <duration>]
 nzytetv programming rolling maintain --media-root <media-root>
 nzytetv programming rolling validate --media-root <media-root>
 nzytetv programming rolling status --media-root <media-root>
@@ -113,6 +114,8 @@ nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]
 ```
 
 Use `--help` on the root command or any subcommand. Exit code `0` means success; invalid arguments, media failures, and failed verification return non-zero codes.
+
+`programming rolling init` defaults to the production six-hour target (exactly 21,600 seconds). The init-only `--test-block-duration` option accepts a whole-unit duration resolving to 60–1,800 whole seconds, such as `3m`, `4m`, `5m`, or `240s`. It is only for a separate non-production lineage used to accelerate rolling handoff tests; status labels such a lineage `TEST LINEAGE — NON-PRODUCTION DURATION`. See [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md) before using it.
 
 `normalize` writes `./BroadcastReady/<original-file-name>.mp4` relative to the current working directory. The source is never modified. An existing destination is rejected unless `--overwrite` is supplied, and that option still cannot replace the source. The final destination is published only after automatic verification succeeds. Video-only sources receive silent 48 kHz stereo AAC audio.
 

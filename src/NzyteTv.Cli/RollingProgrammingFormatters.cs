@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using NzyteTv.Core;
 using NzyteTv.Media;
 
 namespace NzyteTv.Cli;
@@ -17,6 +18,8 @@ public static class RollingProgrammingFormatters
         output.AppendLine($"Planner lineage:       {result.Manifest.PlannerId}");
         output.AppendLine($"Base seed:             {result.Manifest.BaseSeed.ToString(CultureInfo.InvariantCulture)}");
         output.AppendLine($"Genesis history:       {(result.ImportedHistory ? "IMPORTED" : "EMPTY")}");
+        output.AppendLine($"Block target duration: {FormatDuration(result.Manifest.TargetBlockDurationSeconds)}");
+        AppendLineagePurpose(output, result.Manifest.TargetBlockDurationSeconds);
         output.AppendLine($"Prepared-block target: {result.Manifest.TargetPreparedBlockCount}");
         output.AppendLine();
         output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
@@ -77,6 +80,7 @@ public static class RollingProgrammingFormatters
         output.AppendLine($"Planner lineage:       {manifest.PlannerId}");
         output.AppendLine($"Base seed:             {manifest.BaseSeed.ToString(CultureInfo.InvariantCulture)}");
         output.AppendLine($"Block target duration: {FormatDuration(manifest.TargetBlockDurationSeconds)}");
+        AppendLineagePurpose(output, manifest.TargetBlockDurationSeconds);
         output.AppendLine($"Prepared-block target: {manifest.TargetPreparedBlockCount}");
         output.AppendLine($"Committed blocks:      {manifest.Blocks!.Count}");
         output.AppendLine($"Committed range:       {FormatRange(manifest)}");
@@ -118,6 +122,13 @@ public static class RollingProgrammingFormatters
     private static string Prefix(string value) => value[..Math.Min(12, value.Length)];
 
     private static string FormatRevision(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "LEGACY";
+
+    private static void AppendLineagePurpose(StringBuilder output, double targetDurationSeconds)
+    {
+        output.AppendLine(targetDurationSeconds == RollingProgrammingPolicy.DefaultTargetBlockDurationSeconds
+            ? "Lineage purpose:       PRODUCTION DURATION"
+            : "Lineage purpose:       TEST LINEAGE — NON-PRODUCTION DURATION");
+    }
 
     private static string FormatDuration(double seconds)
     {

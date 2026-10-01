@@ -150,6 +150,93 @@ public sealed class ProgrammingCommandLineTests
     }
 
     [Theory]
+    [InlineData("3m", 180)]
+    [InlineData("4m", 240)]
+    [InlineData("5m", 300)]
+    [InlineData("60s", 60)]
+    [InlineData("1800s", 1800)]
+    public void Parse_RollingInitAcceptsWholeSecondTestDurations(
+        string value,
+        int expectedSeconds)
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        [
+            "programming", "rolling", "init",
+            "--media-root", "/isolated-media",
+            "--base-seed", "42",
+            "--test-block-duration", value,
+        ]);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal(expectedSeconds, result.Command!.RollingTestBlockDuration?.TotalSeconds);
+    }
+
+    [Theory]
+    [InlineData("0s")]
+    [InlineData("-1s")]
+    [InlineData("59s")]
+    [InlineData("60.5s")]
+    [InlineData("1.5m")]
+    [InlineData("1800.5s")]
+    [InlineData("1801s")]
+    [InlineData("4")]
+    [InlineData("four-minutes")]
+    public void Parse_RollingInitRejectsInvalidTestDurations(string value)
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        [
+            "programming", "rolling", "init",
+            "--media-root", "/isolated-media",
+            "--test-block-duration", value,
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("whole-second duration", result.Error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("maintain")]
+    [InlineData("validate")]
+    [InlineData("status")]
+    public void Parse_TestDurationIsExclusiveToRollingInitialization(string verb)
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        [
+            "programming", "rolling", verb,
+            "--media-root", "/isolated-media",
+            "--test-block-duration", "4m",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("valid only for programming rolling init", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_TestDurationIsRejectedByUnrelatedCommands()
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        ["programming", "status", "--media-root", "/media", "--test-block-duration", "4m"]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("Unknown option", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_RollingInitRejectsDuplicateTestDuration()
+    {
+        CommandParseResult result = CommandLineParser.Parse(
+        [
+            "programming", "rolling", "init",
+            "--media-root", "/isolated-media",
+            "--test-block-duration", "4m",
+            "--test-block-duration", "240s",
+        ]);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("only once", result.Error, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("programming rolling --help", CommandKind.ProgrammingRollingHelp)]
     [InlineData("programming rolling init --help", CommandKind.ProgrammingRollingInit)]
     [InlineData("programming rolling maintain --help", CommandKind.ProgrammingRollingMaintain)]

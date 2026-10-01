@@ -26,6 +26,7 @@ public sealed class RollingProgrammingFormatterTests
         string output = RollingProgrammingFormatters.FormatStatus(status);
 
         Assert.Contains("Manifest schema:       1", output, StringComparison.Ordinal);
+        Assert.Contains("Lineage purpose:       PRODUCTION DURATION", output, StringComparison.Ordinal);
         Assert.Contains("Prepared-block target: 3", output, StringComparison.Ordinal);
         Assert.Contains("Committed range:       1-1", output, StringComparison.Ordinal);
         Assert.Contains("Visible policy revision:  8", output, StringComparison.Ordinal);
@@ -33,6 +34,33 @@ public sealed class RollingProgrammingFormatterTests
         Assert.Contains("Rolling execution/handoff: NOT PERFORMED BY PLANNER", output, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
         Assert.DoesNotContain("NZYTE_TV_RTMP_URL", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TestLineage_IsProminentlyLabeledInInitializationAndStatus()
+    {
+        RollingProgrammingPaths paths = RollingProgrammingPaths.FromMediaRoot("/media");
+        RollingProgrammingManifest manifest = CreateManifest(240);
+        var validation = new RollingValidationResult(paths, manifest, [], []);
+        var status = new RollingProgrammingStatus(
+            paths,
+            manifest,
+            [new RollingBlockStatus(1, new string('b', 64), 251, 7)],
+            LatestProgrammingRevision: 7,
+            StagingEntryCount: 0,
+            OrphanedEntryCount: 0,
+            PreparedActualDurationSeconds: 251,
+            validation);
+
+        string initialization = RollingProgrammingFormatters.FormatInitialization(
+            new RollingInitializationResult(paths, manifest, true, false));
+        string statusOutput = RollingProgrammingFormatters.FormatStatus(status);
+
+        Assert.Contains("Block target duration: 00:04:00", initialization, StringComparison.Ordinal);
+        Assert.Contains("TEST LINEAGE — NON-PRODUCTION DURATION", initialization, StringComparison.Ordinal);
+        Assert.Contains("Block target duration: 00:04:00", statusOutput, StringComparison.Ordinal);
+        Assert.Contains("actual 00:04:11", statusOutput, StringComparison.Ordinal);
+        Assert.Contains("TEST LINEAGE — NON-PRODUCTION DURATION", statusOutput, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -57,7 +85,7 @@ public sealed class RollingProgrammingFormatterTests
         Assert.Contains("Rolling execution/handoff: NOT PERFORMED BY PLANNER", output, StringComparison.Ordinal);
     }
 
-    private static RollingProgrammingManifest CreateManifest()
+    private static RollingProgrammingManifest CreateManifest(double targetDurationSeconds = 21600)
     {
         var history = new RollingArtifactReference($"history/{new string('a', 64)}.json", new string('a', 64));
         var block = new RollingCommittedBlock
@@ -71,10 +99,11 @@ public sealed class RollingProgrammingFormatterTests
             DescriptorSha256 = new string('d', 64),
             InputSnapshotPath = "blocks/one/input.json",
             InputSnapshotSha256 = new string('e', 64),
-            TargetDurationSeconds = 21600,
-            ActualDurationSeconds = 21605,
+            TargetDurationSeconds = targetDurationSeconds,
+            ActualDurationSeconds = targetDurationSeconds + 5,
             ScheduleStartUtc = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero),
-            ScheduleEndUtc = new DateTimeOffset(2026, 10, 1, 6, 0, 5, TimeSpan.Zero),
+            ScheduleEndUtc = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero)
+                .AddSeconds(targetDurationSeconds + 5),
             ItemCount = 2,
             HistoryBefore = history,
             HistoryAfter = new RollingArtifactReference(
@@ -92,7 +121,7 @@ public sealed class RollingProgrammingFormatterTests
         {
             PlannerId = "00112233445566778899aabbccddeeff",
             BaseSeed = 10,
-            TargetBlockDurationSeconds = 21600,
+            TargetBlockDurationSeconds = targetDurationSeconds,
             TargetPreparedBlockCount = 3,
             NextSequence = 2,
             GenesisHistory = history,

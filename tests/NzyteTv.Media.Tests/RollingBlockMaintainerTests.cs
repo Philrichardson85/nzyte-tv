@@ -64,6 +64,37 @@ public sealed class RollingBlockMaintainerTests
     }
 
     [Fact]
+    public async Task Deficit_ExtendsShortDurationLineageBySequenceWithoutDurationSpecificBehavior()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        await fixture.InitializeAsync(planner, TimeSpan.FromMinutes(4));
+        RollingMaintainResult initial = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 3);
+        Dictionary<string, string> committedPrefix = fixture.CaptureCommittedJson(initial.Manifest);
+        var locator = new CountingMediaToolLocator();
+        var maintainer = new RollingBlockMaintainer(
+            mediaToolLocator: locator,
+            reconciliationPlannerFactory: () => fixture.CreatePlanner(),
+            generationPlannerFactory: _ => fixture.CreatePlanner(),
+            snapshotServiceFactory: _ => fixture.CreateSnapshotService());
+
+        RollingMaintainResult extended = await maintainer.EnsureCommittedThroughAsync(
+            fixture.Root,
+            requiredHighestSequence: 4,
+            CancellationToken.None);
+
+        Assert.True(extended.TargetSatisfied);
+        Assert.Equal(4, extended.Manifest.Blocks!.Count);
+        Assert.All(extended.Manifest.Blocks, block => Assert.Equal(240, block.TargetDurationSeconds));
+        Assert.Equal(extended.Manifest.Blocks[2].HistoryAfter, extended.Manifest.Blocks[3].HistoryBefore);
+        Assert.Equal(committedPrefix, fixture.CaptureCommittedJson(initial.Manifest));
+        Assert.Equal(1, locator.FfprobeCalls);
+    }
+
+    [Fact]
     public async Task MalformedFutureProgramming_IsClassifiedBlockedWithoutChangingCommittedPrefix()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);

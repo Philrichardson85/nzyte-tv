@@ -510,7 +510,8 @@ public static class CliApplication
                         new RollingInitializationRequest(
                             mediaRoot,
                             command.RollingHistoryPath,
-                            command.RollingBaseSeed),
+                            command.RollingBaseSeed,
+                            command.RollingTestBlockDuration),
                         cancellationToken).ConfigureAwait(false);
                     Console.Write(RollingProgrammingFormatters.FormatInitialization(result));
                     return 0;
@@ -1299,16 +1300,19 @@ public static class CliApplication
                 Console.WriteLine("NZYTE TV rolling programming planner (Checkpoint 3B1)");
                 Console.WriteLine();
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]");
+                Console.WriteLine("  nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>] [--test-block-duration <duration>]");
                 Console.WriteLine("  nzytetv programming rolling maintain --media-root <media-root>");
                 Console.WriteLine("  nzytetv programming rolling validate --media-root <media-root>");
                 Console.WriteLine("  nzytetv programming rolling status --media-root <media-root>");
                 Console.WriteLine();
-                Console.WriteLine("This prepares immutable six-hour blocks; execution is a separate opt-in station rolling command.");
+                Console.WriteLine("This prepares immutable six-hour production blocks unless init explicitly creates an isolated test-duration lineage.");
+                Console.WriteLine("Execution is a separate opt-in station rolling command.");
                 break;
             case CommandKind.ProgrammingRollingInit:
-                Console.WriteLine("Usage: nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]");
+                Console.WriteLine("Usage: nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>] [--test-block-duration <duration>]");
                 Console.WriteLine("Initialize one planner lineage with explicit imported planned history or, when --history is omitted, an empty genesis.");
+                Console.WriteLine("--test-block-duration accepts whole-second durations from 60s through 1800s (for example 3m, 4m, 5m, or 240s) and is for isolated non-production test lineages only.");
+                Console.WriteLine("When omitted for a new lineage, the production target remains exactly six hours (21600 seconds).");
                 Console.WriteLine("Initialization is idempotent and never overwrites an existing manifest.");
                 break;
             case CommandKind.ProgrammingRollingMaintain:

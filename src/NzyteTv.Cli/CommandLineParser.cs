@@ -1,5 +1,6 @@
 using System.Globalization;
 using NzyteTv.Core;
+using NzyteTv.Media;
 
 namespace NzyteTv.Cli;
 
@@ -69,6 +70,7 @@ public sealed record ParsedCommand(
     double? ProgrammingWeightMultiplier = null,
     string? RollingHistoryPath = null,
     int? RollingBaseSeed = null,
+    TimeSpan? RollingTestBlockDuration = null,
     bool AcceptStoppedStaticCutover = false,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
@@ -433,10 +435,11 @@ public static class CommandLineParser
         string? mediaRoot = null;
         string? historyPath = null;
         int? baseSeed = null;
+        TimeSpan? testBlockDuration = null;
         for (int index = 3; index < args.Count; index++)
         {
             string argument = args[index];
-            if (argument is not ("--media-root" or "--history" or "--base-seed"))
+            if (argument is not ("--media-root" or "--history" or "--base-seed" or "--test-block-duration"))
             {
                 return Failure($"Unknown option '{argument}' for programming rolling {args[2]}.");
             }
@@ -486,6 +489,27 @@ public static class CommandLineParser
 
                     baseSeed = parsedSeed;
                     break;
+                case "--test-block-duration":
+                    if (kind != CommandKind.ProgrammingRollingInit)
+                    {
+                        return Failure(
+                            "--test-block-duration is valid only for programming rolling init.");
+                    }
+
+                    if (testBlockDuration is not null)
+                    {
+                        return Failure("--test-block-duration may be specified only once.");
+                    }
+
+                    if (!TryParseTestBlockDuration(value, out TimeSpan parsedTestDuration))
+                    {
+                        return Failure(
+                            "--test-block-duration must be a whole-second duration from 60s through " +
+                            "1800s (1m through 30m).");
+                    }
+
+                    testBlockDuration = parsedTestDuration;
+                    break;
             }
         }
 
@@ -498,7 +522,8 @@ public static class CommandLineParser
             kind.Value,
             ProgrammingMediaRoot: mediaRoot,
             RollingHistoryPath: historyPath,
-            RollingBaseSeed: baseSeed));
+            RollingBaseSeed: baseSeed,
+            RollingTestBlockDuration: testBlockDuration));
     }
 
     private static CommandParseResult ParseStation(IReadOnlyList<string> args)
@@ -980,6 +1005,27 @@ public static class CommandLineParser
 
         duration = TimeSpan.FromSeconds(seconds);
         return true;
+    }
+
+    private static bool TryParseTestBlockDuration(string value, out TimeSpan duration)
+    {
+        duration = default;
+        if (value.Length < 2
+            || !long.TryParse(
+                value[..^1],
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out long wholeAmount)
+            || wholeAmount <= 0
+            || !TryParseDuration(value, out duration))
+        {
+            return false;
+        }
+
+        double seconds = duration.TotalSeconds;
+        return seconds == Math.Truncate(seconds)
+            && seconds is >= RollingTestBlockDurationPolicy.MinimumSeconds
+                and <= RollingTestBlockDurationPolicy.MaximumSeconds;
     }
 
     private static bool IsHelp(string argument) => argument is "--help" or "-h";

@@ -95,6 +95,149 @@ public sealed class RollingProgrammingInitializationTests
         Assert.Equal(manifestWrite, File.GetLastWriteTimeUtc(first.Paths.ManifestPath));
     }
 
+    [Theory]
+    [InlineData(180)]
+    [InlineData(240)]
+    [InlineData(300)]
+    public async Task Initialize_PersistsExplicitTestBlockDuration(int seconds)
+    {
+        using var fixture = new EmptyRollingFixture();
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+
+        RollingInitializationResult result = await planner.InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                BaseSeed: 91,
+                TestBlockDuration: TimeSpan.FromSeconds(seconds)),
+            CancellationToken.None);
+
+        Assert.Equal(seconds, result.Manifest.TargetBlockDurationSeconds);
+        Assert.Equal(
+            seconds,
+            new RollingPlanStore().LoadManifest(result.Paths.ManifestPath)
+                .TargetBlockDurationSeconds);
+    }
+
+    [Fact]
+    public async Task Initialize_SameTestDurationIsByteAndMtimeIdempotent()
+    {
+        using var fixture = new EmptyRollingFixture();
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        var request = new RollingInitializationRequest(
+            fixture.Root,
+            BaseSeed: 91,
+            TestBlockDuration: TimeSpan.FromMinutes(4));
+        RollingInitializationResult first = await planner.InitializeAsync(request, CancellationToken.None);
+        byte[] manifestBytes = File.ReadAllBytes(first.Paths.ManifestPath);
+        DateTime manifestWrite = File.GetLastWriteTimeUtc(first.Paths.ManifestPath);
+
+        RollingInitializationResult second = await planner.InitializeAsync(request, CancellationToken.None);
+
+        Assert.False(second.Created);
+        Assert.Equal(manifestBytes, File.ReadAllBytes(first.Paths.ManifestPath));
+        Assert.Equal(manifestWrite, File.GetLastWriteTimeUtc(first.Paths.ManifestPath));
+    }
+
+    [Fact]
+    public async Task Initialize_ConflictingTestDurationIsRejectedWithoutChangingManifest()
+    {
+        using var fixture = new EmptyRollingFixture();
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        RollingInitializationResult first = await planner.InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                BaseSeed: 91,
+                TestBlockDuration: TimeSpan.FromMinutes(4)),
+            CancellationToken.None);
+        byte[] manifestBytes = File.ReadAllBytes(first.Paths.ManifestPath);
+        DateTime manifestWrite = File.GetLastWriteTimeUtc(first.Paths.ManifestPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => planner.InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                BaseSeed: 91,
+                TestBlockDuration: TimeSpan.FromMinutes(5)),
+            CancellationToken.None));
+
+        Assert.Equal(manifestBytes, File.ReadAllBytes(first.Paths.ManifestPath));
+        Assert.Equal(manifestWrite, File.GetLastWriteTimeUtc(first.Paths.ManifestPath));
+    }
+
+    [Fact]
+    public async Task Initialize_OmittedDurationPreservesExistingTestLineage()
+    {
+        using var fixture = new EmptyRollingFixture();
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        RollingInitializationResult first = await planner.InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                BaseSeed: 91,
+                TestBlockDuration: TimeSpan.FromMinutes(4)),
+            CancellationToken.None);
+        byte[] manifestBytes = File.ReadAllBytes(first.Paths.ManifestPath);
+        DateTime manifestWrite = File.GetLastWriteTimeUtc(first.Paths.ManifestPath);
+
+        RollingInitializationResult second = await planner.InitializeAsync(
+            new RollingInitializationRequest(fixture.Root, BaseSeed: 91),
+            CancellationToken.None);
+
+        Assert.Equal(240, second.Manifest.TargetBlockDurationSeconds);
+        Assert.Equal(manifestBytes, File.ReadAllBytes(first.Paths.ManifestPath));
+        Assert.Equal(manifestWrite, File.GetLastWriteTimeUtc(first.Paths.ManifestPath));
+    }
+
+    [Fact]
+    public async Task Initialize_ProductionLineageCannotBeConvertedToTestDuration()
+    {
+        using var fixture = new EmptyRollingFixture();
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        RollingInitializationResult production = await planner.InitializeAsync(
+            new RollingInitializationRequest(fixture.Root, BaseSeed: 91),
+            CancellationToken.None);
+        string before = File.ReadAllText(production.Paths.ManifestPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => planner.InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                BaseSeed: 91,
+                TestBlockDuration: TimeSpan.FromMinutes(4)),
+            CancellationToken.None));
+
+        Assert.Equal(before, File.ReadAllText(production.Paths.ManifestPath));
+        Assert.Equal(21600, new RollingPlanStore().LoadManifest(production.Paths.ManifestPath)
+            .TargetBlockDurationSeconds);
+    }
+
+    [Theory]
+    [InlineData(59)]
+    [InlineData(1801)]
+    public async Task Initialize_RejectsOutOfRangeProgrammaticTestDuration(int seconds)
+    {
+        using var fixture = new EmptyRollingFixture();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => fixture.CreatePlanner().InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                TestBlockDuration: TimeSpan.FromSeconds(seconds)),
+            CancellationToken.None));
+
+        Assert.False(File.Exists(RollingProgrammingPaths.FromMediaRoot(fixture.Root).ManifestPath));
+    }
+
+    [Fact]
+    public async Task Initialize_RejectsFractionalSecondProgrammaticTestDuration()
+    {
+        using var fixture = new EmptyRollingFixture();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => fixture.CreatePlanner().InitializeAsync(
+            new RollingInitializationRequest(
+                fixture.Root,
+                TestBlockDuration: TimeSpan.FromMilliseconds(60_500)),
+            CancellationToken.None));
+
+        Assert.False(File.Exists(RollingProgrammingPaths.FromMediaRoot(fixture.Root).ManifestPath));
+    }
+
     [Fact]
     public async Task Initialize_OmittedBaseSeedIsGeneratedAndPersistedOnlyOnce()
     {

@@ -35,6 +35,20 @@ public sealed class RollingProgrammingReplenisherTests
     }
 
     [Fact]
+    public async Task ShortDurationLineage_UsesTheSameSequenceBasedFutureWindow()
+    {
+        using var fixture = new ReplenisherFixture(committed: 3, targetDurationSeconds: 240);
+        await fixture.WriteActiveStateAsync(RollingStationPhase.Executing, active: 2, completed: 1);
+        fixture.Trigger.CancelOnWaitNumber = 1;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.RunAsync());
+
+        Assert.Equal([4L], fixture.Maintainer.Targets);
+        Assert.Equal(4, fixture.PlanStore.Manifest.Blocks!.Count);
+        Assert.Equal(240, fixture.PlanStore.Manifest.TargetBlockDurationSeconds);
+    }
+
+    [Fact]
     public async Task HealthyBuffer_PerformsOneStartupReconciliationThenWaits()
     {
         using var fixture = new ReplenisherFixture(committed: 3);
@@ -233,7 +247,8 @@ public sealed class RollingProgrammingReplenisherTests
 
         public ReplenisherFixture(
             int committed,
-            IRollingReplenishmentStateStore? advisoryStore = null)
+            IRollingReplenishmentStateStore? advisoryStore = null,
+            double targetDurationSeconds = RollingProgrammingPolicy.DefaultTargetBlockDurationSeconds)
         {
             Root = Directory.CreateTempSubdirectory("nzytetv-replenisher-").FullName;
             MediaRoot = Directory.CreateDirectory(Path.Combine(Root, "media")).FullName;
@@ -253,7 +268,7 @@ public sealed class RollingProgrammingReplenisherTests
                 StatePath = Path.Combine(Root, "runtime", "state.json"),
                 Playlists = [Path.Combine(Root, "static.json")],
             };
-            PlanStore = new MutablePlanStore(CreateManifest(committed));
+            PlanStore = new MutablePlanStore(CreateManifest(committed, targetDurationSeconds));
             Maintainer = new FakeMaintainer(PlanStore);
             Trigger = new ScriptedTrigger(Cancellation);
             var replenisher = new RollingProgrammingReplenisher(
@@ -331,7 +346,7 @@ public sealed class RollingProgrammingReplenisherTests
             Directory.Delete(Root, recursive: true);
         }
 
-        private RollingProgrammingManifest CreateManifest(int count)
+        private RollingProgrammingManifest CreateManifest(int count, double targetDurationSeconds)
         {
             var genesis = new RollingArtifactReference(
                 $"history/{new string('0', 64)}.json",
@@ -347,6 +362,7 @@ public sealed class RollingProgrammingReplenisherTests
             {
                 PlannerId = Configuration.PlannerId,
                 BaseSeed = 7,
+                TargetBlockDurationSeconds = targetDurationSeconds,
                 TargetPreparedBlockCount = 3,
                 NextSequence = count + 1,
                 GenesisHistory = genesis,

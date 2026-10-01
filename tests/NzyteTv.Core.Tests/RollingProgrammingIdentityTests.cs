@@ -69,6 +69,7 @@ public sealed class RollingProgrammingIdentityTests
     [InlineData("history-before")]
     [InlineData("history-after")]
     [InlineData("algorithm")]
+    [InlineData("duration")]
     public void BlockIdentity_UsesRelevantChainAndSnapshotInputs(string field)
     {
         RollingBlockIdentityInput input = CreateInput();
@@ -81,6 +82,7 @@ public sealed class RollingProgrammingIdentityTests
             "history-before" => input with { HistoryBeforeHash = Hash('b') },
             "history-after" => input with { HistoryAfterHash = Hash('b') },
             "algorithm" => input with { PlannerAlgorithmVersion = "changed" },
+            "duration" => input with { TargetDurationSeconds = 240 },
             _ => throw new InvalidOperationException(),
         };
 

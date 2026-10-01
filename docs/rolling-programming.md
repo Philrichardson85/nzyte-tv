@@ -1,6 +1,6 @@
 # Rolling programming planner (Checkpoint 3B1)
 
-Checkpoint 3B1 prepares immutable six-hour programming blocks ahead of station execution. It is a planning system, not a rolling station. Its commands never start FFmpeg, change `station.json`, append to a running Checkpoint 2 queue, or advance runtime state. Static station and manual `build-playlist` operation remain unchanged. Checkpoint 3B2-A provides a separate opt-in coordinator that consumes committed blocks, and Checkpoint 3B2-B invokes this same accepted planner asynchronously to replenish that coordinator's future buffer; see [rolling-station.md](rolling-station.md).
+Checkpoint 3B1 prepares immutable programming blocks ahead of station execution. New production lineages use an exact six-hour target (21,600 seconds). A narrowly scoped initialization option can create a separate, unmistakably labeled short-duration test lineage for accelerated Checkpoint 3B2-C integration testing; it does not alter the production default. The planner is a planning system, not a rolling station. Its commands never start FFmpeg, change `station.json`, append to a running Checkpoint 2 queue, or advance runtime state. Static station and manual `build-playlist` operation remain unchanged. Checkpoint 3B2-A provides a separate opt-in coordinator that consumes committed blocks, and Checkpoint 3B2-B invokes this same accepted planner asynchronously to replenish that coordinator's future buffer; see [rolling-station.md](rolling-station.md).
 
 For a new lineage before its first execution claim, the default target is three committed blocks:
 
@@ -32,6 +32,27 @@ Or import an existing planned-history document:
 ```
 
 `--base-seed` is optional. When omitted, a random signed integer is generated once and persisted in the manifest. It never changes on later maintenance. Initialization is idempotent for the same explicit genesis and seed and refuses to replace or fork an existing manifest.
+
+### Isolated accelerated-test lineage
+
+For a separate Checkpoint 3B2-C integration environment only, initialization can persist a shorter block target:
+
+```bash
+/opt/nzyte-tv/app/nzytetv programming rolling init \
+  --media-root /srv/nzyte-tv-test/media \
+  --base-seed 20261001 \
+  --test-block-duration 4m
+```
+
+`--test-block-duration` is valid only on `programming rolling init`. It accepts whole numeric units whose result is 60 through 1,800 whole seconds, including `3m`, `4m`, `5m`, and `240s`; zero, negative, fractional, malformed, shorter, and longer values are rejected. Omitting it for a new lineage always preserves the production default of 21,600 seconds.
+
+The selected duration is a lineage property in the existing schema-version-1 manifest. Repeating initialization with the same explicit duration is byte- and modification-time-idempotent. A conflicting explicit duration is refused. Omitting the option on a later idempotent initialization preserves whatever duration that lineage already has; it never converts a test lineage to production or a production lineage to test. Status and initialization output label every non-default lineage:
+
+```text
+TEST LINEAGE — NON-PRODUCTION DURATION
+```
+
+This option does not create a fixture generator or a shortened copy of a committed block. Maintenance still uses the accepted snapshot, programming policy, playlist generator, frozen intent, deterministic seed, block identity, atomic publication, history chain, committed-block resolver, and `BroadcastPlanner`. Assets are never trimmed, so actual duration can exceed the nominal target by one complete asset. Replenishment continues to count immutable block sequences, not hours. Keep the test media root, manifest, station configuration, CP2 state, rolling state, locks, sidecar, and streaming destination separate from production. See [Accelerated rolling integration testing](accelerated-rolling-testing.md).
 
 Prepare the initial buffer, validate it, and inspect it:
 
@@ -94,7 +115,7 @@ The lock filename is not authority by itself. A writer holds an exclusive `FileS
 
 - one stable `plannerId` lineage;
 - the persisted `baseSeed`;
-- the six-hour target block duration;
+- the persisted target block duration (21,600 seconds for production, or the explicit isolated-test duration);
 - the three-block prepared target;
 - `nextSequence`;
 - immutable genesis and current `historyHead` references; and

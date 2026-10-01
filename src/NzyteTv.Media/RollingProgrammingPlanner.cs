@@ -7,7 +7,31 @@ namespace NzyteTv.Media;
 public sealed record RollingInitializationRequest(
     string MediaRoot,
     string? HistoryPath = null,
-    int? BaseSeed = null);
+    int? BaseSeed = null,
+    TimeSpan? TestBlockDuration = null);
+
+public static class RollingTestBlockDurationPolicy
+{
+    public const int MinimumSeconds = 60;
+
+    public const int MaximumSeconds = 30 * 60;
+
+    public static double ValidateAndGetSeconds(TimeSpan duration)
+    {
+        double seconds = duration.TotalSeconds;
+        if (!double.IsFinite(seconds)
+            || seconds != Math.Truncate(seconds)
+            || seconds is < MinimumSeconds or > MaximumSeconds)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(duration),
+                $"Test block duration must be a whole-second value from {MinimumSeconds} through " +
+                $"{MaximumSeconds} seconds.");
+        }
+
+        return seconds;
+    }
+}
 
 public sealed record RollingInitializationResult(
     RollingProgrammingPaths Paths,
@@ -135,6 +159,9 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        double requestedTargetDurationSeconds = request.TestBlockDuration is { } testBlockDuration
+            ? RollingTestBlockDurationPolicy.ValidateAndGetSeconds(testBlockDuration)
+            : RollingProgrammingPolicy.DefaultTargetBlockDurationSeconds;
         RollingProgrammingPaths paths = RollingProgrammingPaths.FromMediaRoot(request.MediaRoot);
         if (!Directory.Exists(paths.MediaRoot))
         {
@@ -161,6 +188,14 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
                     "Rolling programming is already initialized with a different base seed; the manifest was not changed.");
             }
 
+            if (request.TestBlockDuration is not null
+                && existing.TargetBlockDurationSeconds != requestedTargetDurationSeconds)
+            {
+                throw new InvalidOperationException(
+                    "Rolling programming is already initialized with a different target block duration; " +
+                    "the manifest was not changed.");
+            }
+
             if (existing.GenesisHistory != genesisReference)
             {
                 throw new InvalidOperationException(
@@ -181,7 +216,7 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
         {
             PlannerId = _idFactory(),
             BaseSeed = request.BaseSeed ?? _baseSeedFactory(),
-            TargetBlockDurationSeconds = RollingProgrammingPolicy.DefaultTargetBlockDurationSeconds,
+            TargetBlockDurationSeconds = requestedTargetDurationSeconds,
             TargetPreparedBlockCount = RollingProgrammingPolicy.DefaultTargetPreparedBlockCount,
             NextSequence = 1,
             GenesisHistory = genesisReference,
