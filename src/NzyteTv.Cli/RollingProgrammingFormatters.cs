@@ -19,7 +19,7 @@ public static class RollingProgrammingFormatters
         output.AppendLine($"Genesis history:       {(result.ImportedHistory ? "IMPORTED" : "EMPTY")}");
         output.AppendLine($"Prepared-block target: {result.Manifest.TargetPreparedBlockCount}");
         output.AppendLine();
-        output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
+        output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
         return output.ToString();
     }
 
@@ -36,7 +36,7 @@ public static class RollingProgrammingFormatters
         output.AppendLine($"Next sequence:         {result.Manifest.NextSequence}");
         output.AppendLine($"Status:                {(result.TargetSatisfied ? "PREPARED" : "INCOMPLETE")}");
         output.AppendLine();
-        output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
+        output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
         return output.ToString();
     }
 
@@ -54,7 +54,7 @@ public static class RollingProgrammingFormatters
         output.AppendLine("Status:");
         output.AppendLine($"    {(result.IsValid ? "VALID" : "INVALID")}");
         output.AppendLine();
-        output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
+        output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
         return output.ToString();
     }
 
@@ -69,7 +69,7 @@ public static class RollingProgrammingFormatters
             output.AppendLine("Manifest:              NOT INITIALIZED / INVALID");
             AppendDiagnostics(output, "Errors", status.Validation.Errors);
             output.AppendLine();
-            output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
+            output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
             return output.ToString();
         }
 
@@ -106,7 +106,7 @@ public static class RollingProgrammingFormatters
         AppendDiagnostics(output, "Warnings", status.Validation.Warnings);
         output.AppendLine();
         output.AppendLine($"Validation health:     {(status.Validation.IsValid ? "HEALTHY" : "INVALID")}");
-        output.AppendLine("Rolling execution/handoff: NOT IMPLEMENTED");
+        output.AppendLine("Rolling execution/handoff: NOT PERFORMED BY PLANNER");
         return output.ToString();
     }
 

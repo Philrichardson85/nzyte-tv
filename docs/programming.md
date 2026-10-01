@@ -122,7 +122,7 @@ Inspect the operator-facing policy summary:
   --media-root /srv/nzyte-tv/media
 ```
 
-Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It identifies 3B1 rolling block planning as available while explicitly saying `Rolling execution/handoff: NOT IMPLEMENTED`, so a valid policy or prepared buffer is not mistaken for dynamic 24/7 station operation.
+Status reports schema/revision, campaign, override counts, repetition, bumper and promo cadence, the three internal personalities, and `Scheduler integration: ACTIVE`. It identifies 3B1 rolling block planning as available and rolling execution as a separate opt-in station command, so a valid policy or prepared buffer is not mistaken for automatically replenished 24/7 station operation.
 
 ## Default-on eligibility and editorial controls
 

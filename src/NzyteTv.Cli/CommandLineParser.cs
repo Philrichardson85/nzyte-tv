@@ -22,6 +22,10 @@ public enum CommandKind
     StationValidate,
     StationRun,
     StationStatus,
+    StationRollingHelp,
+    StationRollingValidate,
+    StationRollingRun,
+    StationRollingStatus,
     ProgrammingHelp,
     ProgrammingInit,
     ProgrammingValidate,
@@ -65,6 +69,7 @@ public sealed record ParsedCommand(
     double? ProgrammingWeightMultiplier = null,
     string? RollingHistoryPath = null,
     int? RollingBaseSeed = null,
+    bool AcceptStoppedStaticCutover = false,
     VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
@@ -503,6 +508,11 @@ public static class CommandLineParser
             return Success(new ParsedCommand(CommandKind.StationHelp, ShowHelp: true));
         }
 
+        if (string.Equals(args[1], "rolling", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStationRolling(args);
+        }
+
         CommandKind? kind = args[1].ToLowerInvariant() switch
         {
             "validate" => CommandKind.StationValidate,
@@ -560,6 +570,83 @@ public static class CommandLineParser
             kind.Value,
             ConfigPath: configPath,
             StatePath: statePath));
+    }
+
+    private static CommandParseResult ParseStationRolling(IReadOnlyList<string> args)
+    {
+        if (args.Count == 2 || (args.Count == 3 && IsHelp(args[2])))
+        {
+            return Success(new ParsedCommand(CommandKind.StationRollingHelp, ShowHelp: true));
+        }
+
+        CommandKind? kind = args[2].ToLowerInvariant() switch
+        {
+            "validate" => CommandKind.StationRollingValidate,
+            "run" => CommandKind.StationRollingRun,
+            "status" => CommandKind.StationRollingStatus,
+            _ => null,
+        };
+        if (kind is null)
+        {
+            return Failure($"Unknown station rolling command '{args[2]}'.");
+        }
+
+        if (args.Count == 4 && IsHelp(args[3]))
+        {
+            return Success(new ParsedCommand(kind.Value, ShowHelp: true));
+        }
+
+        string? configPath = null;
+        bool acceptStoppedStaticCutover = false;
+        for (int index = 3; index < args.Count; index++)
+        {
+            string argument = args[index];
+            if (argument == "--accept-stopped-static-cutover")
+            {
+                if (kind != CommandKind.StationRollingRun)
+                {
+                    return Failure(
+                        "--accept-stopped-static-cutover is valid only for station rolling run.");
+                }
+
+                if (acceptStoppedStaticCutover)
+                {
+                    return Failure("--accept-stopped-static-cutover may be specified only once.");
+                }
+
+                acceptStoppedStaticCutover = true;
+                continue;
+            }
+
+            if (argument != "--config")
+            {
+                return Failure($"Unknown option '{argument}' for station rolling {args[2]}.");
+            }
+
+            if (++index >= args.Count
+                || string.IsNullOrWhiteSpace(args[index])
+                || args[index].StartsWith("-", StringComparison.Ordinal))
+            {
+                return Failure("--config requires a path.");
+            }
+
+            if (configPath is not null)
+            {
+                return Failure("--config may be specified only once.");
+            }
+
+            configPath = args[index];
+        }
+
+        if (string.IsNullOrWhiteSpace(configPath))
+        {
+            return Failure($"The station rolling {args[2]} command requires --config <path>.");
+        }
+
+        return Success(new ParsedCommand(
+            kind.Value,
+            ConfigPath: configPath,
+            AcceptStoppedStaticCutover: acceptStoppedStaticCutover));
     }
 
     private static CommandParseResult ParseMetadata(IReadOnlyList<string> args)

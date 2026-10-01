@@ -1,8 +1,8 @@
 # Rolling programming planner (Checkpoint 3B1)
 
-Checkpoint 3B1 prepares immutable six-hour programming blocks ahead of station execution. It is a planning system, not a rolling station. It never starts FFmpeg, changes `station.json`, appends to a running Checkpoint 2 queue, advances station runtime state, or hands one block to another. Static station and manual `build-playlist` operation remain unchanged.
+Checkpoint 3B1 prepares immutable six-hour programming blocks ahead of station execution. It is a planning system, not a rolling station. Its commands never start FFmpeg, change `station.json`, append to a running Checkpoint 2 queue, or advance runtime state. Static station and manual `build-playlist` operation remain unchanged. Checkpoint 3B2-A now provides a separate opt-in coordinator that may consume these committed blocks; see [rolling-station.md](rolling-station.md).
 
-Before the later Checkpoint 3B2 cutover, the default target is three committed blocks:
+For a new lineage before its first execution claim, the default target is three committed blocks:
 
 ```text
 activation candidate
@@ -10,7 +10,7 @@ future block 1
 future block 2
 ```
 
-Once 3B2 supplies a separate active-block cursor, that policy can be interpreted as one active block plus two committed future blocks. No execution cursor exists in 3B1.
+When the separate 3B2-A coordinator is used, that policy can be interpreted as one active block plus two committed future blocks. The execution cursor is not part of 3B1 or its portable manifest; it lives in a separate runtime document.
 
 ## Commands
 
@@ -46,7 +46,7 @@ Prepare the initial buffer, validate it, and inspect it:
   --media-root /srv/nzyte-tv/media
 ```
 
-`maintain` generates sequentially until three blocks are committed. It uses FFprobe through the accepted library loader to capture actual media durations, but never invokes FFmpeg or reads an RTMP destination. Repeating it at that target changes no committed playlist, history, input snapshot, descriptor, hash, or modification time. `validate` and `status` are read-only. Status reports the lineage, schema, base seed, target duration, buffer target, committed range, next sequence, history-head prefix, nominal and actual prepared duration, per-block policy revision, currently visible policy revision, staging/quarantine counts, and validation health. It always states that rolling execution/handoff is not implemented.
+`maintain` generates sequentially until three blocks are committed. It uses FFprobe through the accepted library loader to capture actual media durations, but never invokes FFmpeg or reads an RTMP destination. Repeating it at that target changes no committed playlist, history, input snapshot, descriptor, hash, or modification time. `validate` and `status` are read-only. Status reports the lineage, schema, base seed, target duration, buffer target, committed range, next sequence, history-head prefix, nominal and actual prepared duration, per-block policy revision, currently visible policy revision, staging/quarantine counts, and validation health. It states that execution/handoff is not performed by the planner.
 
 ## Portable layout
 
@@ -161,4 +161,4 @@ These steps are a future real-Pi acceptance plan, not a claim that they have alr
 
 ## Scope boundary
 
-Checkpoint 3B1 does not consume blocks, choose an active block, update `station.json`, perform automatic queue handoff, keep a station live indefinitely, start FFmpeg, enable systemd, create an air-history log, withdraw committed programming, or monitor YouTube. Checkpoint 3B2 will add safe block activation/handoff while preserving Checkpoint 2's immutable queue epoch and item-level resume guarantees.
+Checkpoint 3B1 does not consume blocks, choose an active block, update `station.json`, start FFmpeg, enable systemd, create an air-history log, withdraw committed programming, or monitor YouTube. The separate Checkpoint 3B2-A coordinator adds safe activation and handoff while preserving Checkpoint 2's immutable queue epoch and item-level resume guarantees; it does not replenish the planner buffer or install a production service.

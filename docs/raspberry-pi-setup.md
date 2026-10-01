@@ -520,6 +520,10 @@ Check executable help and each command's help without touching media:
 /opt/nzyte-tv/app/nzytetv station validate --help
 /opt/nzyte-tv/app/nzytetv station run --help
 /opt/nzyte-tv/app/nzytetv station status --help
+/opt/nzyte-tv/app/nzytetv station rolling --help
+/opt/nzyte-tv/app/nzytetv station rolling validate --help
+/opt/nzyte-tv/app/nzytetv station rolling status --help
+/opt/nzyte-tv/app/nzytetv station rolling run --help
 /opt/nzyte-tv/app/nzytetv programming --help
 /opt/nzyte-tv/app/nzytetv programming init --help
 /opt/nzyte-tv/app/nzytetv programming validate --help
@@ -550,6 +554,8 @@ Schema-version-2 state preserves a deterministic queue identity and the first it
 Checkpoint 2 passed the documented hard parent-crash, clean stop/start, graceful disabled-service reboot, and final boot-enabled reboot tests on Raspberry Pi. Boot enablement remains an explicit operator action; no NZYTE TV code or install step enables the unit.
 
 Checkpoint 3B1 is separate from the service. Its `programming rolling` commands prepare a portable manifest, frozen inputs, content-addressed planned history, and immutable six-hour blocks under the selected `<media-root>/playlists/rolling`. They do not start FFmpeg, alter the unit, or change `station.json`. Follow the [rolling programming planner](rolling-programming.md) acceptance procedure to initialize with an explicit empty/imported genesis, prepare three blocks, verify idempotent hashes/mtimes, test locking and interrupted-work reconciliation, and prove policy/new-media changes affect only later ungenerated blocks.
+
+Checkpoint 3B2-A adds separate opt-in `station rolling validate`, `status`, and `run` commands. Its configuration references the accepted static station configuration, the exact 3B1 planner lineage, and `/var/lib/nzyte-tv/rolling-state.json`. It claims one immutable block and delegates it to the unchanged Checkpoint 2 supervisor; CP2 `state.json` remains the item-level resume authority. It does not modify or install systemd, run the planner, replenish blocks, or preserve one FFmpeg connection across block boundaries. Follow [rolling station coordinator](rolling-station.md) for configuration, safe first cutover, crash behavior, and the not-yet-completed Pi acceptance procedure.
 
 Inspect a quoted source-master path through the convenience symlink:
 
@@ -699,4 +705,4 @@ The current broadcaster automates this stream-copy path and still never stores o
 - Using `h264_v4l2m2m` to create files accepted by NZYTE TV verification.
 - Dedicated long-duration thermal measurements for the completed 39-file `normalize-library` production run.
 - Checkpoint 3B1 rolling-planner acceptance against the live production inventory on Raspberry Pi.
-- Automatic station consumption/handoff of prepared blocks and remote stream-health monitoring.
+- Checkpoint 3B2-A rolling block handoff against real Raspberry Pi/YouTube production ingest, automatic future-block replenishment, and remote stream-health monitoring.

@@ -51,7 +51,7 @@ public sealed class ProgrammingFormatterTests
         Assert.Contains("MUSIC-HEAVY", output, StringComparison.Ordinal);
         Assert.Contains("Scheduler integration: ACTIVE", output, StringComparison.Ordinal);
         Assert.Contains("Rolling block planning: AVAILABLE", output, StringComparison.Ordinal);
-        Assert.Contains("Rolling execution/handoff: NOT IMPLEMENTED", output, StringComparison.Ordinal);
+        Assert.Contains("Rolling execution/handoff: SEPARATE OPT-IN STATION COMMAND", output, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
         Assert.DoesNotContain("NZYTE_TV_RTMP_URL", output, StringComparison.Ordinal);
     }

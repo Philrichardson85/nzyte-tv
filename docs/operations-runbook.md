@@ -105,6 +105,8 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `station validate` | Validates non-secret station configuration and the existing broadcast readiness checks without launching FFmpeg. | Before every station/service start or after configuration changes. |
 | `station run` | Supervises the configured fixed queue through the existing resilient broadcaster and writes durable runtime state/heartbeat. | Checkpoint 2 item-level restart/reboot resume. |
 | `station status` | Reads runtime state, resume telemetry, heartbeat freshness, and station PID without displaying process arguments. | Check station, broadcast, FFmpeg, media, queue, and persistence state. |
+| `station rolling validate` / `status` | Read-only validation/status across the rolling manifest, block execution state, and CP2 state. | Before an opt-in 3B2-A coordinator test and while diagnosing it. |
+| `station rolling run` | Claims one immutable block at a time and delegates it to the unchanged station supervisor. It does not run the planner. | Checkpoint 3B2-A development/acceptance only; no production service is installed yet. |
 
 Use `nzytetv <command> --help` for command-specific syntax.
 
@@ -380,7 +382,7 @@ Replace both angle-bracket placeholders before running the command. Use the curr
 
 History is updated when playlists are generated. It is programming/scheduling history, **not** a live database of which item FFmpeg has finished playing. Stopping midway through already-generated blocks and regenerating can therefore make planned history differ from what actually aired. In the current manual workflow, prefer completing the planned block or deliberately choosing a maintenance boundary before replacing future schedules.
 
-Do not use ordinary `history.json` as the transaction authority for a rolling lineage. `programming rolling maintain` advances that lineage's `historyHead` only when the same atomic manifest commit adds its immutable block. Prepared rolling blocks are still not discovered or aired by the current station.
+Do not use ordinary `history.json` as the transaction authority for a rolling lineage. `programming rolling maintain` advances that lineage's `historyHead` only when the same atomic manifest commit adds its immutable block. Prepared blocks are ignored by ordinary `broadcast` and static `station run`; only an explicitly configured `station rolling run` may claim them.
 
 After media and future playlists are ready, configure `NZYTE_TV_RTMP_URL` again using the silent procedure in [Configure the RTMPS destination safely](#15-configure-the-rtmps-destination-safely), then start a new queue:
 
@@ -578,7 +580,27 @@ The rolling planner is optional and does not replace the manual commands above. 
 
 Omit `--history` only when an empty planned-history genesis is intentional. To import, add `--history <existing-planned-history.json>` to `rolling init`; the planner never searches for one automatically. The first maintenance run commits an activation candidate plus two future blocks under `playlists/rolling`. Repeating it at the target is a no-op. New eligible content and policy changes affect the next block not yet generated and never rewrite committed blocks.
 
-Checkpoint 3B1 does not put those blocks on air, change the static `station.json` queue, start FFmpeg, or hand off at a block boundary. Continue using the accepted static station workflow until Checkpoint 3B2 is implemented and accepted. See [Rolling programming planner](rolling-programming.md) for the transaction model and manual Pi acceptance plan.
+Checkpoint 3B1 commands do not put those blocks on air, change the static `station.json` queue, start FFmpeg, or hand off at a block boundary. Checkpoint 3B2-A provides a separate opt-in execution command, but it has not changed the accepted static service or completed production Pi/YouTube boundary acceptance. See [Rolling programming planner](rolling-programming.md) for the transaction model.
+
+### 10.3.1 Validate the opt-in Checkpoint 3B2-A coordinator
+
+Create `/etc/nzyte-tv/rolling-station.json` from `deploy/config/rolling-station.json.example`. Copy the exact planner lineage printed by `programming rolling status`; do not invent or shorten it. The configuration references the existing static `station.json` and uses a distinct rolling state path such as `/var/lib/nzyte-tv/rolling-state.json`.
+
+Read-only checks:
+
+```bash
+/opt/nzyte-tv/app/nzytetv station rolling validate \
+  --config /etc/nzyte-tv/rolling-station.json
+
+/opt/nzyte-tv/app/nzytetv station rolling status \
+  --config /etc/nzyte-tv/rolling-station.json
+```
+
+The planner manifest remains authoritative for committed order. CP2 `state.json` remains authoritative for the item cursor. The separate rolling document records only active/completed block identity. Validation and status do not mutate any of them.
+
+Do not run the static station and rolling coordinator together. Checkpoint 3B2-A supplies no systemd unit and does not replenish blocks. For a later manual acceptance run, stop the static service first and run `station rolling run` from a controlled terminal. An unfinished `STOPPED` static queue is refused unless the operator deliberately supplies `--accept-stopped-static-cutover` on the first run; that option cannot override a live, interrupted, schema-v1, invalid, or already-rolling state.
+
+If the exact next block is missing, status becomes `WAITINGFORBLOCK`; the coordinator polls with bounded 5/15/30/60-second delays and never replays the prior block. See [Rolling station coordinator](rolling-station.md) for claim, completion-sealing, crash reconciliation, security, and the production-acceptance boundary.
 
 ### 10.4 Configured and effective airtime targets
 
@@ -1026,6 +1048,8 @@ The unit uses `Restart=on-failure`, so an unexpected parent-process failure is e
 
 Boot enablement is still an explicit operator action; NZYTE TV code and installation steps never enable the unit automatically. The accepted production Pi completed the prerequisite tests before the operator enabled it.
 
+That unit still runs the accepted static `station run` command. Checkpoint 3B2-A does not modify, replace, install, or enable a systemd unit. Use the separate rolling command only during its explicit acceptance workflow.
+
 ## 18. First live-stream acceptance checklist
 
 Confirm all of the following during the first live run:
@@ -1049,7 +1073,7 @@ pgrep -x -c ffmpeg
 
 ## 19. Current operational limitations
 
-The accepted Checkpoint 2 station supervisor, unchanged by Checkpoint 3A:
+The accepted Checkpoint 2 station supervisor, unchanged by Checkpoints 3A, 3B1, and 3B2-A:
 
 - uses the supplied playlist queue fixed at broadcaster startup and does not dynamically discover new playlist JSON files;
 - does not automatically generate future playlist blocks;
@@ -1061,7 +1085,7 @@ The accepted Checkpoint 2 station supervisor, unchanged by Checkpoint 3A:
 - does not integrate with the YouTube API; and
 - does not monitor YouTube API stream health.
 
-The queue remains fixed at startup. Checkpoint 3A improves finite playlist generation but does not discover or generate another playlist while broadcasting, append to the station queue, mutate scheduler `history.json` outside normal generation, call the YouTube API, monitor remote stream health, or alert an operator. It is not yet rolling unattended 24/7 programming.
+Each execution queue remains immutable and fixed at startup. The opt-in 3B2-A coordinator may start the next separately committed six-hour block only after positive completion of the current block; it never appends to an active queue. It does not generate or replenish future blocks, mutate scheduler history, preserve one FFmpeg ingest connection across boundaries, call the YouTube API, monitor remote stream health, or alert an operator. It is not yet accepted unattended 24/7 production operation.
 
 ## 20. What do I do when…?
 
@@ -1209,6 +1233,7 @@ The following have been validated at specific points in production acceptance. T
 - [Playlists](playlists.md): scheduling policy, diagnostics, schema, and history.
 - [V1 programming policy](programming.md): editorial controls, spotlight campaign, song-family pacing, internal patterns, and cadence.
 - [Rolling programming planner](rolling-programming.md): immutable blocks, manifest transactions, deterministic retry, recovery, and Pi acceptance.
+- [Rolling station coordinator](rolling-station.md): immutable claims, CP2 reconciliation, completion sealing, block handoff, and the 3B2-A acceptance boundary.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

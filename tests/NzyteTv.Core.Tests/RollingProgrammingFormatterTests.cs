@@ -30,7 +30,7 @@ public sealed class RollingProgrammingFormatterTests
         Assert.Contains("Committed range:       1-1", output, StringComparison.Ordinal);
         Assert.Contains("Visible policy revision:  8", output, StringComparison.Ordinal);
         Assert.Contains("Validation health:     HEALTHY", output, StringComparison.Ordinal);
-        Assert.Contains("Rolling execution/handoff: NOT IMPLEMENTED", output, StringComparison.Ordinal);
+        Assert.Contains("Rolling execution/handoff: NOT PERFORMED BY PLANNER", output, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
         Assert.DoesNotContain("NZYTE_TV_RTMP_URL", output, StringComparison.Ordinal);
     }
@@ -54,7 +54,7 @@ public sealed class RollingProgrammingFormatterTests
             _ => throw new InvalidOperationException(),
         };
 
-        Assert.Contains("Rolling execution/handoff: NOT IMPLEMENTED", output, StringComparison.Ordinal);
+        Assert.Contains("Rolling execution/handoff: NOT PERFORMED BY PLANNER", output, StringComparison.Ordinal);
     }
 
     private static RollingProgrammingManifest CreateManifest()

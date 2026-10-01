@@ -96,6 +96,7 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
     private readonly IRollingPlannerLockProvider _lockProvider;
     private readonly IRollingPlannerFaultInjector _faultInjector;
     private readonly IProgrammingConfigurationStore _programmingStore;
+    private readonly IRollingCommittedBlockResolver _committedBlockResolver;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string> _idFactory;
     private readonly Func<int> _baseSeedFactory;
@@ -108,6 +109,7 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
         IRollingPlannerLockProvider? lockProvider = null,
         IRollingPlannerFaultInjector? faultInjector = null,
         IProgrammingConfigurationStore? programmingStore = null,
+        IRollingCommittedBlockResolver? committedBlockResolver = null,
         TimeProvider? timeProvider = null,
         Func<string>? idFactory = null,
         Func<int>? baseSeedFactory = null)
@@ -119,6 +121,10 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
         _lockProvider = lockProvider ?? new RollingPlannerLockProvider();
         _faultInjector = faultInjector ?? NoOpRollingPlannerFaultInjector.Instance;
         _programmingStore = programmingStore ?? new ProgrammingConfigurationStore();
+        _committedBlockResolver = committedBlockResolver ?? new RollingCommittedBlockResolver(
+            _store,
+            _historyStore,
+            _broadcastPlanner);
         _timeProvider = timeProvider ?? TimeProvider.System;
         _idFactory = idFactory ?? (() => Guid.NewGuid().ToString("N"));
         _baseSeedFactory = baseSeedFactory ?? CreateRandomSeed;
@@ -639,95 +645,12 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
 
     private void ValidateCommittedBlock(RollingProgrammingPaths paths, RollingCommittedBlock block)
     {
-        RollingManifestValidator.ValidateBlock(block);
-        string playlistPath = VerifyArtifact(paths, new RollingArtifactReference(
-            block.PlaylistPath!,
-            block.PlaylistSha256!));
-        string inputPath = VerifyArtifact(paths, new RollingArtifactReference(
-            block.InputSnapshotPath!,
-            block.InputSnapshotSha256!));
-        string descriptorPath = VerifyArtifact(paths, new RollingArtifactReference(
-            block.DescriptorPath!,
-            block.DescriptorSha256!));
-        string blockDirectory = Path.GetDirectoryName(descriptorPath)!;
-        if (!string.Equals(Path.GetDirectoryName(playlistPath), blockDirectory, GetPathComparison())
-            || !string.Equals(Path.GetDirectoryName(inputPath), blockDirectory, GetPathComparison()))
-        {
-            throw new InvalidDataException(
-                $"Rolling block {block.Sequence} artifacts are not contained in one immutable block directory.");
-        }
-
-        VerifyArtifact(paths, block.HistoryBefore!);
-        string historyAfterPath = VerifyArtifact(paths, block.HistoryAfter!);
-
-        RollingBlockDescriptor descriptor = _store.Read<RollingBlockDescriptor>(
-            descriptorPath,
-            $"rolling block {block.Sequence} descriptor");
-        if (descriptor.SchemaVersion != RollingProgrammingPolicy.ArtifactSchemaVersion
-            || descriptor.Block is null)
-        {
-            throw new InvalidDataException($"Rolling block {block.Sequence} descriptor is invalid.");
-        }
-
-        RollingManifestValidator.ValidateBlock(descriptor.Block, descriptor: true);
-        if (descriptor.Block != block with { DescriptorSha256 = null })
-        {
-            throw new InvalidDataException(
-                $"Rolling block {block.Sequence} descriptor does not match the manifest.");
-        }
-
-        RollingPlanningInputSnapshot input = _store.Read<RollingPlanningInputSnapshot>(
-            inputPath,
-            $"rolling block {block.Sequence} input snapshot");
-        PlaylistPlanningSnapshotService.ValidateSnapshot(input, requireReadiness: true);
-        PlaylistDocument playlist = _store.Read<PlaylistDocument>(
-            playlistPath,
-            $"rolling block {block.Sequence} playlist");
-        PlaylistHistoryDocument historyAfter = _historyStore.Load(historyAfterPath);
-        if (input.Sequence != block.Sequence
-            || input.Seed != block.Seed
-            || input.HistoryBeforeHash != block.HistoryBefore!.Sha256
-            || input.CatalogSnapshotHash != block.CatalogSnapshotHash
-            || input.ProgrammingSnapshotHash != block.ProgrammingSnapshotHash
-            || input.InventorySnapshotHash != block.InventorySnapshotHash
-            || playlist.Seed != block.Seed
-            || playlist.Items.Count != block.ItemCount
-            || playlist.ScheduleStartUtc != block.ScheduleStartUtc
-            || playlist.ActualDurationSeconds != block.ActualDurationSeconds
-            || historyAfter.ScheduleEndUtc != block.ScheduleEndUtc)
-        {
-            throw new InvalidDataException(
-                $"Rolling block {block.Sequence} metadata does not match its immutable artifacts.");
-        }
-
-        string calculatedBlockId = RollingBlockIdentity.Calculate(new RollingBlockIdentityInput(
-            GetPlannerId(paths),
-            block.Sequence,
-            block.ParentBlockId,
-            block.Seed,
-            block.TargetDurationSeconds,
-            playlist,
-            block.HistoryBefore.Sha256,
-            block.HistoryAfter!.Sha256,
-            block.CatalogSnapshotHash!,
-            block.ProgrammingSnapshotHash!,
-            block.InventorySnapshotHash!,
-            block.PlannerAlgorithmVersion!));
-        if (!string.Equals(calculatedBlockId, block.BlockId, StringComparison.Ordinal))
-        {
-            throw new InvalidDataException($"Rolling block {block.Sequence} identity mismatch.");
-        }
-
         ProgrammingPaths programmingPaths = ProgrammingPaths.FromMediaRoot(paths.MediaRoot);
-        PlaylistPlanningSnapshotService.VerifyCapturedReadiness(
-            input,
-            playlist,
-            programmingPaths.LibraryRoot,
-            CancellationToken.None).GetAwaiter().GetResult();
-        EnsureBroadcastReady(playlistPath, programmingPaths.LibraryRoot);
-        EnsureNoSecretMaterial(_store.ReadText(playlistPath), $"block {block.Sequence} playlist");
-        EnsureNoSecretMaterial(_store.ReadText(inputPath), $"block {block.Sequence} input snapshot");
-        EnsureNoSecretMaterial(_store.ReadText(descriptorPath), $"block {block.Sequence} descriptor");
+        _ = _committedBlockResolver.VerifyBlock(
+            paths,
+            GetPlannerId(paths),
+            block,
+            programmingPaths.LibraryRoot);
     }
 
     private string GetPlannerId(RollingProgrammingPaths paths) =>

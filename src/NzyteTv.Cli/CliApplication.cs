@@ -32,6 +32,14 @@ public static class CliApplication
                 return await RunStationCommandAsync(command, cancellationToken).ConfigureAwait(false);
             }
 
+            if (command.Kind is CommandKind.StationRollingValidate
+                or CommandKind.StationRollingRun
+                or CommandKind.StationRollingStatus)
+            {
+                return await RunRollingStationCommandAsync(command, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             if (command.Kind is CommandKind.ProgrammingInit
                 or CommandKind.ProgrammingValidate
                 or CommandKind.ProgrammingStatus
@@ -688,6 +696,88 @@ public static class CliApplication
         return result.ExitCode;
     }
 
+    private static async Task<int> RunRollingStationCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        string? configuredDestination = Environment.GetEnvironmentVariable(
+            BroadcastDestination.DefaultEnvironmentVariable);
+        var inspection = new RollingStationInspectionService();
+        if (command.Kind == CommandKind.StationRollingValidate)
+        {
+            RollingStationValidationResult validation = inspection.Validate(
+                command.ConfigPath!,
+                configuredDestination);
+            Console.Write(RollingStationFormatters.FormatValidation(validation));
+            return validation.IsReady ? 0 : 1;
+        }
+
+        if (command.Kind == CommandKind.StationRollingStatus)
+        {
+            RollingStationStatusSnapshot status = inspection.GetStatus(
+                command.ConfigPath!,
+                configuredDestination);
+            Console.Write(RollingStationFormatters.FormatStatus(status));
+            return status.Validation.IsReady ? 0 : 1;
+        }
+
+        RollingStationValidationResult runValidation = inspection.Validate(
+            command.ConfigPath!,
+            configuredDestination);
+        Console.Write(RollingStationFormatters.FormatValidation(runValidation));
+        if (!runValidation.FfmpegAvailable
+            || runValidation.DestinationStatus != BroadcastDestinationStatus.Valid)
+        {
+            return StationExitCodes.PermanentStartupFailure;
+        }
+
+        string destination;
+        string ffmpeg;
+        try
+        {
+            destination = BroadcastDestination.Resolve(
+                configuredDestination,
+                dryRun: false)!;
+            ffmpeg = await new MediaToolLocator().LocateFfmpegAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or MediaToolNotFoundException)
+        {
+            Console.Error.WriteLine(
+                $"FAILED: {StationSecretRedactor.RedactRtmpUrls(exception.Message)}");
+            return StationExitCodes.PermanentStartupFailure;
+        }
+
+        var resilientRunner = new ResilientStationBroadcastRunner(
+            new BroadcastRecoveryRunner(
+                new FfmpegBroadcaster(ffmpeg, new ProcessRunner())));
+        var supervisor = new StationSupervisor(resilientRunner, new StationStateStore());
+        var executor = new StationSupervisorRollingBlockExecutor(
+            supervisor,
+            destination,
+            line => Console.Error.WriteLine(line),
+            PrintBroadcastRecoveryUpdate);
+        var coordinator = new RollingStationCoordinator(executor);
+
+        Console.WriteLine();
+        Console.WriteLine("Rolling station starting. Press Ctrl+C to stop.");
+        RollingStationRunResult result = await coordinator.RunAsync(
+            command.ConfigPath!,
+            command.AcceptStoppedStaticCutover,
+            cancellationToken).ConfigureAwait(false);
+        Console.WriteLine();
+        Console.WriteLine(
+            $"Rolling station:           {result.FinalState?.Phase.ToString().ToUpperInvariant() ?? "UNINITIALIZED"}");
+        if (result.ExitCode != 0 && !string.IsNullOrWhiteSpace(result.Error))
+        {
+            Console.Error.WriteLine(
+                $"FAILED: {StationSecretRedactor.RedactRtmpUrls(result.Error)}");
+        }
+
+        return result.ExitCode;
+    }
+
     private static bool IsPermanentStationConfigurationFailure(Exception exception) => exception is
         FileNotFoundException or
         DirectoryNotFoundException or
@@ -1031,7 +1121,7 @@ public static class CliApplication
             Console.WriteLine("  nzytetv verify <input>");
             Console.WriteLine("  nzytetv build-playlist <library-root> --catalog <path> --output <path> --duration <value> [options]");
             Console.WriteLine("  nzytetv broadcast <playlist> [<playlist> ...] --library <library-root> [--dry-run]");
-            Console.WriteLine("  nzytetv station <validate|run|status> ...");
+            Console.WriteLine("  nzytetv station <validate|run|status|rolling> ...");
             Console.WriteLine("  nzytetv programming <init|validate|status|campaign|asset|rolling> ...");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
@@ -1083,6 +1173,7 @@ public static class CliApplication
                 Console.WriteLine("  nzytetv station validate --config <station.json>");
                 Console.WriteLine("  nzytetv station run --config <station.json>");
                 Console.WriteLine($"  nzytetv station status [--state <state.json>]  (default: {StationRuntimePolicy.DefaultStatePath})");
+                Console.WriteLine("  nzytetv station rolling <validate|run|status> --config <rolling-station.json>");
                 Console.WriteLine();
                 Console.WriteLine("Checkpoint 2 safely resumes a matching fixed queue at the first item not positively completed.");
                 break;
@@ -1101,6 +1192,30 @@ public static class CliApplication
                 Console.WriteLine("Usage: nzytetv station status [--state <state.json>]");
                 Console.WriteLine($"Read station runtime/persistence state (default: {StationRuntimePolicy.DefaultStatePath}) and verify its heartbeat and PID.");
                 Console.WriteLine("Process command lines and destination credentials are never displayed.");
+                break;
+            case CommandKind.StationRollingHelp:
+                Console.WriteLine("NZYTE TV rolling station coordinator (Checkpoint 3B2-A)");
+                Console.WriteLine();
+                Console.WriteLine("  nzytetv station rolling validate --config <rolling-station.json>");
+                Console.WriteLine("  nzytetv station rolling status --config <rolling-station.json>");
+                Console.WriteLine("  nzytetv station rolling run --config <rolling-station.json> [--accept-stopped-static-cutover]");
+                Console.WriteLine();
+                Console.WriteLine("Consumes immutable committed blocks through the existing StationSupervisor.");
+                Console.WriteLine("Automatic rolling-planner replenishment is not implemented.");
+                break;
+            case CommandKind.StationRollingValidate:
+                Console.WriteLine("Usage: nzytetv station rolling validate --config <rolling-station.json>");
+                Console.WriteLine("Read-only validation of lineage, committed blocks, CP2 reconciliation, FFmpeg, and destination classification.");
+                break;
+            case CommandKind.StationRollingStatus:
+                Console.WriteLine("Usage: nzytetv station rolling status --config <rolling-station.json>");
+                Console.WriteLine("Read-only combined rolling-manifest, rolling-execution, and CP2 station status.");
+                break;
+            case CommandKind.StationRollingRun:
+                Console.WriteLine("Usage: nzytetv station rolling run --config <rolling-station.json> [--accept-stopped-static-cutover]");
+                Console.WriteLine("Claims and executes immutable rolling blocks through the accepted resilient station supervisor.");
+                Console.WriteLine("The cutover option is valid only for the first claim from a dead STOPPED schema-v2 static queue.");
+                Console.WriteLine($"Requires {BroadcastDestination.DefaultEnvironmentVariable}; its value is never displayed or serialized.");
                 break;
             case CommandKind.ProgrammingHelp:
                 Console.WriteLine("NZYTE TV programming policy");
@@ -1165,7 +1280,7 @@ public static class CliApplication
                 Console.WriteLine("  nzytetv programming rolling validate --media-root <media-root>");
                 Console.WriteLine("  nzytetv programming rolling status --media-root <media-root>");
                 Console.WriteLine();
-                Console.WriteLine("This prepares immutable six-hour blocks. Rolling station execution/handoff is not implemented.");
+                Console.WriteLine("This prepares immutable six-hour blocks; execution is a separate opt-in station rolling command.");
                 break;
             case CommandKind.ProgrammingRollingInit:
                 Console.WriteLine("Usage: nzytetv programming rolling init --media-root <media-root> [--history <planned-history.json>] [--base-seed <integer>]");
@@ -1184,7 +1299,7 @@ public static class CliApplication
             case CommandKind.ProgrammingRollingStatus:
                 Console.WriteLine("Usage: nzytetv programming rolling status --media-root <media-root>");
                 Console.WriteLine("Report planner lineage, buffer, block identities/revisions, staging, quarantine, and validation health.");
-                Console.WriteLine("Rolling execution/handoff remains not implemented in Checkpoint 3B1.");
+                Console.WriteLine("Rolling execution/handoff is not performed by the Checkpoint 3B1 planner.");
                 break;
             case CommandKind.MediaHelp:
                 Console.WriteLine("NZYTE TV portable media-root tools");

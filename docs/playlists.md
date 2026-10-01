@@ -285,4 +285,4 @@ Checkpoint 3B1 offers a safer rolling-planning transaction for future use. It im
 
 ## Scope boundary
 
-Playlist generation produces finite schedules and bounded planned history only. Checkpoint 3B1 can prepare immutable future blocks, but the separate `broadcast` and station commands do not consume or append them automatically. Rolling handoff, an air log, Skip/Force Play controls, a Web UI, dayparts, named shows, YouTube monitoring, and filesystem-driven changes to a running queue remain unimplemented.
+Playlist generation produces finite schedules and bounded planned history only. Checkpoint 3B1 can prepare immutable future blocks; ordinary `broadcast` and static `station run` do not consume or append them automatically. The separate opt-in Checkpoint 3B2-A coordinator can hand off already-committed blocks without modifying an active queue, but it does not replenish them. An air log, Skip/Force Play controls, a Web UI, dayparts, named shows, YouTube monitoring, and filesystem-driven changes to a running queue remain unimplemented.

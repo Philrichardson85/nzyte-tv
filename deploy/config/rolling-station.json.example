@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "stationConfigPath": "/etc/nzyte-tv/station.json",
+  "plannerId": "00000000000000000000000000000000",
+  "rollingStatePath": "/var/lib/nzyte-tv/rolling-state.json"
+}
