@@ -542,6 +542,7 @@ public sealed class PlaylistGenerator
                 vlogAtOrAboveTarget,
                 musicBelowCombinedTarget,
                 maximumStage: LastAdjacencySafeProgrammingStage,
+                preferOldestExactAssetWhenRelaxed: true,
                 random);
             if (breaker is not null)
             {
@@ -561,6 +562,7 @@ public sealed class PlaylistGenerator
                 vlogAtOrAboveTarget,
                 musicBelowCombinedTarget,
                 maximumStage: LastAdjacencySafeProgrammingStage,
+                preferOldestExactAssetWhenRelaxed: true,
                 random);
             if (breaker is not null)
             {
@@ -576,6 +578,7 @@ public sealed class PlaylistGenerator
             vlogAtOrAboveTarget,
             musicBelowCombinedTarget,
             maximumStage: FinalProgrammingStage,
+            preferOldestExactAssetWhenRelaxed: false,
             random)
             ?? throw new InvalidOperationException(
                 "Playlist scheduling made no progress because no candidates are available.");
@@ -589,6 +592,7 @@ public sealed class PlaylistGenerator
         bool vlogAtOrAboveTarget,
         bool musicBelowCombinedTarget,
         int maximumStage,
+        bool preferOldestExactAssetWhenRelaxed,
         StableRandom random)
     {
         for (int stage = 0; stage <= maximumStage; stage++)
@@ -596,6 +600,12 @@ public sealed class PlaylistGenerator
             CandidateEvaluation[] constraintSafe = candidates
                 .Where(candidate => IsProgrammingCandidateAllowedAtStage(candidate, stage))
                 .ToArray();
+            if (preferOldestExactAssetWhenRelaxed
+                && IsExactAssetCooldownRelaxationStage(stage))
+            {
+                constraintSafe = PreferOldestExactAssetCandidates(constraintSafe, playTime);
+            }
+
             CandidateEvaluation[] available = constraintSafe
                 .Where(candidate => IsProgrammingCandidatePreferredAtStage(candidate, stage))
                 .ToArray();
@@ -648,6 +658,29 @@ public sealed class PlaylistGenerator
 
         return null;
     }
+
+    private static CandidateEvaluation[] PreferOldestExactAssetCandidates(
+        IReadOnlyCollection<CandidateEvaluation> candidates,
+        DateTimeOffset playTime)
+    {
+        if (candidates.Count <= 1)
+        {
+            return [.. candidates];
+        }
+
+        TimeSpan maximumAge = candidates.Max(candidate => GetExactAssetAge(candidate, playTime));
+        return candidates
+            .Where(candidate => GetExactAssetAge(candidate, playTime) == maximumAge)
+            .ToArray();
+    }
+
+    private static TimeSpan GetExactAssetAge(
+        CandidateEvaluation candidate,
+        DateTimeOffset playTime) => candidate.LastAssetPlayedAt is DateTimeOffset lastPlayedAt
+            ? playTime - lastPlayedAt
+            : TimeSpan.MaxValue;
+
+    private static bool IsExactAssetCooldownRelaxationStage(int stage) => stage is 5 or 8;
 
     private static CandidateSelection CreateProgrammingSelection(
         CandidateEvaluation selected,
