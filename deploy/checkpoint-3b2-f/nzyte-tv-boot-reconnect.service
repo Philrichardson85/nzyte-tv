@@ -1,0 +1,24 @@
+[Unit]
+Description=NZYTE TV production boot-only guarded reconnection
+After=nzyte-tv.service
+ConditionPathExists=/opt/nzyte-tv/production/recovery/nzyte-tv-boot-reconnect.sh
+
+[Service]
+Type=oneshot
+Environment=E3_TARGET_SERVICE=nzyte-tv.service
+Environment=E3_BLOCKED_SERVICE=nzyte-tv-3b2d.service
+Environment=E3_BLOCKED_TIMER=nzyte-tv-3b2e-boot-reconnect.timer
+Environment=E3_STATE_DIR=/var/lib/nzyte-tv/recovery
+Environment=E3_DIAGNOSTICS_FILE=/var/lib/nzyte-tv/broadcast-diagnostics.json
+Environment=E3_DIAGNOSTICS_READER_BIN=/opt/nzyte-tv/production/recovery/nzyte-tv-read-diagnostics.py
+ExecStart=/opt/nzyte-tv/production/recovery/nzyte-tv-boot-reconnect.sh run
+TimeoutStartSec=240
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nzyte-tv/recovery
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true

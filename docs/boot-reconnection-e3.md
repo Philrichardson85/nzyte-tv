@@ -13,7 +13,7 @@ The production `nzyte-tv.service`, the isolated test service, their drop-ins, FF
 3. exits when that boot ID is already recorded;
 4. atomically records a new boot ID before readiness checks or service control, consuming the one E3 slot for that boot;
 5. requires production to be exactly `inactive` and `disabled`;
-6. requires the isolated service to be active, its MainPID to equal the sole `nzytetv` PID, exactly one FFmpeg PID, and that FFmpeg process's `/proc` parent PID to equal the service MainPID;
+6. requires the isolated service to be enabled and active, its MainPID to equal the sole `nzytetv` PID, exactly one FFmpeg PID, and that FFmpeg process's `/proc` parent PID to equal the service MainPID;
 7. reads only an allowlisted E1 snapshot—attempt ID, FFmpeg PID, output time, and last-advancing time—and requires the live FFmpeg PID to match;
 8. waits 35 seconds and requires the same attempt and PID to advance with recent progress;
 9. performs one bounded stop, verifies the service and both processes are gone, starts it, and verifies the service and both processes return; and

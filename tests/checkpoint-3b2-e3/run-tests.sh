@@ -53,6 +53,7 @@ new_case() {
     local name="$1"
     local now_epoch
     CASE_ROOT="${TEMPORARY_ROOT}/${name}"
+    unset E3_TARGET_SERVICE E3_BLOCKED_SERVICE E3_BLOCKED_TIMER
     CONTROL_DIR="${CASE_ROOT}/control"
     mkdir -p "${CASE_ROOT}/bin" "$CONTROL_DIR" "${CASE_ROOT}/state" "${CASE_ROOT}/proc/2001"
     for tool in systemctl pgrep flock sleep diagnostics-reader; do
@@ -67,6 +68,8 @@ new_case() {
     write_control production-active 0
     write_control production-enablement disabled
     write_control test-active 1
+    write_control test-enablement enabled
+    write_control test-timer-enablement disabled
     write_control main-pid 1001
     write_control app-count 1
     write_control app-pid 1001
@@ -170,7 +173,7 @@ test_production_active_skips() {
     write_control production-active 1
     run_case
     assert_equal "$(event_count stop)" 0 "production-active stop count"
-    assert_file_line "${CASE_ROOT}/state/last-outcome.env" "reason=production-service-active" "production-active skip missing"
+    assert_file_line "${CASE_ROOT}/state/last-outcome.env" "reason=blocked-service-active" "production-active skip missing"
 }
 
 test_missing_ffmpeg_and_stalled_progress_skip() {
@@ -244,6 +247,61 @@ test_failed_stop_and_start_are_bounded() {
     assert_file_line "${CASE_ROOT}/state/last-outcome.env" "reason=start-command-failed-restore-failed" "failed-start outcome missing"
 }
 
+test_production_profile_targets_only_production_and_requires_test_isolation() {
+    new_case production-profile
+    export E3_TARGET_SERVICE=nzyte-tv.service
+    export E3_BLOCKED_SERVICE=nzyte-tv-3b2d.service
+    export E3_BLOCKED_TIMER=nzyte-tv-3b2e-boot-reconnect.timer
+    write_control production-active 1
+    write_control production-enablement enabled
+    write_control test-active 0
+    write_control test-enablement disabled
+    write_control test-timer-enablement disabled
+    seed_case
+    move_to_next_boot
+    run_case
+    assert_equal "$(event_count stop)" 1 "production-profile stop count"
+    assert_equal "$(event_count start)" 1 "production-profile start count"
+    assert_file_line "${CONTROL_DIR}/events" "stop nzyte-tv.service" "production service was not targeted"
+    assert_file_line "${CONTROL_DIR}/events" "start nzyte-tv.service" "production service was not restarted"
+
+    new_case production-profile-test-timer-enabled
+    export E3_TARGET_SERVICE=nzyte-tv.service
+    export E3_BLOCKED_SERVICE=nzyte-tv-3b2d.service
+    export E3_BLOCKED_TIMER=nzyte-tv-3b2e-boot-reconnect.timer
+    write_control production-active 1
+    write_control production-enablement enabled
+    write_control test-active 0
+    write_control test-enablement disabled
+    write_control test-timer-enablement enabled
+    seed_case
+    move_to_next_boot
+    run_case
+    assert_equal "$(event_count stop)" 0 "enabled test timer production stop count"
+    assert_file_line \
+        "${CASE_ROOT}/state/last-outcome.env" \
+        "reason=blocked-timer-not-disabled" \
+        "enabled test timer skip missing"
+
+    new_case production-profile-target-disabled
+    export E3_TARGET_SERVICE=nzyte-tv.service
+    export E3_BLOCKED_SERVICE=nzyte-tv-3b2d.service
+    export E3_BLOCKED_TIMER=nzyte-tv-3b2e-boot-reconnect.timer
+    write_control production-active 1
+    write_control production-enablement disabled
+    write_control test-active 0
+    write_control test-enablement disabled
+    write_control test-timer-enablement disabled
+    seed_case
+    move_to_next_boot
+    run_case
+    assert_equal "$(event_count stop)" 0 "disabled production target stop count"
+    assert_file_line \
+        "${CASE_ROOT}/state/last-outcome.env" \
+        "reason=target-service-not-enabled" \
+        "disabled production target skip missing"
+}
+
 test_diagnostics_reader
 test_install_seed_does_not_restart
 test_subsequent_boot_reconnects_once
@@ -253,5 +311,6 @@ test_missing_ffmpeg_and_stalled_progress_skip
 test_unrelated_ffmpeg_skips
 test_concurrent_invocations_restart_once
 test_failed_stop_and_start_are_bounded
+test_production_profile_targets_only_production_and_requires_test_isolation
 
 printf 'Checkpoint 3B2-E3 mock tests passed.\n'

@@ -1,5 +1,7 @@
 # Station supervisor, persistent resume, and systemd operation
 
+> This page remains the static-station reference. The separately staged production rolling unit and reversible handoff procedure are documented in [Checkpoint 3B2-F production cutover preparation](production-cutover-3b2f.md); they are not deployed automatically.
+
 NZYTE TV v0.5.0 Checkpoint 2 extends the station foundation with safe item-level resume across a full station-process restart. It has passed Raspberry Pi acceptance for hard parent failure, clean stop/start, graceful reboot, and boot-enabled reboot. The static `station run` workflow documented here still broadcasts only the fixed ordered playlist list in `station.json`; it does not discover future playlists. Checkpoint 3B1 may prepare immutable rolling blocks, Checkpoint 3B2-A supplies a separate opt-in coordinator for them, and Checkpoint 3B2-B replenishes that rolling buffer through the accepted planner. None changes this static command, configuration, state schema, or systemd unit. See [rolling-station.md](rolling-station.md).
 
 The supervisor continues to wrap, rather than replace, the existing resilient broadcaster:

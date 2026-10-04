@@ -4,7 +4,7 @@ NZYTE TV is a production-validated media-preparation, programming, and broadcast
 
 Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks. Checkpoint 3B2-A adds an opt-in coordinator that safely claims and hands those immutable blocks to the unchanged station supervisor. Checkpoint 3B2-B runs that accepted planner asynchronously beside rolling execution to maintain two committed future blocks. Encoding remains independent from metadata, scheduling, and playback.
 
-Persistent FFmpeg ingest across block boundaries, dynamic queue append, a production rolling systemd unit, YouTube boundary acceptance, API health monitoring, and alerts remain out of scope. The 3B1 planner itself never puts blocks on air; automatic replenishment is active only inside the separate opt-in `station rolling run` host, which has not yet completed production Pi/YouTube acceptance. Existing static operation and boot enablement remain unchanged.
+Persistent FFmpeg ingest across block boundaries, dynamic queue append, API health monitoring, and alerts remain out of scope. The accepted isolated station has completed rolling handoff, replenishment, diagnostics, and boot-recovery acceptance. Checkpoint 3B2-F supplies reviewed-candidate production units and a cutover/rollback runbook, but those assets are not deployed and do not change the existing static production service until an operator performs the separately approved cutover.
 
 ## Operating NZYTE TV
 
@@ -20,6 +20,7 @@ Focused references:
 - [V1 programming policy and operator controls](docs/programming.md)
 - [Rolling programming planner](docs/rolling-programming.md)
 - [Rolling station coordinator](docs/rolling-station.md)
+- [Checkpoint 3B2-F production cutover preparation](docs/production-cutover-3b2f.md)
 - [Checkpoint 3B2-E3 boot-only test reconnection](docs/boot-reconnection-e3.md)
 - [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
@@ -190,7 +191,7 @@ The station fingerprints the exact ordered validated queue with SHA-256. A stopp
 
 The repository unit uses `Restart=on-failure` and `RestartPreventExitStatus=78`: runtime failure remains restartable, while permanent startup/configuration or resume-safety failures do not loop. Successful static-queue completion exits zero and is not replayed. Checkpoint 2 passed the documented hard-crash, clean stop/start, graceful reboot, and boot-enabled reboot acceptance tests; service enablement remains an explicit operator action. See [Station supervisor, persistent resume, and systemd operation](docs/station-service.md).
 
-`station rolling validate`, `status`, and `run` use a separate configuration that references the accepted static configuration and planner lineage. During `run`, automatic replenishment maintains the manifest window in the background and records non-authoritative health beside the rolling execution state. Checkpoints 3B2-A/B do not install or alter systemd; production rolling service integration is deferred.
+`station rolling validate`, `status`, and `run` use a separate configuration that references the accepted static configuration and planner lineage. During `run`, automatic replenishment maintains the manifest window in the background and records non-authoritative health beside the rolling execution state. Checkpoints 3B2-A/B did not install or alter systemd. Checkpoint 3B2-F prepares production-specific candidate units, diagnostics, guarded boot recovery, and an exclusive cutover/rollback procedure without deploying them.
 
 ## Broadcast standard
 

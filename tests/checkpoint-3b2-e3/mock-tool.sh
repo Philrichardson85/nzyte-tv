@@ -39,6 +39,14 @@ service_active_value() {
     fi
 }
 
+write_service_active() {
+    if [[ "$1" == "nzyte-tv.service" ]]; then
+        write_value production-active "$2"
+    else
+        write_value test-active "$2"
+    fi
+}
+
 mock_systemctl() {
     local command="${1:-}"
     shift || true
@@ -61,6 +69,8 @@ mock_systemctl() {
         is-enabled)
             if [[ "${1:-}" == "nzyte-tv.service" ]]; then
                 printf '%s\n' "$(read_value production-enablement disabled)"
+            elif [[ "${1:-}" == "nzyte-tv-3b2e-boot-reconnect.timer" ]]; then
+                printf '%s\n' "$(read_value test-timer-enablement disabled)"
             else
                 printf '%s\n' "$(read_value test-enablement enabled)"
             fi
@@ -74,7 +84,7 @@ mock_systemctl() {
             if decrement_failure stop-failures; then
                 return 1
             fi
-            write_value test-active 0
+            write_service_active "${1:-}" 0
             write_value app-count 0
             write_value ffmpeg-count 0
             ;;
@@ -83,7 +93,7 @@ mock_systemctl() {
             if decrement_failure start-failures; then
                 return 1
             fi
-            write_value test-active 1
+            write_service_active "${1:-}" 1
             write_value main-pid "$(read_value started-main-pid 1101)"
             write_value app-count 1
             write_value app-pid "$(read_value started-main-pid 1101)"

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NzyteTv.Core;
 using NzyteTv.Media;
 
@@ -133,6 +134,7 @@ public sealed class RollingStationCoordinatorTests
         {
             if (sequence == 1)
             {
+                await maintainer.WaitForTargetAsync(3, token);
                 return await fixture.CompleteExecution(sequence, configuration, plan, token);
             }
 
@@ -178,7 +180,15 @@ public sealed class RollingStationCoordinatorTests
         var secondTrigger = new RollingReplenishmentTrigger();
         var secondStore = new SignalingRollingStationStateStore(fixture.RollingStore, secondTrigger);
         var secondOwnership = new RollingCoordinatorOwnershipSignal();
-        var secondExecutor = new ScriptedExecutor(fixture.CompleteExecution);
+        var secondExecutor = new ScriptedExecutor(async (sequence, configuration, plan, token) =>
+        {
+            if (sequence == 6)
+            {
+                await maintainer.WaitForTargetAsync(8, token);
+            }
+
+            return await fixture.CompleteExecution(sequence, configuration, plan, token);
+        });
         var secondCoordinator = fixture.CreateCoordinator(
             secondExecutor,
             faultInjector: new CancelAtFault(
@@ -1381,6 +1391,8 @@ public sealed class RollingStationCoordinatorTests
     private sealed class CoordinatorFakeMaintainer(CoordinatorFixture fixture)
         : IRollingBlockMaintainer
     {
+        private readonly ConcurrentDictionary<long, TaskCompletionSource> _targetSignals = [];
+
         public List<long> Targets { get; } = [];
 
         public Queue<Exception> Exceptions { get; } = [];
@@ -1391,14 +1403,20 @@ public sealed class RollingStationCoordinatorTests
             CancellationToken cancellationToken)
         {
             Targets.Add(requiredHighestSequence);
+            TaskCompletionSource signal = _targetSignals.GetOrAdd(
+                requiredHighestSequence,
+                static _ => new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously));
             if (Exceptions.TryDequeue(out Exception? exception))
             {
+                signal.TrySetResult();
                 throw exception;
             }
 
             fixture.PublishThrough(Math.Max(
                 fixture.PlanStore.Manifest.Blocks!.Count,
                 checked((int)requiredHighestSequence)));
+            signal.TrySetResult();
             return Task.FromResult(new RollingMaintainResult(
                 RollingProgrammingPaths.FromMediaRoot(mediaRoot),
                 fixture.PlanStore.Manifest,
@@ -1406,6 +1424,12 @@ public sealed class RollingStationCoordinatorTests
                 0,
                 true));
         }
+
+        public Task WaitForTargetAsync(long target, CancellationToken cancellationToken) =>
+            _targetSignals.GetOrAdd(
+                target,
+                static _ => new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously)).Task.WaitAsync(cancellationToken);
     }
 
     private sealed class ThrowOnceFault(

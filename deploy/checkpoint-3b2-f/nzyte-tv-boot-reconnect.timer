@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the NZYTE TV production reconnection guard once after boot
+
+[Timer]
+OnBootSec=150s
+AccuracySec=5s
+Persistent=false
+Unit=nzyte-tv-boot-reconnect.service
+
+[Install]
+WantedBy=timers.target

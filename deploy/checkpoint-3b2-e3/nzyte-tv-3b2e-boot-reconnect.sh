@@ -7,8 +7,9 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 umask 077
 
-readonly PRODUCTION_SERVICE="${E3_PRODUCTION_SERVICE:-nzyte-tv.service}"
-readonly TEST_SERVICE="${E3_TEST_SERVICE:-nzyte-tv-3b2d.service}"
+readonly TARGET_SERVICE="${E3_TARGET_SERVICE:-${E3_TEST_SERVICE:-nzyte-tv-3b2d.service}}"
+readonly BLOCKED_SERVICE="${E3_BLOCKED_SERVICE:-${E3_PRODUCTION_SERVICE:-nzyte-tv.service}}"
+readonly BLOCKED_TIMER="${E3_BLOCKED_TIMER:-}"
 readonly STATE_DIR="${E3_STATE_DIR:-/opt/nzyte-tv/integration/3b2d/state/e3}"
 readonly BOOT_ID_SOURCE="${E3_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
 readonly E3_PROCFS_ROOT="${E3_PROC_ROOT:-/proc}"
@@ -253,7 +254,7 @@ wait_for_stopped() {
     while (( elapsed <= STOP_TIMEOUT_SECONDS )); do
         app_count="$(process_count nzytetv)" || app_count="invalid"
         ffmpeg_count="$(process_count ffmpeg)" || ffmpeg_count="invalid"
-        if ! service_is_active "$TEST_SERVICE" \
+        if ! service_is_active "$TARGET_SERVICE" \
             && [[ "$app_count" == "0" ]] \
             && [[ "$ffmpeg_count" == "0" ]]; then
             return 0
@@ -277,11 +278,11 @@ wait_for_started() {
     local ffmpeg_count
     local app_pid
     while (( elapsed <= START_TIMEOUT_SECONDS )); do
-        main_pid="$(service_main_pid "$TEST_SERVICE")" || main_pid="invalid"
+        main_pid="$(service_main_pid "$TARGET_SERVICE")" || main_pid="invalid"
         app_count="$(process_count nzytetv)" || app_count="invalid"
         ffmpeg_count="$(process_count ffmpeg)" || ffmpeg_count="invalid"
         app_pid="$(single_process_pid nzytetv)" || app_pid="invalid"
-        if service_is_active "$TEST_SERVICE" \
+        if service_is_active "$TARGET_SERVICE" \
             && [[ "$app_count" == "1" ]] \
             && [[ "$ffmpeg_count" == "1" ]] \
             && [[ "$main_pid" == "$app_pid" ]]; then
@@ -300,7 +301,7 @@ wait_for_started() {
 }
 
 restore_once() {
-    if ! "$SYSTEMCTL_BIN" start "$TEST_SERVICE" >/dev/null 2>&1; then
+    if ! "$SYSTEMCTL_BIN" start "$TARGET_SERVICE" >/dev/null 2>&1; then
         return 1
     fi
 
@@ -414,25 +415,35 @@ run_boot_reconnection() {
         exit 1
     }
 
-    local production_state
-    local production_enablement
-    production_state="$(service_state "$PRODUCTION_SERVICE")" \
-        || skip_boot "$boot_id" "production-service-state-unknown"
-    production_enablement="$(service_enablement "$PRODUCTION_SERVICE")" \
-        || skip_boot "$boot_id" "production-service-enablement-unknown"
-    if [[ "$production_state" == "active" ]]; then
-        skip_boot "$boot_id" "production-service-active"
+    local blocked_state
+    local blocked_enablement
+    blocked_state="$(service_state "$BLOCKED_SERVICE")" \
+        || skip_boot "$boot_id" "blocked-service-state-unknown"
+    blocked_enablement="$(service_enablement "$BLOCKED_SERVICE")" \
+        || skip_boot "$boot_id" "blocked-service-enablement-unknown"
+    if [[ "$blocked_state" == "active" ]]; then
+        skip_boot "$boot_id" "blocked-service-active"
     fi
-    [[ "$production_state" == "inactive" ]] \
-        || skip_boot "$boot_id" "production-service-not-inactive"
-    [[ "$production_enablement" == "disabled" ]] \
-        || skip_boot "$boot_id" "production-service-not-disabled"
+    [[ "$blocked_state" == "inactive" ]] \
+        || skip_boot "$boot_id" "blocked-service-not-inactive"
+    [[ "$blocked_enablement" == "disabled" ]] \
+        || skip_boot "$boot_id" "blocked-service-not-disabled"
 
-    if [[ "$(service_state "$TEST_SERVICE")" != "active" ]]; then
-        skip_boot "$boot_id" "test-service-inactive"
+    if [[ -n "$BLOCKED_TIMER" ]]; then
+        local blocked_timer_enablement
+        blocked_timer_enablement="$(service_enablement "$BLOCKED_TIMER")" \
+            || skip_boot "$boot_id" "blocked-timer-enablement-unknown"
+        [[ "$blocked_timer_enablement" == "disabled" ]] \
+            || skip_boot "$boot_id" "blocked-timer-not-disabled"
     fi
 
-    main_pid="$(service_main_pid "$TEST_SERVICE")" || skip_boot "$boot_id" "test-service-main-pid-invalid"
+    if [[ "$(service_state "$TARGET_SERVICE")" != "active" ]]; then
+        skip_boot "$boot_id" "target-service-inactive"
+    fi
+    [[ "$(service_enablement "$TARGET_SERVICE")" == "enabled" ]] \
+        || skip_boot "$boot_id" "target-service-not-enabled"
+
+    main_pid="$(service_main_pid "$TARGET_SERVICE")" || skip_boot "$boot_id" "target-service-main-pid-invalid"
     app_count="$(process_count nzytetv)" || skip_boot "$boot_id" "nzytetv-process-count-invalid"
     ffmpeg_count="$(process_count ffmpeg)" || skip_boot "$boot_id" "ffmpeg-process-count-invalid"
     [[ "$app_count" == "1" ]] || skip_boot "$boot_id" "nzytetv-process-count-not-one"
@@ -460,15 +471,15 @@ run_boot_reconnection() {
     "$SLEEP_BIN" "$OBSERVATION_SECONDS" >/dev/null 2>&1 \
         || skip_boot "$boot_id" "progress-observation-failed"
 
-    if ! service_is_active "$TEST_SERVICE"; then
-        skip_boot "$boot_id" "test-service-changed-during-observation"
+    if ! service_is_active "$TARGET_SERVICE"; then
+        skip_boot "$boot_id" "target-service-changed-during-observation"
     fi
 
     [[ "$(process_count nzytetv)" == "1" ]] \
         || skip_boot "$boot_id" "nzytetv-changed-during-observation"
     [[ "$(process_count ffmpeg)" == "1" ]] \
         || skip_boot "$boot_id" "ffmpeg-changed-during-observation"
-    [[ "$(service_main_pid "$TEST_SERVICE")" == "$main_pid" ]] \
+    [[ "$(service_main_pid "$TARGET_SERVICE")" == "$main_pid" ]] \
         || skip_boot "$boot_id" "service-process-changed-during-observation"
     [[ "$(single_process_pid nzytetv)" == "$app_pid" ]] \
         || skip_boot "$boot_id" "nzytetv-changed-during-observation"
@@ -492,7 +503,7 @@ run_boot_reconnection() {
         log_safe "failed (outcome-write-failed)"
         exit 1
     }
-    if ! "$SYSTEMCTL_BIN" stop "$TEST_SERVICE" >/dev/null 2>&1; then
+    if ! "$SYSTEMCTL_BIN" stop "$TARGET_SERVICE" >/dev/null 2>&1; then
         if wait_for_started; then
             fail_action "$boot_id" "stop-command-failed-service-still-active"
         fi
@@ -509,7 +520,7 @@ run_boot_reconnection() {
         fail_action "$boot_id" "stop-timeout-restore-failed"
     fi
 
-    if ! "$SYSTEMCTL_BIN" start "$TEST_SERVICE" >/dev/null 2>&1; then
+    if ! "$SYSTEMCTL_BIN" start "$TARGET_SERVICE" >/dev/null 2>&1; then
         if restore_once; then
             fail_action "$boot_id" "start-command-failed-service-restored"
         fi
@@ -527,7 +538,7 @@ run_boot_reconnection() {
         log_safe "failed (outcome-write-failed-after-reconnection)"
         exit 1
     }
-    log_safe "guarded test-service reconnection completed"
+    log_safe "guarded target-service reconnection completed"
 }
 
 case "${1:-}" in

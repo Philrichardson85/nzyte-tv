@@ -1,5 +1,7 @@
 # Rolling station coordinator and replenishment (Checkpoints 3B2-A/B)
 
+> Checkpoint 3B2-F now provides production deployment candidates and an operator-controlled cutover/rollback procedure after isolated rolling acceptance. Nothing is installed or enabled merely by checking out the repository. See [Checkpoint 3B2-F production cutover preparation](production-cutover-3b2f.md).
+
 Checkpoint 3B2-A is an opt-in execution coordinator for immutable blocks committed by the [rolling programming planner](rolling-programming.md). It claims exactly one six-hour block, delegates that block to the accepted Checkpoint 2 `StationSupervisor`, confirms durable completion, and then claims the next manifest block. Checkpoint 3B2-B adds an asynchronous runtime host that asks the accepted planner to retain two committed future blocks beyond the active or next-required sequence. Neither component appends to or rewrites the active queue.
 
 The coordinator itself still does not run the planner. The outer runtime host owns the coordinator/background-task lifecycle and delegates all generation to the existing planner. No rolling systemd unit is installed or enabled, one FFmpeg connection is not preserved across block boundaries, and production YouTube boundary acceptance remains deferred to 3B2-C.

@@ -106,7 +106,7 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `station run` | Supervises the configured fixed queue through the existing resilient broadcaster and writes durable runtime state/heartbeat. | Checkpoint 2 item-level restart/reboot resume. |
 | `station status` | Reads runtime state, resume telemetry, heartbeat freshness, and station PID without displaying process arguments. | Check station, broadcast, FFmpeg, media, queue, and persistence state. |
 | `station rolling validate` / `status` | Read-only execution and replenishment status across the rolling manifest, block execution state, CP2 state, and advisory health. | Before an opt-in rolling test and while diagnosing it. |
-| `station rolling run` | Claims one immutable block at a time, delegates it to the unchanged station supervisor, and asynchronously maintains two committed future blocks through the accepted planner. | Checkpoint 3B2-A/B development/acceptance only; no production service is installed yet. |
+| `station rolling run` | Claims one immutable block at a time, delegates it to the unchanged station supervisor, and asynchronously maintains two committed future blocks through the accepted planner. | Accepted in the isolated station; production candidate service and reversible handoff are prepared but not installed by the repository. |
 
 Use `nzytetv <command> --help` for command-specific syntax.
 
@@ -582,7 +582,7 @@ Omit `--history` only when an empty planned-history genesis is intentional. To i
 
 Production initialization always defaults to six hours (21,600 seconds). For accelerated handoff acceptance only, a completely separate test media root may be initialized with `--test-block-duration 4m`; accepted values are 60–1,800 whole seconds, and the resulting output is prominently labeled `TEST LINEAGE — NON-PRODUCTION DURATION`. Never apply the option to the production media root or reuse production station/runtime state. It is initialization-only, does not trim assets, and cannot change an existing lineage to a different duration. Follow [Accelerated rolling integration testing](accelerated-rolling-testing.md) for the isolation checklist.
 
-Checkpoint 3B1 commands do not put those blocks on air, change the static `station.json` queue, start FFmpeg, or hand off at a block boundary. The separate opt-in rolling command performs execution and automatic future-buffer maintenance, but it has not changed the accepted static service or completed production Pi/YouTube boundary acceptance. See [Rolling programming planner](rolling-programming.md) for the transaction model.
+Checkpoint 3B1 commands do not put those blocks on air, change the static `station.json` queue, start FFmpeg, or hand off at a block boundary. The separate opt-in rolling command performs execution and automatic future-buffer maintenance. Isolated Pi/YouTube acceptance is complete; the existing production service remains unchanged until the operator follows the separately approved [Checkpoint 3B2-F production cutover](production-cutover-3b2f.md). See [Rolling programming planner](rolling-programming.md) for the transaction model.
 
 ### 10.3.1 Validate the opt-in rolling coordinator and replenisher
 
@@ -600,7 +600,7 @@ Read-only checks:
 
 The planner manifest remains authoritative for committed order. CP2 `state.json` remains authoritative for the item cursor. The separate rolling document records only active/completed block identity. The optional `rolling-state.json.replenishment.json` sidecar is advisory and contains buffer/retry health, never execution authority. Validation and status do not mutate any document or invoke generation.
 
-Do not run the static station and rolling coordinator together. Checkpoints 3B2-A/B supply no systemd unit. For a later manual acceptance run, stop the static service first and run `station rolling run` from a controlled terminal. Only the process that owns the coordinator lock starts automatic replenishment. An unfinished `STOPPED` static queue is refused unless the operator deliberately supplies `--accept-stopped-static-cutover` on the first run; that option cannot override a live, interrupted, schema-v1, invalid, or already-rolling state.
+Do not run the static station and rolling coordinator together. Checkpoints 3B2-A/B supplied no systemd unit. Checkpoint 3B2-F adds staged production candidates and an exclusive handoff helper; checkout alone installs or enables nothing. Only the process that owns the coordinator lock starts automatic replenishment. An unfinished `STOPPED` static queue is refused unless the operator deliberately supplies `--accept-stopped-static-cutover` on the first run; that option cannot override a live, interrupted, schema-v1, invalid, or already-rolling state.
 
 Status calculates buffer truth from the authoritative manifest and rolling execution state, rather than trusting the sidecar. With the current three-block window it reports two future blocks, the active/next-required anchor, highest committed sequence, required highest sequence, deficit, buffer health, replenishment health, last successful replenishment, and the last redacted error. `HEALTHY` means the full relative window exists; `LOW` means one future block remains; `EMPTY` means no future block remains beyond the anchor. `BLOCKED` replenishment can coexist with executable committed blocks.
 
@@ -1238,6 +1238,7 @@ The following have been validated at specific points in production acceptance. T
 - [V1 programming policy](programming.md): editorial controls, spotlight campaign, song-family pacing, internal patterns, and cadence.
 - [Rolling programming planner](rolling-programming.md): immutable blocks, manifest transactions, deterministic retry, recovery, and Pi acceptance.
 - [Rolling station coordinator](rolling-station.md): immutable claims, CP2 reconciliation, completion sealing, block handoff, automatic future-buffer replenishment, and the 3B2-C acceptance boundary.
+- [Checkpoint 3B2-F production cutover](production-cutover-3b2f.md): staged ARM64 release, production diagnostics/recovery, exclusive handoff, verification, and rollback.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.
