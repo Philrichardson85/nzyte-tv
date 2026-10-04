@@ -1,0 +1,18 @@
+[Unit]
+Description=NZYTE TV 3B2-E3 test-only boot reconnection
+After=nzyte-tv-3b2d.service
+ConditionPathExists=/opt/nzyte-tv/integration/3b2d/e3/nzyte-tv-3b2e-boot-reconnect.sh
+
+[Service]
+Type=oneshot
+ExecStart=/opt/nzyte-tv/integration/3b2d/e3/nzyte-tv-3b2e-boot-reconnect.sh run
+TimeoutStartSec=240
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/nzyte-tv/integration/3b2d/state/e3
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true

@@ -20,6 +20,7 @@ Focused references:
 - [V1 programming policy and operator controls](docs/programming.md)
 - [Rolling programming planner](docs/rolling-programming.md)
 - [Rolling station coordinator](docs/rolling-station.md)
+- [Checkpoint 3B2-E3 boot-only test reconnection](docs/boot-reconnection-e3.md)
 - [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)

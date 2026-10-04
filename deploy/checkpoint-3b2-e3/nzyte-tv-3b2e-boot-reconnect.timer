@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the NZYTE TV 3B2-E3 guard once after boot
+
+[Timer]
+OnBootSec=150s
+AccuracySec=5s
+Persistent=false
+Unit=nzyte-tv-3b2e-boot-reconnect.service
+
+[Install]
+WantedBy=timers.target
