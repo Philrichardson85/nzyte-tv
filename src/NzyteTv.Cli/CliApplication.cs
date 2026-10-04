@@ -579,7 +579,10 @@ public static class CliApplication
         Console.WriteLine("Broadcast starting. Press Ctrl+C to stop.");
         try
         {
-            var recovery = new BroadcastRecoveryRunner(new FfmpegBroadcaster(ffmpeg, new ProcessRunner()));
+            var recovery = new BroadcastRecoveryRunner(new FfmpegBroadcaster(
+                ffmpeg,
+                new ProcessRunner(),
+                BroadcastDiagnosticsConfiguration.CreateFromEnvironment()));
             BroadcastRecoveryResult result = await recovery.RunAsync(
                 plan, destination!, line => Console.Error.WriteLine(line), PrintBroadcastRecoveryUpdate, cancellationToken)
                 .ConfigureAwait(false);
@@ -674,7 +677,10 @@ public static class CliApplication
         }
         var resilientRunner = new ResilientStationBroadcastRunner(
             new BroadcastRecoveryRunner(
-                new FfmpegBroadcaster(ffmpeg, new ProcessRunner())));
+                new FfmpegBroadcaster(
+                    ffmpeg,
+                    new ProcessRunner(),
+                    BroadcastDiagnosticsConfiguration.CreateFromEnvironment())));
         var supervisor = new StationSupervisor(resilientRunner, new StationStateStore());
 
         Console.WriteLine();
@@ -752,7 +758,10 @@ public static class CliApplication
 
         var resilientRunner = new ResilientStationBroadcastRunner(
             new BroadcastRecoveryRunner(
-                new FfmpegBroadcaster(ffmpeg, new ProcessRunner())));
+                new FfmpegBroadcaster(
+                    ffmpeg,
+                    new ProcessRunner(),
+                    BroadcastDiagnosticsConfiguration.CreateFromEnvironment())));
         var supervisor = new StationSupervisor(resilientRunner, new StationStateStore());
         var executor = new StationSupervisorRollingBlockExecutor(
             supervisor,

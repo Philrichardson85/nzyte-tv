@@ -9,7 +9,9 @@ public sealed record ProcessRequest(
     Action<string>? OnStandardOutput = null,
     Action<string>? OnStandardError = null,
     Action<int>? OnStarted = null,
-    Action<int>? OnExited = null);
+    Action<int>? OnExited = null,
+    bool CaptureStandardOutput = true,
+    bool CaptureStandardError = true);
 
 public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
@@ -55,9 +57,12 @@ public sealed class ProcessRunner : IProcessRunner
                 return;
             }
 
-            lock (stdout)
+            if (request.CaptureStandardOutput)
             {
-                stdout.AppendLine(eventArgs.Data);
+                lock (stdout)
+                {
+                    stdout.AppendLine(eventArgs.Data);
+                }
             }
 
             request.OnStandardOutput?.Invoke(eventArgs.Data);
@@ -71,9 +76,12 @@ public sealed class ProcessRunner : IProcessRunner
                 return;
             }
 
-            lock (stderr)
+            if (request.CaptureStandardError)
             {
-                stderr.AppendLine(eventArgs.Data);
+                lock (stderr)
+                {
+                    stderr.AppendLine(eventArgs.Data);
+                }
             }
 
             request.OnStandardError?.Invoke(eventArgs.Data);

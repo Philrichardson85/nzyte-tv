@@ -114,6 +114,20 @@ This behavior was added after a Raspberry Pi 4 acceptance stream ran for approxi
 
 After five minutes of healthy streaming, the consecutive-recovery budget resets. Ctrl+C from the parent broadcaster is intentional cancellation, so it stops either FFmpeg or an in-progress retry delay promptly and does not trigger recovery. If the budget is exhausted, the command exits nonzero with the last active item and a sanitized FFmpeg diagnostic. The RTMP/RTMPS destination remains redacted in all forwarded diagnostics. Playlist history is not rewritten during broadcaster recovery.
 
+## Optional local broadcast diagnostics
+
+Set `NZYTE_TV_BROADCAST_DIAGNOSTICS_PATH` to enable a separate, advisory schema-version-1 JSON file. When the variable is absent, diagnostics are disabled and broadcast operation is unchanged. The file retains at most 20 recent FFmpeg attempts and records a random attempt ID, safe starting-item identity, PID and lifecycle times, complete `-progress` batch values, advancing/stagnant counts, bounded sanitized stderr, exit status, existing failure classification, and the existing retry decision. Initial launches have no claimed reason; a launch is marked `recoveryRetry` only when the broadcaster's recovery loop initiated it.
+
+Writes are atomic and progress snapshots are limited to the first batch and no more than once every 30 seconds, plus lifecycle transitions. A diagnostics read or write failure is isolated from broadcasting. This file is not CP2 station state, rolling state, a playlist, or scheduling authority, and it is not consumed by `station status`. It never contains FFmpeg arguments or the configured destination; known RTMP/RTMPS URLs, stream-key material, authorization values, and named OAuth secrets are redacted defensively.
+
+For an isolated Raspberry Pi test, choose a path owned by the test service account and outside production state, for example:
+
+```bash
+export NZYTE_TV_BROADCAST_DIAGNOSTICS_PATH=/var/lib/nzyte-tv-3b2d/broadcast-diagnostics.json
+```
+
+The diagnostics show only local FFmpeg process and muxing activity. They do not call YouTube, do not establish ingest or publication health, and do not prove viewer-facing audio or video playback.
+
 Verify that FFmpeg stopped:
 
 Bash:

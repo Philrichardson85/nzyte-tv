@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using NzyteTv.Core;
 
@@ -126,7 +127,10 @@ public sealed record BroadcastAttemptResult(
     int FfmpegExitCode,
     TimeSpan? OutputTime,
     string Diagnostic,
-    int StartItemIndex);
+    int StartItemIndex)
+{
+    public string AttemptId { get; init; } = string.Empty;
+}
 
 public static class FfmpegProgressParser
 {
@@ -138,13 +142,17 @@ public static class FfmpegProgressParser
         if (separator <= 0) return false;
         string key = line[..separator];
         string value = line[(separator + 1)..];
-        if (key == "out_time_us" && long.TryParse(value, out long microseconds) && microseconds >= 0)
+        if (key == "out_time_us"
+            && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long microseconds)
+            && microseconds >= 0)
         {
             outputTime = TimeSpan.FromMicroseconds(microseconds);
             return true;
         }
 
-        if (key == "out_time" && TimeSpan.TryParse(value, out TimeSpan parsed) && parsed >= TimeSpan.Zero)
+        if (key == "out_time"
+            && TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out TimeSpan parsed)
+            && parsed >= TimeSpan.Zero)
         {
             outputTime = parsed;
             return true;
@@ -181,13 +189,32 @@ public sealed class FfmpegBroadcaster
 {
     private readonly string _ffmpegPath;
     private readonly IProcessRunner _processRunner;
+    private readonly IBroadcastDiagnostics _diagnostics;
 
-    public FfmpegBroadcaster(string ffmpegPath, IProcessRunner processRunner)
+    public FfmpegBroadcaster(
+        string ffmpegPath,
+        IProcessRunner processRunner,
+        IBroadcastDiagnostics? diagnostics = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ffmpegPath);
         ArgumentNullException.ThrowIfNull(processRunner);
         _ffmpegPath = ffmpegPath;
         _processRunner = processRunner;
+        _diagnostics = diagnostics ?? DisabledBroadcastDiagnostics.Instance;
+    }
+
+    public IBroadcastDiagnostics Diagnostics => _diagnostics;
+
+    internal async Task FlushDiagnosticsAsync()
+    {
+        try
+        {
+            await _diagnostics.FlushAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Diagnostics are advisory and must not alter broadcast outcomes.
+        }
     }
 
     public async Task<BroadcastAttemptResult> BroadcastAttemptAsync(
@@ -205,6 +232,7 @@ public sealed class FfmpegBroadcaster
             onOutput,
             onProgress,
             observer: null,
+            launchReason: null,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -217,58 +245,177 @@ public sealed class FfmpegBroadcaster
         IBroadcastRuntimeObserver? observer,
         CancellationToken cancellationToken)
     {
+        return await BroadcastAttemptAsync(
+            plan,
+            destination,
+            startItemIndex,
+            onOutput,
+            onProgress,
+            observer,
+            launchReason: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<BroadcastAttemptResult> BroadcastAttemptAsync(
+        BroadcastPlan plan,
+        string destination,
+        int startItemIndex,
+        Action<string>? onOutput,
+        Action<TimeSpan>? onProgress,
+        IBroadcastRuntimeObserver? observer,
+        BroadcastLaunchReason? launchReason,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (!plan.IsReady) throw new InvalidOperationException("Broadcast plan is not ready.");
         if (startItemIndex < 0 || startItemIndex >= plan.Items.Count) throw new ArgumentOutOfRangeException(nameof(startItemIndex));
 
+        string attemptId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string? concatPath = null;
         TimeSpan? latestOutputTime = null;
-        var diagnostics = new List<string>();
+        var progressParser = new FfmpegProgressBatchParser();
+        var progressGate = new object();
+        var diagnosticBuffer = new BoundedDiagnosticBuffer(
+            sanitize: line => BroadcastCredentialRedactor.Redact(line, destination));
+        _diagnostics.BeginAttempt(
+            attemptId,
+            plan.Items[startItemIndex],
+            startItemIndex,
+            launchReason);
         try
         {
             concatPath = await FfmpegConcatFile.CreateTemporaryAsync(
                 plan.Items.Skip(startItemIndex).Select(item => item.MediaPath), cancellationToken).ConfigureAwait(false);
             IReadOnlyList<string> arguments = BroadcastFfmpegArgumentBuilder.Build(concatPath, destination);
-            void HandleOutput(string line)
+            void HandleProgress(string line)
             {
-                string safe = Redact(line, destination);
-                if (FfmpegProgressParser.TryParseOutputTime(safe, out TimeSpan outputTime))
+                string safe = BroadcastCredentialRedactor.RedactDiagnosticLine(line, destination);
+                if (!FfmpegProgressParser.TryParseOutputTime(safe, out _)
+                    && !string.IsNullOrWhiteSpace(safe))
                 {
-                    latestOutputTime = outputTime;
-                    onProgress?.Invoke(outputTime);
+                    // Preserve the existing live console stream without treating stdout as
+                    // failure diagnostics or allowing it to consume the stderr buffer.
+                    onOutput?.Invoke(safe);
+                }
+
+                if (!progressParser.TryAddLine(line, out FfmpegProgressBatch? batch) || batch is null)
+                {
                     return;
                 }
+
+                _diagnostics.RecordProgress(attemptId, batch);
+                if (batch.OutputTime is TimeSpan outputTime)
+                {
+                    lock (progressGate)
+                    {
+                        latestOutputTime = outputTime;
+                    }
+
+                    onProgress?.Invoke(outputTime);
+                }
+            }
+
+            void HandleDiagnostic(string line)
+            {
+                string safe = BroadcastCredentialRedactor.RedactDiagnosticLine(line, destination);
+                diagnosticBuffer.Add(safe);
+                _diagnostics.RecordStandardError(attemptId, safe);
                 if (!string.IsNullOrWhiteSpace(safe))
                 {
-                    if (diagnostics.Count < 12) diagnostics.Add(safe);
                     onOutput?.Invoke(safe);
                 }
             }
+
             ProcessResult result = await _processRunner.RunAsync(new ProcessRequest(
                 _ffmpegPath,
                 arguments,
-                HandleOutput,
-                HandleOutput,
-                processId => observer?.OnEvent(new BroadcastRuntimeEvent(
-                    BroadcastRuntimeEventKind.FfmpegProcessStarted,
-                    FfmpegPid: processId)),
-                processId => observer?.OnEvent(new BroadcastRuntimeEvent(
-                    BroadcastRuntimeEventKind.FfmpegProcessStopped,
-                    FfmpegPid: processId))), cancellationToken).ConfigureAwait(false);
+                HandleProgress,
+                HandleDiagnostic,
+                processId =>
+                {
+                    _diagnostics.RecordProcessStarted(attemptId, processId);
+                    observer?.OnEvent(new BroadcastRuntimeEvent(
+                        BroadcastRuntimeEventKind.FfmpegProcessStarted,
+                        FfmpegPid: processId));
+                },
+                processId =>
+                {
+                    _diagnostics.RecordProcessStopped(attemptId);
+                    observer?.OnEvent(new BroadcastRuntimeEvent(
+                        BroadcastRuntimeEventKind.FfmpegProcessStopped,
+                        FfmpegPid: processId));
+                },
+                CaptureStandardOutput: false,
+                CaptureStandardError: false), cancellationToken).ConfigureAwait(false);
             // Only the parent cancellation state makes this a cancellation. In particular,
             // FFmpeg exit 255 without a requested token is an unexpected child failure.
             cancellationToken.ThrowIfCancellationRequested();
-            string diagnostic = string.Join(Environment.NewLine, diagnostics);
-            if (string.IsNullOrWhiteSpace(diagnostic)) diagnostic = Redact(result.StandardError, destination);
-            return new BroadcastAttemptResult(result.ExitCode, latestOutputTime, diagnostic, startItemIndex);
+            if (diagnosticBuffer.Snapshot().Count == 0 && !string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                foreach (string line in result.StandardError.Split(
+                    ['\r', '\n'],
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    diagnosticBuffer.Add(line);
+                }
+            }
+
+            IReadOnlyList<string> diagnosticLines = diagnosticBuffer.Snapshot();
+            string diagnostic = string.Join(Environment.NewLine, diagnosticLines);
+            _diagnostics.RecordProcessExit(
+                attemptId,
+                result.ExitCode,
+                cancelled: false,
+                diagnosticLines);
+            if (result.ExitCode == 0)
+            {
+                await FlushDiagnosticsAsync().ConfigureAwait(false);
+            }
+
+            lock (progressGate)
+            {
+                return new BroadcastAttemptResult(
+                    result.ExitCode,
+                    latestOutputTime,
+                    diagnostic,
+                    startItemIndex)
+                {
+                    AttemptId = attemptId,
+                };
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _diagnostics.RecordProcessExit(
+                attemptId,
+                exitCode: null,
+                cancelled: true,
+                diagnosticBuffer.Snapshot());
+            _diagnostics.RecordDecision(
+                attemptId,
+                BroadcastFailureKind.Cancelled,
+                BroadcastRetryDecision.Cancelled);
+            await FlushDiagnosticsAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch
+        {
+            _diagnostics.RecordProcessExit(
+                attemptId,
+                exitCode: null,
+                cancelled: false,
+                diagnosticBuffer.Snapshot());
+            _diagnostics.RecordDecision(
+                attemptId,
+                failureClassification: null,
+                BroadcastRetryDecision.LaunchFailed);
+            await FlushDiagnosticsAsync().ConfigureAwait(false);
+            throw;
         }
         finally
         {
             if (concatPath is not null && File.Exists(concatPath)) File.Delete(concatPath);
         }
     }
-
-    private static string Redact(string value, string secret) =>
-        value.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
 }

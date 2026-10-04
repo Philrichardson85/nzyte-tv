@@ -241,6 +241,12 @@ public sealed class BroadcastRecoveryTests
 
     private static string ConcatPath(string path) => Path.GetFullPath(path).Replace('\\', '/');
 
+    private static void EmitProgress(ProcessRequest request, TimeSpan progress)
+    {
+        request.OnStandardOutput?.Invoke($"out_time_us={(long)(progress.TotalMilliseconds * 1000)}");
+        request.OnStandardOutput?.Invoke("progress=continue");
+    }
+
     private sealed record Step(int ExitCode, TimeSpan? Progress, string? Diagnostic, Action? BeforeReturn = null);
 
     private sealed class SequencedRunner(params Step[] steps) : IProcessRunner
@@ -262,7 +268,7 @@ public sealed class BroadcastRecoveryTests
             Step step = _steps.Dequeue();
             if (step.Progress is not null)
             {
-                request.OnStandardOutput?.Invoke($"out_time_us={(long)(step.Progress.Value.TotalMilliseconds * 1000)}");
+                EmitProgress(request, step.Progress.Value);
             }
             if (step.Diagnostic is not null) request.OnStandardError?.Invoke(step.Diagnostic);
             step.BeforeReturn?.Invoke();
@@ -283,9 +289,9 @@ public sealed class BroadcastRecoveryTests
         public Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken)
         {
             request.OnStarted?.Invoke(5001);
-            request.OnStandardOutput?.Invoke("out_time_us=1000000");
-            request.OnStandardOutput?.Invoke("out_time_us=11000000");
-            request.OnStandardOutput?.Invoke("out_time_us=35000000");
+            EmitProgress(request, TimeSpan.FromSeconds(1));
+            EmitProgress(request, TimeSpan.FromSeconds(11));
+            EmitProgress(request, TimeSpan.FromSeconds(35));
             request.OnExited?.Invoke(5001);
             return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
         }
@@ -296,10 +302,10 @@ public sealed class BroadcastRecoveryTests
         public Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken)
         {
             request.OnStarted?.Invoke(5002);
-            request.OnStandardOutput?.Invoke("out_time_us=11000000");
-            request.OnStandardOutput?.Invoke("out_time_us=11000000");
-            request.OnStandardOutput?.Invoke("out_time_us=35000000");
-            request.OnStandardOutput?.Invoke("out_time_us=35000000");
+            EmitProgress(request, TimeSpan.FromSeconds(11));
+            EmitProgress(request, TimeSpan.FromSeconds(11));
+            EmitProgress(request, TimeSpan.FromSeconds(35));
+            EmitProgress(request, TimeSpan.FromSeconds(35));
             request.OnExited?.Invoke(5002);
             return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));
         }

@@ -179,7 +179,7 @@ Checkpoint 3B2-A consumes those blocks without mutating them. A separate schema-
 
 `broadcast` validates one or more generated schema-version-1 playlists and plays them sequentially from the normalized library. It uses an FFmpeg concat input with real-time pacing, `-c copy`, and FLV output, so playback does not re-encode or filter media. Library-relative paths are resolved safely beneath the supplied root; missing MP4 files, missing technical manifests, traversal attempts, malformed playlists, and invalid sequences prevent broadcast startup.
 
-The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never displayed. `--dry-run` does not require the variable and does not launch FFmpeg. Pressing Ctrl+C cancels and terminates the FFmpeg child process. See [broadcasting.md](docs/broadcasting.md) for setup and usage.
+The RTMP/RTMPS destination is read only from `NZYTE_TV_RTMP_URL` and is never displayed. `--dry-run` does not require the variable and does not launch FFmpeg. Pressing Ctrl+C cancels and terminates the FFmpeg child process. Optional advisory local attempt diagnostics can be written atomically by setting `NZYTE_TV_BROADCAST_DIAGNOSTICS_PATH`; they remain separate from station and rolling authority and do not imply YouTube or viewer health. See [broadcasting.md](docs/broadcasting.md) for setup and usage.
 
 ### Station supervisor and durable resume
 
