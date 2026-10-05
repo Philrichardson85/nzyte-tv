@@ -23,6 +23,9 @@ public sealed class ProductionCutoverDeploymentTests
             "ExecStart=/opt/nzyte-tv/production/nzyte-tv-production-launch.sh",
             station,
             StringComparison.Ordinal);
+        Assert.Contains("KillSignal=SIGINT", station, StringComparison.Ordinal);
+        Assert.Contains("KillMode=mixed", station, StringComparison.Ordinal);
+        Assert.Contains("TimeoutStopSec=90", station, StringComparison.Ordinal);
         Assert.DoesNotContain("station run --config", station, StringComparison.Ordinal);
 
         Assert.Contains("E3_TARGET_SERVICE=nzyte-tv.service", recovery, StringComparison.Ordinal);
@@ -88,6 +91,9 @@ public sealed class ProductionCutoverDeploymentTests
         Assert.Contains("sudo test ! -e /var/lib/nzyte-tv/rolling-state.json", runbook, StringComparison.Ordinal);
         Assert.Contains("Do **not** run `programming rolling init`", runbook, StringComparison.Ordinal);
         Assert.Contains("Do not edit `/etc/nzyte-tv/station.json`", runbook, StringComparison.Ordinal);
+        Assert.Contains("KillSignal=SIGINT", runbook, StringComparison.Ordinal);
+        Assert.Contains("KillMode=mixed", runbook, StringComparison.Ordinal);
+        Assert.Contains("TimeoutStopSec=90", runbook, StringComparison.Ordinal);
 
         int stop = runbook.IndexOf("rollback-stop-production", StringComparison.Ordinal);
         int restore = runbook.IndexOf(

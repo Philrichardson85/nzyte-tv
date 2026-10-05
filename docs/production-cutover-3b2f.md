@@ -239,6 +239,8 @@ sudo systemd-analyze verify \
   /etc/nzyte-tv/3b2f-candidate-units/nzyte-tv-boot-reconnect.timer
 ```
 
+The production unit deliberately matches the accepted test service's graceful-stop contract: `KillSignal=SIGINT`, `KillMode=mixed`, and `TimeoutStopSec=90`. The application converts `SIGINT` into cancellation, stops its FFmpeg child, and persists the CP2 and rolling stopped states. `mixed` lets the application perform that coordinated shutdown before systemd applies a final cgroup kill if the 90-second bound expires.
+
 Seed production recovery with the current boot ID before any production timer can be enabled:
 
 ```bash
@@ -299,7 +301,13 @@ sudo install -o root -g root -m 0644 \
 sudo systemctl daemon-reload
 systemctl is-enabled nzyte-tv.service
 systemctl is-enabled nzyte-tv-boot-reconnect.timer
+systemctl show nzyte-tv.service \
+  --property=KillSignal \
+  --property=KillMode \
+  --property=TimeoutStopUSec
 ```
+
+Require the shutdown properties to resolve to `SIGINT` (signal 2), `mixed`, and 90 seconds before continuing.
 
 Both must still report `disabled`.
 

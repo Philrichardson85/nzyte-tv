@@ -11,6 +11,9 @@ Group=u24
 EnvironmentFile=/etc/nzyte-tv/secrets.env
 Environment=NZYTE_TV_BROADCAST_DIAGNOSTICS_PATH=/var/lib/nzyte-tv/broadcast-diagnostics.json
 ExecStart=/opt/nzyte-tv/production/nzyte-tv-production-launch.sh
+KillSignal=SIGINT
+KillMode=mixed
+TimeoutStopSec=90
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=78
