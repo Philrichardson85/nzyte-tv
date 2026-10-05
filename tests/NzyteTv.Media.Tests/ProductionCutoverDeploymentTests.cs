@@ -71,6 +71,8 @@ public sealed class ProductionCutoverDeploymentTests
         Assert.DoesNotContain("pgrep -a", handoff, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rtmp://", handoff, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rtmps://", handoff, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/etc/nzyte-tv/3b2d-test.env", launch, StringComparison.Ordinal);
+        Assert.DoesNotContain("/etc/nzyte-tv/3b2d-test.env", handoff, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,6 +103,68 @@ public sealed class ProductionCutoverDeploymentTests
             StringComparison.Ordinal);
         int startTest = runbook.IndexOf("rollback-start-test", StringComparison.Ordinal);
         Assert.True(stop >= 0 && restore > stop && startTest > restore);
+    }
+
+    [Fact]
+    public void Runbook_RequiresSecretSafeDestinationPreflightBeforeExclusiveHandoff()
+    {
+        string root = FindRepositoryRoot();
+        string runbook = File.ReadAllText(Path.Combine(root, "docs", "production-cutover-3b2f.md"));
+
+        int productionFileCheck = runbook.IndexOf(
+            "sudo test -s /etc/nzyte-tv/secrets.env",
+            StringComparison.Ordinal);
+        int testFileCheck = runbook.IndexOf(
+            "sudo test -s /etc/nzyte-tv/3b2d-test.env",
+            StringComparison.Ordinal);
+        int equalityGuard = runbook.IndexOf(
+            "sudo cmp -s",
+            testFileCheck,
+            StringComparison.Ordinal);
+        int comparedProductionFile = runbook.IndexOf(
+            "/etc/nzyte-tv/secrets.env",
+            equalityGuard,
+            StringComparison.Ordinal);
+        int comparedTestFile = runbook.IndexOf(
+            "/etc/nzyte-tv/3b2d-test.env",
+            comparedProductionFile,
+            StringComparison.Ordinal);
+        int privilegedValidation = runbook.IndexOf(
+            "sudo bash -c '",
+            comparedTestFile,
+            StringComparison.Ordinal);
+        int productionEnvironmentLoad = runbook.IndexOf(
+            ". /etc/nzyte-tv/secrets.env",
+            privilegedValidation,
+            StringComparison.Ordinal);
+        int loadedValidation = runbook.IndexOf(
+            "station rolling validate",
+            productionEnvironmentLoad,
+            StringComparison.Ordinal);
+        int exclusiveHandoff = runbook.IndexOf(
+            "sudo /opt/nzyte-tv/production/nzyte-tv-production-handoff.sh cutover",
+            StringComparison.Ordinal);
+
+        Assert.True(productionFileCheck >= 0);
+        Assert.True(testFileCheck > productionFileCheck);
+        Assert.True(equalityGuard > testFileCheck);
+        Assert.True(comparedProductionFile > equalityGuard);
+        Assert.True(comparedTestFile > comparedProductionFile);
+        Assert.True(privilegedValidation > comparedTestFile);
+        Assert.True(productionEnvironmentLoad > privilegedValidation);
+        Assert.True(loadedValidation > productionEnvironmentLoad);
+        Assert.True(exclusiveHandoff > loadedValidation);
+        Assert.Contains(
+            "Destination env: CONFIGURED / VALID",
+            runbook,
+            StringComparison.Ordinal);
+        Assert.Contains("NEVER `cat` either environment file", runbook, StringComparison.Ordinal);
+        Assert.Contains("NEVER print `NZYTE_TV_RTMP_URL`", runbook, StringComparison.Ordinal);
+        Assert.Contains("must **STOP the cutover**", runbook, StringComparison.Ordinal);
+        Assert.Contains(
+            "Do not copy, synchronize, or automatically overwrite either file",
+            runbook,
+            StringComparison.Ordinal);
     }
 
     [E3ShellFact]

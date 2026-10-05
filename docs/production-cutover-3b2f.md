@@ -280,6 +280,37 @@ sudo test ! -e /var/lib/nzyte-tv/rolling-state.json
 sudo test ! -e /var/lib/nzyte-tv/rolling-state.json.replenishment.json
 ```
 
+Require both destination environment files to exist, be non-empty, and match exactly without displaying their contents. Exact comparison is intentional for this deployment: production and the accepted 3B2-D station publish to the same accepted destination.
+
+```bash
+sudo test -s /etc/nzyte-tv/secrets.env
+sudo test -s /etc/nzyte-tv/3b2d-test.env
+sudo cmp -s \
+  /etc/nzyte-tv/secrets.env \
+  /etc/nzyte-tv/3b2d-test.env
+```
+
+Any missing, empty, or mismatched file must **STOP the cutover** for operator investigation. Do not copy, synchronize, or automatically overwrite either file as part of this generic runbook.
+
+Validate the reviewed production candidate again with the actual production environment loaded:
+
+```bash
+sudo bash -c '
+    set -e
+    set -a
+    . /etc/nzyte-tv/secrets.env
+    set +a
+
+    exec /opt/nzyte-tv/releases/v0.5.0-3b2f-candidate/nzytetv \
+        station rolling validate \
+        --config /etc/nzyte-tv/rolling-station.json
+'
+```
+
+Require configuration `VALID`, static station `VALID`, planner manifest `VALID`, FFmpeg `AVAILABLE`, `Destination env: CONFIGURED / VALID`, buffer `HEALTHY`, and overall `READY`. Before first rolling execution, rolling execution `UNINITIALIZED` remains expected.
+
+NEVER `cat` either environment file. NEVER print `NZYTE_TV_RTMP_URL`. NEVER place either secret in shell tracing, process arguments, diagnostics, evidence, logs, Git, or test output. Do not enable shell tracing around the validation command.
+
 Expected service/count results remain production disabled/inactive, production recovery absent or disabled, test active, test recovery enabled, and counts `1`/`1`. Record safe `systemctl show` properties, the hashes, planner status, rolling validation, CP2 status, and PID counts in the timestamped evidence directory. Do not capture environment contents, process command lines, raw FFmpeg stderr, or unfiltered journals.
 
 ## Controlled cutover
@@ -379,6 +410,14 @@ The outcome must remain `seeded`; enabling the timer on this boot must not resta
 
 For reboot acceptance, capture the boot ID, safe systemd properties, rolling status, checksums, PID counts, and allowlisted E1 reader output before reboot. After at least 220 seconds, require one production recovery outcome for the new boot, production active, test disabled, one owned application/FFmpeg pair, advancing rolling execution, intact committed blocks, two future blocks, and viewer-confirmed video/audio. Repeat on a second later reboot. Do not accept merely because the timer fired or ingest is healthy.
 
+## Checkpoint acceptance result and lesson
+
+The first exclusive production cutover failed because the production destination configuration had drifted from the accepted working 3B2-D destination. FFmpeg repeatedly exited before producing any progress batches and reported output-opening failures. The handoff helper correctly failed safe, stopped production, and rollback restored the accepted test broadcaster and viewer-facing video/audio.
+
+The old production destination was preserved as restricted failure evidence. After an operator reviewed and corrected the destination without displaying its value, the same reviewed application candidate completed the exclusive cutover successfully. Production rolling execution, replenishment, diagnostics, service isolation, and viewer-facing video/audio passed. Two subsequent production reboot/recovery acceptances also passed with one guarded reconnection per boot and manually confirmed video/audio.
+
+During the second reboot acceptance, YouTube briefly reported poor ingest before returning to excellent without intervention. A contemporaneous 30-second local FFmpeg sample remained at normal speed with no dropped, duplicate, or stagnant progress reports and low Pi resource use. This was accepted as transient post-reconnect ingest stabilization, not proof of an encoder failure.
+
 ## Rollback
 
 Rollback is deliberately split so no test process starts until production recovery is disabled and inactive and the production broadcaster is stopped and verified gone.
@@ -473,4 +512,5 @@ Do not create `v0.5.0` during preparation or initial cutover. A release decision
 - E1 writes progress periodically; the recovery guard waits 35 seconds for two persisted observations and consumes the boot attempt on an inconclusive result.
 - Global exact-name process checks require the production Pi to run no unrelated `nzytetv` or FFmpeg process.
 - A controlled restart or CP2 resume restarts the current asset from its beginning.
-- The staged unit hardening, ARM64 publication, systemd ordering, and full rollback still require Raspberry Pi execution; local tests mock systemd and processes.
+- Brief post-reconnect YouTube ingest stabilization may occur even while local FFmpeg diagnostics remain healthy. Viewer-facing moving video and audible audio confirmation remains mandatory for reboot acceptance.
+- Unit hardening, ARM64 publication, systemd ordering, exclusive cutover, failed-cutover rollback, and two production reboot recoveries have now been executed and accepted on the Raspberry Pi for the reviewed 3B2-F application.
