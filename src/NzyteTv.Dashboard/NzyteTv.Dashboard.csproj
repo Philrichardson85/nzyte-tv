@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NzyteTv.Core\NzyteTv.Core.csproj" />
+    <ProjectReference Include="..\NzyteTv.Media\NzyteTv.Media.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>nzytetv-dashboard</AssemblyName>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>3b3-a</VersionSuffix>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NzyteTv.Dashboard.Tests" />
+  </ItemGroup>
+
+</Project>

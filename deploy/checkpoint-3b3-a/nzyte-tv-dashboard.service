@@ -1,0 +1,35 @@
+[Unit]
+Description=NZYTE TV Read-Only Operations Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=u24
+Group=u24
+WorkingDirectory=/opt/nzyte-tv/dashboard
+ExecStart=/opt/nzyte-tv/dashboard/nzytetv-dashboard
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=Dashboard__Port=5080
+Environment=Dashboard__StationStatePath=/var/lib/nzyte-tv/state.json
+Environment=Dashboard__RollingStatePath=/var/lib/nzyte-tv/rolling-state.json
+Environment=Dashboard__ReplenishmentStatePath=/var/lib/nzyte-tv/rolling-state.json.replenishment.json
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/var/lib/nzyte-tv
+InaccessiblePaths=-/etc/nzyte-tv -/var/lib/nzyte-tv/broadcast-diagnostics.json
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

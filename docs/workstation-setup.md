@@ -297,6 +297,21 @@ Bash:
 
 Publishing for the wrong architecture can produce an application that cannot start on the target machine. See [Raspberry Pi setup](raspberry-pi-setup.md) for Pi-specific mounting, candidate deployment, and rollback guidance.
 
+### Publish the separate read-only dashboard
+
+Checkpoint 3B3-A uses a separate ASP.NET Core executable. Publish it to a different output directory from the broadcaster:
+
+```bash
+dotnet publish \
+  src/NzyteTv.Dashboard/NzyteTv.Dashboard.csproj \
+  -c Release \
+  -r linux-arm64 \
+  --self-contained true \
+  -o artifacts/publish/dashboard-linux-arm64
+```
+
+The dashboard binds only to `127.0.0.1:5080` by default and does not replace or host inside `/opt/nzyte-tv/app/nzytetv`. This command creates workstation staging output; it does not install or start the candidate systemd unit. A later deployment or upgrade must use an operator-reviewed staged procedure rather than publishing over a live dashboard directory. See [Read-only web dashboard](dashboard.md) for the state boundary and SSH access.
+
 ## Updating NZYTE TV
 
 Updating differs depending on whether the checkout tracks `main` or is pinned to a release tag.

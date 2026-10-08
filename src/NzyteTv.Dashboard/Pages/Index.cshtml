@@ -1,0 +1,97 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Operations Dashboard";
+}
+
+<main class="dashboard" data-refresh-interval-ms="@Model.RefreshIntervalMilliseconds">
+    <header class="masthead">
+        <div>
+            <p class="eyebrow">Operations dashboard</p>
+            <h1>NZYTE TV</h1>
+            <p class="version">Dashboard version <span id="dashboard-version">@Model.Snapshot.Dashboard.Version</span></p>
+        </div>
+        <div class="overall-status" id="overall-status" data-station-state="@Model.Snapshot.Station.Status.ToString().ToLowerInvariant()">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div>
+                <span class="status-label">Local station</span>
+                <strong id="overall-station">@IndexModel.Display(Model.Snapshot.Station.Status)</strong>
+            </div>
+        </div>
+        <div class="refresh-summary" aria-live="polite">
+            <span id="refresh-state">Automatic refresh active</span>
+            <span>Snapshot quality: <strong id="snapshot-quality">@IndexModel.Display(Model.Snapshot.Quality)</strong></span>
+            <span>Snapshot age: <strong id="snapshot-age">0s</strong></span>
+            <time id="last-refreshed" datetime="@Model.Snapshot.ObservedAtUtc.ToString("O")">
+                @Model.Snapshot.ObservedAtUtc.ToLocalTime().ToString("g")
+            </time>
+        </div>
+    </header>
+
+    <section class="status-grid" aria-label="Station status">
+        <article class="panel">
+            <div class="panel-heading">
+                <h2>Station</h2>
+                <span class="pill" id="station-availability">@IndexModel.Display(Model.Snapshot.Station.Availability)</span>
+            </div>
+            <dl>
+                <div><dt>Status</dt><dd id="station-status">@IndexModel.Display(Model.Snapshot.Station.Status)</dd></div>
+                <div><dt>Process evidence</dt><dd id="station-process">@IndexModel.Display(Model.Snapshot.Station.ProcessEvidence)</dd></div>
+                <div><dt>Heartbeat</dt><dd id="station-heartbeat">@IndexModel.DisplayTimestamp(Model.Snapshot.Station.HeartbeatAtUtc)</dd></div>
+                <div><dt>Heartbeat age</dt><dd id="heartbeat-age">@IndexModel.DisplayAge(Model.Snapshot.Station.HeartbeatAgeSeconds)</dd></div>
+                <div><dt>Session uptime</dt><dd id="session-uptime">@IndexModel.DisplayDuration(Model.Snapshot.Station.SessionUptimeSeconds)</dd></div>
+            </dl>
+        </article>
+
+        <article class="panel">
+            <div class="panel-heading">
+                <h2>Broadcast</h2>
+                <span class="pill" id="broadcast-state">@IndexModel.Display(Model.Snapshot.Broadcast.State)</span>
+            </div>
+            <dl>
+                <div><dt>Local state</dt><dd id="broadcast-local-state">@IndexModel.Display(Model.Snapshot.Broadcast.State)</dd></div>
+                <div><dt>FFmpeg</dt><dd id="ffmpeg-state">@IndexModel.Display(Model.Snapshot.Broadcast.FfmpegState)</dd></div>
+                <div><dt>Recovery attempts</dt><dd id="recovery-attempts">@IndexModel.DisplayNumber(Model.Snapshot.Broadcast.RecoveryAttempts)</dd></div>
+            </dl>
+        </article>
+
+        <article class="panel now-playing">
+            <div class="panel-heading">
+                <h2>Now Playing</h2>
+                <span class="pill" id="playback-availability">@IndexModel.Display(Model.Snapshot.Playback.Availability)</span>
+            </div>
+            <p class="media-title" id="playback-title">@(Model.Snapshot.Playback.Title ?? "Unavailable")</p>
+            <dl>
+                <div><dt>Item type</dt><dd id="playback-type">@(Model.Snapshot.Playback.ItemType ?? "Unavailable")</dd></div>
+                <div><dt>Queue position</dt><dd id="queue-position">@IndexModel.DisplayQueuePosition(Model.Snapshot.Playback)</dd></div>
+            </dl>
+        </article>
+
+        <article class="panel programming">
+            <div class="panel-heading">
+                <h2>Programming</h2>
+                <span class="pill" id="rolling-availability">@IndexModel.Display(Model.Snapshot.Rolling.Availability)</span>
+            </div>
+            <dl>
+                <div><dt>Rolling phase</dt><dd id="rolling-phase">@IndexModel.Display(Model.Snapshot.Rolling.Phase)</dd></div>
+                <div><dt>Active block</dt><dd id="active-block">@IndexModel.DisplayNumber(Model.Snapshot.Rolling.ActiveBlockSequence)</dd></div>
+                <div><dt>Last completed</dt><dd id="last-completed-block">@IndexModel.DisplayNumber(Model.Snapshot.Rolling.LastCompletedBlockSequence)</dd></div>
+                <div><dt>Next required</dt><dd id="next-required-block">@IndexModel.DisplayNumber(Model.Snapshot.Rolling.NextRequiredBlockSequence)</dd></div>
+                <div><dt>Committed future</dt><dd id="future-block-count">@IndexModel.DisplayNumber(Model.Snapshot.Rolling.CommittedFutureBlockCount)</dd></div>
+                <div><dt>Future target</dt><dd id="future-block-target">@IndexModel.Display(Model.Snapshot.Rolling.FutureBlockTarget)</dd></div>
+                <div><dt>Buffer deficit</dt><dd id="buffer-deficit">@IndexModel.DisplayNumber(Model.Snapshot.Rolling.BufferDeficit)</dd></div>
+                <div><dt>Buffer health</dt><dd id="buffer-health">@IndexModel.Display(Model.Snapshot.Rolling.BufferHealth)</dd></div>
+                <div><dt>Replenishment</dt><dd id="replenishment-health">@IndexModel.Display(Model.Snapshot.Rolling.ReplenishmentHealth)</dd></div>
+            </dl>
+        </article>
+    </section>
+
+    <aside class="information-note">
+        <strong>Local status only.</strong>
+        Broadcast status reflects the local NZYTE TV broadcaster. Public YouTube playback is not independently verified.
+    </aside>
+
+    <footer>
+        <span>Issues: <strong id="issue-count">@Model.Snapshot.Issues.Count</strong></span>
+    </footer>
+</main>

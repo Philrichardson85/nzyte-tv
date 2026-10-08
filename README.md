@@ -2,9 +2,9 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks. Checkpoint 3B2-A adds an opt-in coordinator that safely claims and hands those immutable blocks to the unchanged station supervisor. Checkpoint 3B2-B runs that accepted planner asynchronously beside rolling execution to maintain two committed future blocks. Encoding remains independent from metadata, scheduling, and playback.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks. Checkpoint 3B2-A adds an opt-in coordinator that safely claims and hands those immutable blocks to the unchanged station supervisor. Checkpoint 3B2-B runs that accepted planner asynchronously beside rolling execution to maintain two committed future blocks. Checkpoint 3B3-A adds a separate loopback-only, read-only operations dashboard without changing the broadcaster process. Encoding remains independent from metadata, scheduling, playback, and dashboard presentation.
 
-Persistent FFmpeg ingest across block boundaries, dynamic queue append, API health monitoring, and alerts remain out of scope. The accepted isolated station has completed rolling handoff, replenishment, diagnostics, and boot-recovery acceptance. Checkpoint 3B2-F supplies reviewed-candidate production units and a cutover/rollback runbook, but those assets are not deployed and do not change the existing static production service until an operator performs the separately approved cutover.
+Persistent FFmpeg ingest across block boundaries, dynamic queue append, public YouTube API health monitoring, and alerts remain out of scope. The accepted isolated station has completed rolling handoff, replenishment, diagnostics, and boot-recovery acceptance. Checkpoint 3B2-F supplies reviewed-candidate production units and a cutover/rollback runbook, but those assets are not deployed and do not change the existing static production service until an operator performs the separately approved cutover.
 
 ## Operating NZYTE TV
 
@@ -25,6 +25,7 @@ Focused references:
 - [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
+- [Read-only web dashboard](docs/dashboard.md)
 
 ## Setup
 

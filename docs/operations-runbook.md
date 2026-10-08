@@ -40,6 +40,8 @@ The commands have five broad responsibilities:
 
 These responsibilities are deliberately separate. Metadata never encodes media. Playlist generation never changes media. Broadcast never repairs or transcodes media.
 
+Checkpoint 3B3-A adds a sixth, isolated responsibility: the read-only operations dashboard presents a sanitized view of accepted runtime state. It does not control the broadcaster and does not independently verify public YouTube playback. See [Read-only web dashboard](dashboard.md).
+
 ## 2. Safety rules before starting
 
 1. Never put a YouTube stream key, password, GitHub token, or other credential in Git, documentation, a playlist, or a command argument.
@@ -48,6 +50,7 @@ These responsibilities are deliberately separate. Metadata never encodes media. 
 4. Do not edit `/etc/fstab` until `lsblk -f` confirms the correct drive UUID and filesystem.
 5. If `git status --short` shows changes you do not understand, stop before switching branches or pulling.
 6. If a validation command reports an error, stop and fix it rather than continuing to the live broadcast step.
+7. Treat the dashboard as local evidence only. `BROADCASTING` means the local NZYTE TV process reports broadcasting; it does not prove that public viewers are receiving video or audio.
 
 ## 3. PowerShell and Bash are different
 
