@@ -9,6 +9,23 @@ public sealed class ProgrammingWorkflowTests
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void ProgrammingPaths_ComposesCatalogConfigurationAndLibraryUnderMediaRoot()
+    {
+        string mediaRoot = Path.Combine(Path.GetTempPath(), "nzytetv-production-media-root");
+
+        ProgrammingPaths paths = ProgrammingPaths.FromMediaRoot(mediaRoot);
+
+        Assert.Equal(Path.GetFullPath(mediaRoot), paths.MediaRoot);
+        Assert.Equal(Path.Combine(Path.GetFullPath(mediaRoot), "library"), paths.LibraryRoot);
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(mediaRoot), "catalog", "song-catalog.json"),
+            paths.CatalogPath);
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(mediaRoot), "catalog", "programming.json"),
+            paths.ConfigurationPath);
+    }
+
+    [Fact]
     public async Task Store_RoundTripsSchemaAndWritesAtomically()
     {
         using var fixture = new ProgrammingFixture();
@@ -173,6 +190,139 @@ public sealed class ProgrammingWorkflowTests
                 true,
                 null,
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Service_FailedAtomicCampaignWriteLeavesPriorConfigurationReadable()
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var goodStore = new ProgrammingConfigurationStore();
+        await goodStore.WriteAsync(
+            fixture.ConfigurationPath,
+            ProgrammingConfiguration.CreateDefault(),
+            CancellationToken.None);
+        var service = new ProgrammingService(
+            new ProgrammingConfigurationStore(new ThrowingWriter()));
+
+        await Assert.ThrowsAsync<IOException>(() => service.SetCampaignAsync(
+            fixture.Root,
+            "song-a",
+            2.0,
+            expectedRevision: 1,
+            CancellationToken.None));
+
+        ProgrammingConfiguration persisted = goodStore.Load(fixture.ConfigurationPath);
+        Assert.Equal(1, persisted.Revision);
+        Assert.False(persisted.ActiveCampaign!.Enabled);
+    }
+
+    [Theory]
+    [InlineData(0.1)]
+    [InlineData(10.0)]
+    public async Task Service_CampaignAcceptsWeightBoundaries(double weight)
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var service = new ProgrammingService();
+        await service.InitializeAsync(fixture.Root, CancellationToken.None);
+
+        ProgrammingMutationResult result = await service.SetCampaignAsync(
+            fixture.Root, "song-a", weight, expectedRevision: 1, CancellationToken.None);
+
+        Assert.Equal(weight, result.Configuration.ActiveCampaign!.WeightMultiplier);
+        Assert.Equal(2, result.Configuration.Revision);
+    }
+
+    [Theory]
+    [InlineData(0.09)]
+    [InlineData(10.01)]
+    public async Task Service_CampaignRejectsWeightsOutsideBoundaries(double weight)
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var service = new ProgrammingService();
+        await service.InitializeAsync(fixture.Root, CancellationToken.None);
+
+        await Assert.ThrowsAsync<ProgrammingConfigurationValidationException>(() =>
+            service.SetCampaignAsync(
+                fixture.Root, "song-a", weight, expectedRevision: 1, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Service_ExpectedRevisionMutationPreservesUnrelatedConfigurationAndIncrementsOnce()
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var store = new ProgrammingConfigurationStore();
+        ProgrammingConfiguration original = ProgrammingConfiguration.CreateDefault() with
+        {
+            Revision = 7,
+            ReleaseAgeHotRotationEnabled = false,
+            AssetOverrides = new Dictionary<string, AssetEditorialOverride>
+            {
+                ["asset-a"] = new() { WeightMultiplier = 1.5 },
+            },
+        };
+        await store.WriteAsync(fixture.ConfigurationPath, original, CancellationToken.None);
+
+        ProgrammingMutationResult result = await new ProgrammingService().SetCampaignAsync(
+            fixture.Root, "song-a", 2.5, expectedRevision: 7, CancellationToken.None);
+
+        Assert.Equal(8, result.Configuration.Revision);
+        Assert.False(result.Configuration.ReleaseAgeHotRotationEnabled);
+        Assert.Equal(original.AssetOverrides, result.Configuration.AssetOverrides);
+        Assert.Equal(original.Repetition, result.Configuration.Repetition);
+        Assert.Equal(
+            original.Personalities!.Select(personality => personality.Name),
+            result.Configuration.Personalities!.Select(personality => personality.Name));
+        Assert.Equal(
+            original.Personalities!.SelectMany(personality => personality.Lanes!),
+            result.Configuration.Personalities!.SelectMany(personality => personality.Lanes!));
+    }
+
+    [Fact]
+    public async Task Service_StaleExpectedRevisionDoesNotWrite()
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var service = new ProgrammingService();
+        await service.InitializeAsync(fixture.Root, CancellationToken.None);
+
+        await Assert.ThrowsAsync<ProgrammingConfigurationConflictException>(() =>
+            service.SetCampaignAsync(
+                fixture.Root, "song-a", 2.0, expectedRevision: 99, CancellationToken.None));
+
+        Assert.Equal(1, new ProgrammingConfigurationStore().Load(fixture.ConfigurationPath).Revision);
+    }
+
+    [Fact]
+    public async Task Service_SimultaneousSameRevisionMutationsAllowExactlyOneWinner()
+    {
+        using var fixture = new ProgrammingFixture();
+        await fixture.PrepareInventoryAsync();
+        var serviceA = new ProgrammingService();
+        var serviceB = new ProgrammingService();
+        await serviceA.InitializeAsync(fixture.Root, CancellationToken.None);
+
+        Task<ProgrammingMutationResult> first = serviceA.SetCampaignAsync(
+            fixture.Root, "song-a", 2.0, expectedRevision: 1, CancellationToken.None);
+        Task<ProgrammingMutationResult> second = serviceB.SetCampaignAsync(
+            fixture.Root, "song-b", 3.0, expectedRevision: 1, CancellationToken.None);
+        Task[] tasks = [first, second];
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (ProgrammingConfigurationConflictException)
+        {
+            // Expected for the request that acquires the cross-process lease second.
+        }
+
+        Assert.Equal(1, tasks.Count(task => task.Status == TaskStatus.RanToCompletion));
+        Assert.Equal(1, tasks.Count(task =>
+            task.Exception?.InnerException is ProgrammingConfigurationConflictException));
+        Assert.Equal(2, new ProgrammingConfigurationStore().Load(fixture.ConfigurationPath).Revision);
     }
 
     [Fact]

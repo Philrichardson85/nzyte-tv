@@ -2,9 +2,13 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Antiforgery;
 using NzyteTv.Dashboard.Configuration;
+using NzyteTv.Dashboard.Http;
+using NzyteTv.Dashboard.Operations;
 using NzyteTv.Dashboard.Status;
 using NzyteTv.Media;
+using NzyteTv.Operations.Contracts;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 DashboardHostConfiguration.RejectAlternativeListeners(builder.Configuration);
@@ -17,6 +21,14 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 builder.Services.AddRazorPages();
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Name = "NzyteTvDashboardAntiforgery";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.None;
+    options.HeaderName = "X-NZYTE-TV-CSRF";
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -40,6 +52,7 @@ builder.Services.AddSingleton<IDashboardStatusProvider>(services =>
     services.GetRequiredService<DashboardStatusCache>());
 builder.Services.AddHostedService(services =>
     services.GetRequiredService<DashboardStatusCache>());
+builder.Services.AddSingleton<IOperationsHelperClient, OperationsHelperClient>();
 
 WebApplication app = builder.Build();
 
@@ -56,7 +69,10 @@ app.Use(async (context, next) =>
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
         return Task.CompletedTask;
     });
-    if (!HttpMethods.IsGet(context.Request.Method))
+    bool spotlightMutation = HttpMethods.IsPost(context.Request.Method)
+        && (context.Request.Path.Equals("/api/v1/programming/spotlight")
+            || context.Request.Path.Equals("/api/v1/programming/spotlight/disable"));
+    if (!HttpMethods.IsGet(context.Request.Method) && !spotlightMutation)
     {
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         context.Response.Headers.Allow = "GET";
@@ -81,8 +97,106 @@ app.MapGet("/healthz", (HttpContext context) =>
     return Results.Text("dashboard-ok", "text/plain");
 });
 
+app.MapGet("/api/v1/programming/spotlight", async (
+    HttpContext context,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return await ExecuteHelperAsync(
+        () => client.GetSpotlightAsync(cancellationToken)).ConfigureAwait(false);
+});
+
+app.MapPost("/api/v1/programming/spotlight", async (
+    HttpContext context,
+    IAntiforgery antiforgery,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) => await ExecuteMutationAsync(
+    context,
+    antiforgery,
+    async () =>
+    {
+        SetSpotlightRequest request = await StrictJsonRequestReader.ReadAsync<SetSpotlightRequest>(
+            context.Request,
+            cancellationToken).ConfigureAwait(false);
+        return await client.SetSpotlightAsync(request, cancellationToken).ConfigureAwait(false);
+    }).ConfigureAwait(false));
+
+app.MapPost("/api/v1/programming/spotlight/disable", async (
+    HttpContext context,
+    IAntiforgery antiforgery,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) => await ExecuteMutationAsync(
+    context,
+    antiforgery,
+    async () =>
+    {
+        DisableSpotlightRequest request = await StrictJsonRequestReader.ReadAsync<DisableSpotlightRequest>(
+            context.Request,
+            cancellationToken).ConfigureAwait(false);
+        return await client.DisableSpotlightAsync(request, cancellationToken).ConfigureAwait(false);
+    }).ConfigureAwait(false));
+
 app.MapRazorPages();
 
 app.Run();
+
+static async Task<IResult> ExecuteMutationAsync(
+    HttpContext context,
+    IAntiforgery antiforgery,
+    Func<Task<SpotlightStateResponse>> action)
+{
+    context.Response.Headers.CacheControl = "no-store";
+    try
+    {
+        await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        return Results.Ok(await action().ConfigureAwait(false));
+    }
+    catch (AntiforgeryValidationException)
+    {
+        return Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.ValidationFailed);
+    }
+    catch (DashboardUnsupportedContentTypeException)
+    {
+        return Error(StatusCodes.Status415UnsupportedMediaType, OperationsErrorCodes.UnsupportedContentType);
+    }
+    catch (DashboardRequestTooLargeException)
+    {
+        return Error(StatusCodes.Status413PayloadTooLarge, OperationsErrorCodes.RequestTooLarge);
+    }
+    catch (DashboardMalformedRequestException)
+    {
+        return Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.MalformedRequest);
+    }
+    catch (OperationsHelperException exception)
+    {
+        return MapHelperError(exception);
+    }
+}
+
+static async Task<IResult> ExecuteHelperAsync(Func<Task<SpotlightStateResponse>> action)
+{
+    try
+    {
+        return Results.Ok(await action().ConfigureAwait(false));
+    }
+    catch (OperationsHelperException)
+    {
+        return Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.HelperUnavailable);
+    }
+}
+
+static IResult MapHelperError(OperationsHelperException exception) => exception.Code switch
+{
+    OperationsErrorCodes.StaleRevision =>
+        Error(StatusCodes.Status409Conflict, OperationsErrorCodes.StaleRevision),
+    OperationsErrorCodes.ValidationFailed =>
+        Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.ValidationFailed),
+    _ => Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.HelperUnavailable),
+};
+
+static IResult Error(int statusCode, string code) => Results.Json(
+    new OperationsErrorResponse(OperationsProtocol.SchemaVersion, code),
+    statusCode: statusCode);
 
 public partial class Program;

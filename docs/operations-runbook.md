@@ -40,7 +40,9 @@ The commands have five broad responsibilities:
 
 These responsibilities are deliberately separate. Metadata never encodes media. Playlist generation never changes media. Broadcast never repairs or transcodes media.
 
-Checkpoint 3B3-A adds a sixth, isolated responsibility: the read-only operations dashboard presents a sanitized view of accepted runtime state. It does not control the broadcaster and does not independently verify public YouTube playback. See [Read-only web dashboard](dashboard.md).
+Checkpoint 3B3-A adds a sixth, isolated responsibility: the operations dashboard presents a sanitized view of accepted runtime state. Checkpoint 3B3-B1 adds only a Spotlight Record control through a separate Unix-socket operations helper. It cannot control the broadcaster and does not independently verify public YouTube playback. See [Operations dashboard](dashboard.md).
+
+The candidate B1 production design moves the programming catalog to ext4 and bind-mounts it at the existing `/srv/nzyte-tv/media/catalog` application path. It uses separate programming-write, state-read, and socket-access groups, and makes both the broadcaster and helper fail closed when the catalog mount is absent. This has not been deployed. Follow the separately reviewed [Checkpoint 3B3-B1 Raspberry Pi deployment plan](deployment-3b3-b1.md) for the future staged migration and rollback; do not improvise the mount or permissions during routine operation.
 
 ## 2. Safety rules before starting
 
@@ -100,6 +102,7 @@ After changing the checked-out branch or tag, publish again and run `--help` fro
 | `programming validate` | Validates policy values plus referenced catalog groups and library asset IDs. | Before playlist generation and after policy edits. |
 | `programming status` | Summarizes campaign, overrides, repetition, cadence, and internal patterns. | Inspect the active finite-block policy. |
 | `programming campaign` / `programming asset` | Manages the spotlight record and sparse per-asset editorial overrides. | Routine programming changes without hand-editing JSON. |
+| Dashboard Spotlight Record | Enables, updates, or disables the one campaign from validated catalog choices through the local operations helper. | Routine Spotlight changes; affects newly generated blocks only. |
 | `programming rolling init` | Creates one portable rolling-planner lineage with an explicit empty or imported planned-history genesis. | Once, before preparing the 3B1 buffer. |
 | `programming rolling maintain` | Reconciles interrupted work and ensures the manifest's three-block minimum. It never shrinks an automatically extended manifest or starts FFmpeg. | Prepare, repair, or verify the rolling buffer. |
 | `programming rolling validate` / `status` | Validates hashes, chains, media readiness, and broadcast plans; reports buffer/audit state. | After maintenance and before later acceptance work. |
@@ -1242,6 +1245,7 @@ The following have been validated at specific points in production acceptance. T
 - [Rolling programming planner](rolling-programming.md): immutable blocks, manifest transactions, deterministic retry, recovery, and Pi acceptance.
 - [Rolling station coordinator](rolling-station.md): immutable claims, CP2 reconciliation, completion sealing, block handoff, automatic future-buffer replenishment, and the 3B2-C acceptance boundary.
 - [Checkpoint 3B2-F production cutover](production-cutover-3b2f.md): staged ARM64 release, production diagnostics/recovery, exclusive handoff, verification, and rollback.
+- [Checkpoint 3B3-B1 deployment plan](deployment-3b3-b1.md): candidate ext4 catalog migration, bind mount, service identities, permissions, acceptance, and rollback.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

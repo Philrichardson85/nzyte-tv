@@ -17,6 +17,10 @@ public sealed class DashboardOptions
     public string ReplenishmentStatePath { get; set; } =
         DefaultStatePath("rolling-state.json.replenishment.json");
 
+    public string OperationsSocketPath { get; set; } = OperatingSystem.IsWindows()
+        ? Path.GetFullPath(Path.Combine(Path.GetTempPath(), "nzyte-tv-operations.sock"))
+        : "/run/nzyte-tv-operations/operations.sock";
+
     public static DashboardOptions Load(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -50,6 +54,7 @@ public sealed class DashboardOptions
         ReplenishmentStatePath = NormalizePath(
             ReplenishmentStatePath,
             nameof(ReplenishmentStatePath));
+        OperationsSocketPath = NormalizePath(OperationsSocketPath, nameof(OperationsSocketPath));
 
         var paths = new HashSet<string>(GetPathComparer())
         {

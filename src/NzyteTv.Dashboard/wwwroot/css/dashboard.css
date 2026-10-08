@@ -203,6 +203,82 @@ dd {
     line-height: 1.5;
 }
 
+.operations-section {
+    margin-top: 1.5rem;
+}
+
+.spotlight-panel {
+    margin-top: 0.5rem;
+}
+
+.spotlight-summary {
+    margin-bottom: 1.25rem;
+}
+
+.spotlight-controls {
+    display: grid;
+    grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 12rem);
+    gap: 0.65rem 1rem;
+    align-items: center;
+}
+
+.spotlight-controls label {
+    color: var(--muted);
+}
+
+.spotlight-controls select,
+.spotlight-controls input,
+.spotlight-controls button {
+    min-height: 2.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font: inherit;
+}
+
+.spotlight-controls select,
+.spotlight-controls input {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+}
+
+.button-row {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 0.65rem;
+    justify-content: flex-end;
+}
+
+.spotlight-controls button {
+    padding: 0.5rem 0.8rem;
+    border-color: var(--accent);
+    cursor: pointer;
+}
+
+.spotlight-controls button.secondary {
+    border-color: var(--border);
+}
+
+.spotlight-controls button:disabled,
+.spotlight-controls select:disabled,
+.spotlight-controls input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.operation-message,
+.control-note {
+    margin: 1rem 0 0;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.control-note {
+    padding-top: 0.8rem;
+    border-top: 1px solid rgba(157, 176, 191, 0.13);
+}
+
 .information-note strong {
     color: var(--text);
 }
@@ -232,6 +308,15 @@ footer {
 
     .overall-status {
         width: 100%;
+    }
+
+    .spotlight-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .button-row {
+        grid-column: auto;
+        flex-direction: column;
     }
 }
 

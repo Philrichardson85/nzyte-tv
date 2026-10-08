@@ -1,0 +1,14 @@
+[Unit]
+Description=NZYTE TV Programming Catalog Bind Mount
+Requires=srv-nzyte\x2dtv-media.mount
+After=srv-nzyte\x2dtv-media.mount
+Before=nzyte-tv.service nzyte-tv-operations.service
+
+[Mount]
+What=/var/lib/nzyte-tv-programming/catalog
+Where=/srv/nzyte-tv/media/catalog
+Type=none
+Options=bind
+
+[Install]
+WantedBy=multi-user.target

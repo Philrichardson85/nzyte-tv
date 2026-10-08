@@ -1,0 +1,39 @@
+[Unit]
+Description=NZYTE TV Narrow Operations Helper
+Requires=srv-nzyte\x2dtv-media-catalog.mount
+After=local-fs.target srv-nzyte\x2dtv-media-catalog.mount
+RequiresMountsFor=/srv/nzyte-tv/media/catalog
+
+[Service]
+Type=simple
+User=nzyte-ops
+Group=nzyte-ops
+SupplementaryGroups=nzyte-programming
+WorkingDirectory=/opt/nzyte-tv/operations
+ExecStart=/opt/nzyte-tv/operations/nzytetv-operations
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=Operations__MediaRoot=/srv/nzyte-tv/media
+Environment=Operations__SocketPath=/run/nzyte-tv-operations/operations.sock
+RuntimeDirectory=nzyte-tv-operations
+RuntimeDirectoryMode=0750
+UMask=0007
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/srv/nzyte-tv/media
+ReadWritePaths=/srv/nzyte-tv/media/catalog /run/nzyte-tv-operations
+InaccessiblePaths=-/etc/nzyte-tv -/var/lib/nzyte-tv -/var/lib/nzyte-tv-programming
+
+[Install]
+WantedBy=multi-user.target

@@ -4,10 +4,13 @@
     <Project Path="src/NzyteTv.Core/NzyteTv.Core.csproj" />
     <Project Path="src/NzyteTv.Dashboard/NzyteTv.Dashboard.csproj" />
     <Project Path="src/NzyteTv.Media/NzyteTv.Media.csproj" />
+    <Project Path="src/NzyteTv.Operations.Contracts/NzyteTv.Operations.Contracts.csproj" />
+    <Project Path="src/NzyteTv.Operations/NzyteTv.Operations.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NzyteTv.Core.Tests/NzyteTv.Core.Tests.csproj" />
     <Project Path="tests/NzyteTv.Dashboard.Tests/NzyteTv.Dashboard.Tests.csproj" />
     <Project Path="tests/NzyteTv.Media.Tests/NzyteTv.Media.Tests.csproj" />
+    <Project Path="tests/NzyteTv.Operations.Tests/NzyteTv.Operations.Tests.csproj" />
   </Folder>
 </Solution>

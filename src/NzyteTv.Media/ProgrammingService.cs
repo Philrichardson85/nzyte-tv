@@ -103,13 +103,16 @@ public sealed record ProgrammingMutationResult(
 public sealed class ProgrammingService(
     IProgrammingConfigurationStore? configurationStore = null,
     ISongCatalogStore? catalogStore = null,
-    IProgrammingInventoryLoader? inventoryLoader = null)
+    IProgrammingInventoryLoader? inventoryLoader = null,
+    IProgrammingConfigurationMutationLock? mutationLock = null)
 {
     private readonly IProgrammingConfigurationStore _configurationStore =
         configurationStore ?? new ProgrammingConfigurationStore();
     private readonly ISongCatalogStore _catalogStore = catalogStore ?? new SongCatalogStore();
     private readonly IProgrammingInventoryLoader _inventoryLoader =
         inventoryLoader ?? new ProgrammingInventoryLoader();
+    private readonly IProgrammingConfigurationMutationLock _mutationLock =
+        mutationLock ?? new ProgrammingConfigurationMutationLock();
 
     public async Task<ProgrammingConfigurationInitializationResult> InitializeAsync(
         string mediaRoot,
@@ -190,10 +193,27 @@ public sealed class ProgrammingService(
         string mediaRoot,
         string contentGroupId,
         double? weightMultiplier,
+        CancellationToken cancellationToken) => await SetCampaignAsync(
+            mediaRoot,
+            contentGroupId,
+            weightMultiplier,
+            expectedRevision: null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<ProgrammingMutationResult> SetCampaignAsync(
+        string mediaRoot,
+        string contentGroupId,
+        double? weightMultiplier,
+        long? expectedRevision,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contentGroupId);
+        ProgrammingPaths paths = ProgrammingPaths.FromMediaRoot(mediaRoot);
+        await using IAsyncDisposable lease = await _mutationLock.AcquireAsync(
+            paths.ConfigurationPath,
+            cancellationToken).ConfigureAwait(false);
         LoadedProgramming loaded = LoadForMutation(mediaRoot);
+        VerifyExpectedRevision(loaded.Configuration, expectedRevision);
         double weight = weightMultiplier ?? ProgrammingConfiguration.DefaultCampaignMultiplier;
         var campaign = new ActiveCampaign
         {
@@ -202,7 +222,7 @@ public sealed class ProgrammingService(
             WeightMultiplier = weight,
         };
         ProgrammingConfiguration current = loaded.Configuration;
-        if (current.ActiveCampaign == campaign)
+        if (current.ActiveCampaign == campaign && expectedRevision is null)
         {
             return new ProgrammingMutationResult(
                 loaded.Paths,
@@ -226,12 +246,25 @@ public sealed class ProgrammingService(
 
     public async Task<ProgrammingMutationResult> ClearCampaignAsync(
         string mediaRoot,
+        CancellationToken cancellationToken) => await ClearCampaignAsync(
+            mediaRoot,
+            expectedRevision: null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<ProgrammingMutationResult> ClearCampaignAsync(
+        string mediaRoot,
+        long? expectedRevision,
         CancellationToken cancellationToken)
     {
+        ProgrammingPaths paths = ProgrammingPaths.FromMediaRoot(mediaRoot);
+        await using IAsyncDisposable lease = await _mutationLock.AcquireAsync(
+            paths.ConfigurationPath,
+            cancellationToken).ConfigureAwait(false);
         LoadedProgramming loaded = LoadStructurallyValidConfiguration(mediaRoot);
         ProgrammingConfiguration current = loaded.Configuration;
+        VerifyExpectedRevision(current, expectedRevision);
         var cleared = new ActiveCampaign();
-        if (current.ActiveCampaign == cleared)
+        if (current.ActiveCampaign == cleared && expectedRevision is null)
         {
             return new ProgrammingMutationResult(
                 loaded.Paths,
@@ -266,6 +299,10 @@ public sealed class ProgrammingService(
             throw new ArgumentException("At least one asset editorial value must be supplied.", nameof(doNotAir));
         }
 
+        ProgrammingPaths paths = ProgrammingPaths.FromMediaRoot(mediaRoot);
+        await using IAsyncDisposable lease = await _mutationLock.AcquireAsync(
+            paths.ConfigurationPath,
+            cancellationToken).ConfigureAwait(false);
         LoadedProgramming loaded = LoadForMutation(mediaRoot);
         if (!loaded.Inventory.Assets.Any(asset => string.Equals(asset.AssetId, assetId, StringComparison.Ordinal)))
         {
@@ -321,6 +358,10 @@ public sealed class ProgrammingService(
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetId);
+        ProgrammingPaths paths = ProgrammingPaths.FromMediaRoot(mediaRoot);
+        await using IAsyncDisposable lease = await _mutationLock.AcquireAsync(
+            paths.ConfigurationPath,
+            cancellationToken).ConfigureAwait(false);
         LoadedProgramming loaded = LoadStructurallyValidConfiguration(mediaRoot);
         ProgrammingConfiguration current = loaded.Configuration;
         var overrides = new Dictionary<string, AssetEditorialOverride>(
@@ -390,6 +431,16 @@ public sealed class ProgrammingService(
             loaded.Paths.ConfigurationPath,
             updated,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void VerifyExpectedRevision(
+        ProgrammingConfiguration configuration,
+        long? expectedRevision)
+    {
+        if (expectedRevision is long expected && configuration.Revision != expected)
+        {
+            throw new ProgrammingConfigurationConflictException(expected, configuration.Revision);
+        }
     }
 
     private static bool OverridesEqual(

@@ -20,6 +20,9 @@ public sealed class DashboardRenderingTests
         Assert.Contains("Broadcast", html, StringComparison.Ordinal);
         Assert.Contains("Now Playing", html, StringComparison.Ordinal);
         Assert.Contains("Programming", html, StringComparison.Ordinal);
+        Assert.Contains("PROGRAMMING CONTROLS", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Spotlight Record", html, StringComparison.Ordinal);
+        Assert.Contains("Newly generated programming only", html, StringComparison.Ordinal);
         Assert.Contains(
             "Public YouTube playback is not independently verified.",
             html,
@@ -58,6 +61,8 @@ public sealed class DashboardRenderingTests
 
         Assert.Contains("textContent", script, StringComparison.Ordinal);
         Assert.DoesNotContain("innerHTML", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("option.textContent", script, StringComparison.Ordinal);
+        Assert.Contains("X-NZYTE-TV-CSRF", script, StringComparison.Ordinal);
         Assert.Contains("window.setTimeout(poll", script, StringComparison.Ordinal);
         Assert.DoesNotContain("WebSocket", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("EventSource", script, StringComparison.OrdinalIgnoreCase);
@@ -118,7 +123,7 @@ public sealed class DashboardRenderingTests
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion;
 
-        Assert.StartsWith("0.1.0-3b3-a+", version, StringComparison.Ordinal);
+        Assert.StartsWith("0.2.0-3b3-b1+", version, StringComparison.Ordinal);
     }
 
     internal static string FindRepositoryRoot()

@@ -4,7 +4,8 @@
     ViewData["Title"] = "Operations Dashboard";
 }
 
-<main class="dashboard" data-refresh-interval-ms="@Model.RefreshIntervalMilliseconds">
+<main class="dashboard" data-refresh-interval-ms="@Model.RefreshIntervalMilliseconds"
+      data-antiforgery-token="@Model.AntiforgeryToken">
     <header class="masthead">
         <div>
             <p class="eyebrow">Operations dashboard</p>
@@ -83,6 +84,37 @@
                 <div><dt>Buffer health</dt><dd id="buffer-health">@IndexModel.Display(Model.Snapshot.Rolling.BufferHealth)</dd></div>
                 <div><dt>Replenishment</dt><dd id="replenishment-health">@IndexModel.Display(Model.Snapshot.Rolling.ReplenishmentHealth)</dd></div>
             </dl>
+        </article>
+    </section>
+
+    <section class="operations-section" aria-labelledby="programming-controls-heading">
+        <p class="eyebrow">Programming controls</p>
+        <article class="panel spotlight-panel">
+            <div class="panel-heading">
+                <h2 id="programming-controls-heading">Spotlight Record</h2>
+                <span class="pill" id="spotlight-availability">Loading</span>
+            </div>
+            <dl class="spotlight-summary">
+                <div><dt>Current</dt><dd id="spotlight-current">Loading</dd></div>
+                <div><dt>Weight</dt><dd id="spotlight-current-weight">Unavailable</dd></div>
+                <div><dt>Applies to</dt><dd>Newly generated programming only</dd></div>
+            </dl>
+            <div class="spotlight-controls">
+                <label for="spotlight-song">Song</label>
+                <select id="spotlight-song" disabled></select>
+                <label for="spotlight-weight">Weight multiplier</label>
+                <input id="spotlight-weight" type="number" min="0.1" max="10.0" step="0.1" value="2.0" disabled />
+                <div class="button-row">
+                    <button id="spotlight-set" type="button" disabled>Enable / Update Spotlight</button>
+                    <button id="spotlight-disable" type="button" class="secondary" disabled>Disable Spotlight</button>
+                </div>
+            </div>
+            <p class="operation-message" id="spotlight-message" aria-live="polite">
+                Connecting to the local operations helper.
+            </p>
+            <p class="control-note">
+                Spotlight changes affect newly generated programming only. The active block and already committed future blocks are unchanged.
+            </p>
         </article>
     </section>
 

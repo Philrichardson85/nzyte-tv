@@ -2,7 +2,7 @@
 
 NZYTE TV is a production-validated media-preparation, programming, and broadcast automation system for prerecorded channels. It inspects source media, normalizes it to one deterministic broadcast format, independently verifies the result, builds deterministic playlists, and can stream generated playlists sequentially through FFmpeg.
 
-Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks. Checkpoint 3B2-A adds an opt-in coordinator that safely claims and hands those immutable blocks to the unchanged station supervisor. Checkpoint 3B2-B runs that accepted planner asynchronously beside rolling execution to maintain two committed future blocks. Checkpoint 3B3-A adds a separate loopback-only, read-only operations dashboard without changing the broadcaster process. Encoding remains independent from metadata, scheduling, playback, and dashboard presentation.
+Current development includes broadcast playback for generated playlist JSON using FFmpeg concat, real-time input pacing, stream-copy, an environment-supplied RTMP/RTMPS destination, and bounded reconnect recovery that restarts only an interrupted asset. The accepted v0.5.0 Checkpoint 2 station supervisor adds safe item-level resume for the fixed configured queue across station-process restarts, clean stop/start, and graceful reboot. Checkpoint 3A adds an optional programming policy for deliberate song-family-aware sequencing, internal pacing patterns, editorial overrides, station imaging, promos, and one active spotlight campaign. Checkpoint 3B1 adds a crash-safe planner for immutable rolling six-hour blocks. Checkpoint 3B2-A adds an opt-in coordinator that safely claims and hands those immutable blocks to the unchanged station supervisor. Checkpoint 3B2-B runs that accepted planner asynchronously beside rolling execution to maintain two committed future blocks. Checkpoint 3B3-A adds a separate loopback-only operations dashboard without changing the broadcaster process; Checkpoint 3B3-B1 adds one narrow Spotlight Record control through an isolated Unix-socket helper. Encoding remains independent from metadata, scheduling, playback, and dashboard presentation.
 
 Persistent FFmpeg ingest across block boundaries, dynamic queue append, public YouTube API health monitoring, and alerts remain out of scope. The accepted isolated station has completed rolling handoff, replenishment, diagnostics, and boot-recovery acceptance. Checkpoint 3B2-F supplies reviewed-candidate production units and a cutover/rollback runbook, but those assets are not deployed and do not change the existing static production service until an operator performs the separately approved cutover.
 
@@ -25,9 +25,10 @@ Focused references:
 - [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md)
 - [Broadcasting generated playlists](docs/broadcasting.md)
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
-- [Read-only web dashboard](docs/dashboard.md)
+- [Operations dashboard](docs/dashboard.md)
+- [Checkpoint 3B3-B1 Raspberry Pi deployment plan](docs/deployment-3b3-b1.md)
 
-### Read-only operations dashboard
+### Operations dashboard
 
 The dashboard listens only on the Raspberry Pi loopback address at `127.0.0.1:5080` and is intentionally not directly reachable through the Pi's LAN IP. From the Windows workstation, open an SSH tunnel with:
 
@@ -35,7 +36,7 @@ The dashboard listens only on the Raspberry Pi loopback address at `127.0.0.1:50
 ssh -N -L 15080:127.0.0.1:5080 u24@u24-desktop
 ```
 
-Keep that SSH tunnel terminal open while using the dashboard, then view it in the Windows browser at `http://127.0.0.1:15080`. See the [detailed dashboard documentation](docs/dashboard.md) for configuration, security boundaries, and operational guidance.
+Keep that SSH tunnel terminal open while using the dashboard, then view it in the Windows browser at `http://127.0.0.1:15080`. Station status remains read-only. The Spotlight Record control is limited to catalog songs and affects only newly generated programming; the active block and committed future blocks are unchanged. See the [detailed dashboard documentation](docs/dashboard.md) for configuration, security boundaries, and operational guidance.
 
 ## Setup
 

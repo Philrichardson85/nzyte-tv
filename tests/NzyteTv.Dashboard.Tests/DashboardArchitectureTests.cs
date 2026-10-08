@@ -118,6 +118,20 @@ public sealed class DashboardArchitectureTests
     }
 
     [Fact]
+    public void DashboardDoesNotWriteProgrammingFilesDirectly()
+    {
+        string root = DashboardRenderingTests.FindRepositoryRoot();
+        string dashboardRoot = Path.Combine(root, "src", "NzyteTv.Dashboard");
+        string source = string.Join("\n", Directory.EnumerateFiles(dashboardRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Select(File.ReadAllText));
+        Assert.DoesNotContain("ProgrammingConfigurationStore", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProgrammingService", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("File.Write", source, StringComparison.Ordinal);
+        Assert.Contains("UnixDomainSocketEndPoint", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardServiceTemplate_ContainsNoSecretsOrBroadcasterControls()
     {
         string root = DashboardRenderingTests.FindRepositoryRoot();

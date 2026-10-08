@@ -1,0 +1,38 @@
+[Unit]
+Description=NZYTE TV Operations Dashboard with Spotlight Control
+After=network.target nzyte-tv-operations.service
+Wants=nzyte-tv-operations.service
+
+[Service]
+Type=simple
+User=nzyte-dashboard
+Group=nzyte-dashboard
+SupplementaryGroups=nzyte-tv-state nzyte-ops
+WorkingDirectory=/opt/nzyte-tv/dashboard
+ExecStart=/opt/nzyte-tv/dashboard/nzytetv-dashboard
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=Dashboard__Port=5080
+Environment=Dashboard__StationStatePath=/var/lib/nzyte-tv/state.json
+Environment=Dashboard__RollingStatePath=/var/lib/nzyte-tv/rolling-state.json
+Environment=Dashboard__ReplenishmentStatePath=/var/lib/nzyte-tv/rolling-state.json.replenishment.json
+Environment=Dashboard__OperationsSocketPath=/run/nzyte-tv-operations/operations.sock
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/var/lib/nzyte-tv /run/nzyte-tv-operations
+InaccessiblePaths=-/etc/nzyte-tv -/var/lib/nzyte-tv/broadcast-diagnostics.json -/var/lib/nzyte-tv-programming -/srv/nzyte-tv
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

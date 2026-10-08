@@ -7,7 +7,10 @@
     }
 
     const interval = Number.parseInt(root.dataset.refreshIntervalMs || "5000", 10);
+    const antiforgeryToken = root.dataset.antiforgeryToken || "";
     let lastObservedAt = Date.now();
+    let spotlightRevision = null;
+    let spotlightBusy = false;
 
     function setLiteralText(id, value, suffix = "") {
         const element = document.getElementById(id);
@@ -130,7 +133,128 @@
         }
     }
 
+    function setSpotlightControlsEnabled(enabled, spotlightEnabled = false) {
+        const song = document.getElementById("spotlight-song");
+        const weight = document.getElementById("spotlight-weight");
+        const setButton = document.getElementById("spotlight-set");
+        const disableButton = document.getElementById("spotlight-disable");
+        if (song) song.disabled = !enabled;
+        if (weight) weight.disabled = !enabled;
+        if (setButton) setButton.disabled = !enabled;
+        if (disableButton) disableButton.disabled = !enabled || !spotlightEnabled;
+    }
+
+    function renderSpotlight(state) {
+        spotlightRevision = state.revision;
+        setStatusText("spotlight-availability", "available");
+        setLiteralText("spotlight-current", state.enabled
+            ? `${state.artist} — ${state.title}`
+            : "Disabled");
+        setLiteralText("spotlight-current-weight", state.enabled
+            ? `${state.weightMultiplier.toFixed(1)}x`
+            : "Unavailable");
+
+        const select = document.getElementById("spotlight-song");
+        if (select) {
+            select.replaceChildren();
+            for (const song of state.catalogOptions) {
+                const option = document.createElement("option");
+                option.value = song.contentGroupId;
+                option.textContent = `${song.artist} — ${song.title}`;
+                option.selected = song.contentGroupId === state.contentGroupId;
+                select.appendChild(option);
+            }
+        }
+
+        const weight = document.getElementById("spotlight-weight");
+        if (weight) weight.value = state.enabled ? state.weightMultiplier.toFixed(1) : "2.0";
+        setSpotlightControlsEnabled(state.catalogOptions.length > 0, state.enabled);
+    }
+
+    function renderSpotlightUnavailable() {
+        spotlightRevision = null;
+        setStatusText("spotlight-availability", "unavailable");
+        setLiteralText("spotlight-current", "Unavailable");
+        setLiteralText("spotlight-current-weight", null);
+        setSpotlightControlsEnabled(false);
+    }
+
+    async function refreshSpotlight(showFailure = true) {
+        try {
+            const response = await fetch("/api/v1/programming/spotlight", {
+                cache: "no-store",
+                headers: { "Accept": "application/json" }
+            });
+            if (!response.ok) throw new Error("spotlight request failed");
+            renderSpotlight(await response.json());
+            if (showFailure) setLiteralText("spotlight-message", "Spotlight controls ready.");
+            return true;
+        } catch {
+            renderSpotlightUnavailable();
+            if (showFailure) {
+                setLiteralText("spotlight-message",
+                    "Programming controls are unavailable. Broadcast status is unaffected.");
+            }
+            return false;
+        }
+    }
+
+    async function mutateSpotlight(path, body) {
+        if (spotlightBusy || spotlightRevision === null) return;
+        spotlightBusy = true;
+        setSpotlightControlsEnabled(false);
+        setLiteralText("spotlight-message", "Applying Spotlight change…");
+        try {
+            const response = await fetch(path, {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-NZYTE-TV-CSRF": antiforgeryToken
+                },
+                body: JSON.stringify(body)
+            });
+            if (response.status === 409) {
+                await refreshSpotlight(false);
+                setLiteralText("spotlight-message",
+                    "Spotlight changed elsewhere. Review the refreshed selection before trying again.");
+                return;
+            }
+            if (!response.ok) throw new Error("spotlight mutation failed");
+            renderSpotlight(await response.json());
+            setLiteralText("spotlight-message", "Spotlight change saved.");
+        } catch {
+            await refreshSpotlight(false);
+            setLiteralText("spotlight-message",
+                "Spotlight change was not saved. Review the current state and try again.");
+        } finally {
+            spotlightBusy = false;
+        }
+    }
+
+    const setSpotlightButton = document.getElementById("spotlight-set");
+    if (setSpotlightButton) {
+        setSpotlightButton.addEventListener("click", () => {
+            const song = document.getElementById("spotlight-song");
+            const weight = document.getElementById("spotlight-weight");
+            mutateSpotlight("/api/v1/programming/spotlight", {
+                expectedRevision: spotlightRevision,
+                contentGroupId: song.value,
+                weightMultiplier: Number.parseFloat(weight.value)
+            });
+        });
+    }
+
+    const disableSpotlightButton = document.getElementById("spotlight-disable");
+    if (disableSpotlightButton) {
+        disableSpotlightButton.addEventListener("click", () => mutateSpotlight(
+            "/api/v1/programming/spotlight/disable",
+            { expectedRevision: spotlightRevision }));
+    }
+
     updateAge();
     window.setInterval(updateAge, 1000);
     window.setTimeout(poll, interval);
+    refreshSpotlight();
 })();

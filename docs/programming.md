@@ -27,7 +27,9 @@ For the portable production drive mounted at `/srv/nzyte-tv/media`, that is:
 /srv/nzyte-tv/media/catalog/programming.json
 ```
 
-When the catalog is intentionally kept under `/srv/nzyte-tv/catalog`, use `/srv/nzyte-tv` as the programming media root; its `library` convenience symlink and `catalog` directory form the same expected layout.
+Current production uses `/srv/nzyte-tv/media` as the programming media root. The separate `/srv/nzyte-tv/catalog` directory is legacy and does not contain the active `programming.json`; the dashboard operations helper must not target it.
+
+The Checkpoint 3B3-B1 deployment design stores the mutable catalog physically on ext4 at `/var/lib/nzyte-tv-programming/catalog` and bind-mounts it onto `/srv/nzyte-tv/media/catalog`. This preserves the established `ProgrammingPaths` resolution and gives the narrowly scoped operations helper a POSIX group-write boundary that the exFAT media filesystem cannot provide. Both the broadcaster and helper require the bind mount, so neither may silently use stale files underneath it. See [Checkpoint 3B3-B1 Raspberry Pi deployment plan](deployment-3b3-b1.md).
 
 `build-playlist` automatically looks for `programming.json` beside the `song-catalog.json` supplied through `--catalog`. No extra build option is required.
 
@@ -166,6 +168,10 @@ Defaults are `doNotAir=false` and `weightMultiplier=1.0`. Multipliers must be fi
 ## Active Campaign / Spotlight Record
 
 V1 supports one active campaign targeting one catalog `contentGroupId`. Set it with the default 2.0x song-family multiplier:
+
+Checkpoint 3B3-B1 also presents this existing feature as **Spotlight Record** in the loopback-only operations dashboard. The browser can select only a validated song-catalog entry, uses `2.0x` as the recommended default, and submits the last-read programming revision. A stale revision is rejected rather than overwriting a concurrent change. The dashboard operation preserves every unrelated programming field and uses the same validation and atomic store as the CLI.
+
+Dashboard Spotlight changes apply only to blocks generated after the update. The active block and already committed future blocks remain immutable and unchanged.
 
 ```bash
 /opt/nzyte-tv/app/nzytetv programming campaign set free-fallin \

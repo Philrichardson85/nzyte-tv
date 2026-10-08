@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using NzyteTv.Dashboard.Configuration;
 using NzyteTv.Dashboard.Status;
@@ -6,16 +7,21 @@ namespace NzyteTv.Dashboard.Pages;
 
 public sealed class IndexModel(
     IDashboardStatusProvider statusProvider,
-    DashboardOptions options) : PageModel
+    DashboardOptions options,
+    IAntiforgery antiforgery) : PageModel
 {
     public DashboardStatusSnapshot Snapshot { get; private set; } = null!;
 
     public int RefreshIntervalMilliseconds { get; } =
         checked(options.BrowserRefreshSeconds * 1000);
 
+    public string AntiforgeryToken { get; private set; } = string.Empty;
+
     public void OnGet()
     {
         Snapshot = statusProvider.GetStatus();
+        AntiforgeryToken = antiforgery.GetAndStoreTokens(HttpContext).RequestToken
+            ?? throw new InvalidOperationException("An antiforgery request token was not generated.");
     }
 
     public static string Display(object? value) => value?.ToString() ?? "Unavailable";
