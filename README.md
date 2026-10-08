@@ -27,6 +27,16 @@ Focused references:
 - [Station supervisor, persistent resume, and systemd operation](docs/station-service.md)
 - [Read-only web dashboard](docs/dashboard.md)
 
+### Read-only operations dashboard
+
+The dashboard listens only on the Raspberry Pi loopback address at `127.0.0.1:5080` and is intentionally not directly reachable through the Pi's LAN IP. From the Windows workstation, open an SSH tunnel with:
+
+```powershell
+ssh -N -L 15080:127.0.0.1:5080 u24@u24-desktop
+```
+
+Keep that SSH tunnel terminal open while using the dashboard, then view it in the Windows browser at `http://127.0.0.1:15080`. See the [detailed dashboard documentation](docs/dashboard.md) for configuration, security boundaries, and operational guidance.
+
 ## Setup
 
 Supported platforms:
