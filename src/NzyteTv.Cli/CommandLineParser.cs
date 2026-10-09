@@ -44,6 +44,9 @@ public enum CommandKind
     ProgrammingRollingStatus,
     MediaHelp,
     MediaInit,
+    MediaPackagePrepare,
+    MediaMetadataBootstrap,
+    MediaMetadataRefresh,
 }
 
 public sealed record ParsedCommand(
@@ -72,7 +75,12 @@ public sealed record ParsedCommand(
     int? RollingBaseSeed = null,
     TimeSpan? RollingTestBlockDuration = null,
     bool AcceptStoppedStaticCutover = false,
-    VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None);
+    VerticalLayoutMode VerticalLayout = VerticalLayoutMode.None,
+    string? MediaRoot = null,
+    string? ExternalMetadataRoot = null,
+    string? InboxRoot = null,
+    string? SourceRelativePath = null,
+    bool Publish = false);
 
 public sealed record CommandParseResult(ParsedCommand? Command, string? Error)
 {
@@ -212,22 +220,160 @@ public static class CommandLineParser
             return Success(new ParsedCommand(CommandKind.MediaHelp, ShowHelp: true));
         }
 
-        if (!string.Equals(args[1], "init", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(args[1], "init", StringComparison.OrdinalIgnoreCase))
         {
-            return Failure($"Unknown media command '{args[1]}'.");
+            if (args.Count == 3 && IsHelp(args[2]))
+            {
+                return Success(new ParsedCommand(CommandKind.MediaInit, ShowHelp: true));
+            }
+
+            if (args.Count != 3)
+            {
+                return Failure("The media init command requires exactly one media root.");
+            }
+
+            return Success(new ParsedCommand(CommandKind.MediaInit, Input: args[2]));
         }
 
-        if (args.Count == 3 && IsHelp(args[2]))
+        if (string.Equals(args[1], "package", StringComparison.OrdinalIgnoreCase))
         {
-            return Success(new ParsedCommand(CommandKind.MediaInit, ShowHelp: true));
+            if (args.Count < 3 || !string.Equals(args[2], "prepare", StringComparison.OrdinalIgnoreCase))
+            {
+                return Failure("The supported media package command is 'prepare'.");
+            }
+
+            if (args.Count == 4 && IsHelp(args[3]))
+            {
+                return Success(new ParsedCommand(CommandKind.MediaPackagePrepare, ShowHelp: true));
+            }
+
+            return ParseMediaOptions(
+                args,
+                3,
+                CommandKind.MediaPackagePrepare,
+                requireMetadataRoot: false,
+                requireSource: true,
+                allowInbox: true,
+                allowPublish: false);
         }
 
-        if (args.Count != 3)
+        if (string.Equals(args[1], "metadata", StringComparison.OrdinalIgnoreCase))
         {
-            return Failure("The media init command requires exactly one media root.");
+            if (args.Count < 3)
+            {
+                return Failure("The media metadata command requires bootstrap or refresh.");
+            }
+
+            CommandKind? kind = args[2].ToLowerInvariant() switch
+            {
+                "bootstrap" => CommandKind.MediaMetadataBootstrap,
+                "refresh" => CommandKind.MediaMetadataRefresh,
+                _ => null,
+            };
+            if (kind is null)
+            {
+                return Failure($"Unknown media metadata command '{args[2]}'.");
+            }
+
+            if (args.Count == 4 && IsHelp(args[3]))
+            {
+                return Success(new ParsedCommand(kind.Value, ShowHelp: true));
+            }
+
+            return ParseMediaOptions(
+                args,
+                3,
+                kind.Value,
+                requireMetadataRoot: true,
+                requireSource: false,
+                allowInbox: kind == CommandKind.MediaMetadataRefresh,
+                allowPublish: kind == CommandKind.MediaMetadataBootstrap);
         }
 
-        return Success(new ParsedCommand(CommandKind.MediaInit, Input: args[2]));
+        return Failure($"Unknown media command '{args[1]}'.");
+    }
+
+    private static CommandParseResult ParseMediaOptions(
+        IReadOnlyList<string> args,
+        int optionStart,
+        CommandKind kind,
+        bool requireMetadataRoot,
+        bool requireSource,
+        bool allowInbox,
+        bool allowPublish)
+    {
+        string? mediaRoot = null;
+        string? metadataRoot = null;
+        string? inboxRoot = null;
+        string? source = null;
+        bool publish = false;
+        for (int index = optionStart; index < args.Count; index++)
+        {
+            string argument = args[index];
+            if (argument == "--publish")
+            {
+                if (!allowPublish || publish) return Failure("--publish is not valid or was repeated.");
+                publish = true;
+                continue;
+            }
+
+            if (argument is not ("--media-root" or "--metadata-root" or "--inbox-root" or "--source-relative"))
+            {
+                return Failure($"Unknown option '{argument}'.");
+            }
+
+            if (++index >= args.Count || string.IsNullOrWhiteSpace(args[index]))
+            {
+                return Failure($"{argument} requires a value.");
+            }
+
+            string value = args[index];
+            if (value.StartsWith("-", StringComparison.Ordinal))
+            {
+                return Failure($"{argument} requires a value.");
+            }
+
+            switch (argument)
+            {
+                case "--media-root" when mediaRoot is null:
+                    mediaRoot = value;
+                    break;
+                case "--metadata-root" when requireMetadataRoot && metadataRoot is null:
+                    metadataRoot = value;
+                    break;
+                case "--inbox-root" when allowInbox && inboxRoot is null:
+                    inboxRoot = value;
+                    break;
+                case "--source-relative" when requireSource && source is null:
+                    source = value;
+                    break;
+                default:
+                    return Failure($"{argument} is not valid or was repeated.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(mediaRoot))
+        {
+            return Failure("The command requires --media-root <path>.");
+        }
+
+        if (requireMetadataRoot && string.IsNullOrWhiteSpace(metadataRoot))
+        {
+            return Failure("The command requires --metadata-root <path>.");
+        }
+
+        if (requireSource && string.IsNullOrWhiteSpace(source))
+        {
+            return Failure("The command requires --source-relative <path>.");
+        }
+
+        return Success(new ParsedCommand(
+            kind,
+            MediaRoot: mediaRoot,
+            ExternalMetadataRoot: metadataRoot,
+            InboxRoot: inboxRoot,
+            SourceRelativePath: source,
+            Publish: publish));
     }
 
     private static CommandParseResult ParseProgramming(IReadOnlyList<string> args)

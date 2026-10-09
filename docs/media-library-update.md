@@ -1,6 +1,6 @@
 # Media-library update architecture
 
-Checkpoint 3B3-B2 is being delivered in isolated slices. B2-A establishes only the programming-metadata storage and planning-read foundation described here. It does not add an Update Media Library button, package import, media refresh, deployment configuration, or Raspberry Pi migration.
+Checkpoint 3B3-B2 is being delivered in isolated slices. B2-A established the programming-metadata storage and planning-read foundation. B2-B adds local READY-package preparation, bounded package verification, external-generation refresh, and adjacent-sidecar bootstrap tooling. It still does not add an Update Media Library dashboard button, operations-helper endpoint, production service configuration, or Raspberry Pi deployment/migration.
 
 ## B2-A storage modes
 
@@ -23,10 +23,13 @@ The storage foundation uses this layout beneath an explicitly supplied root:
   generations/
     000000000001/
       generation.json
+      inventory.json
       source/
         Music Videos/Foo.mov.nzytetv.meta.json
       library/
         Music Videos/Foo.mp4.nzytetv.meta.json
+  operations/
+    <operation-id>.json
 ```
 
 Generation IDs are twelve-digit, nonzero decimal values. `current.json` contains schema version, positive revision, and generation ID. The referenced `generation.json` must contain the same revision and identity.
@@ -45,17 +48,75 @@ Existing v0.7 planning snapshots and durable intents remain readable because the
 
 Snapshots created in external mode record both generation ID and metadata revision. Their retries and committed-block verification reopen that exact immutable generation rather than consulting the then-current pointer. Committed-block schemas, planner lineage, rolling coordinator behavior, FFmpeg, and broadcaster behavior are unchanged.
 
+## B2-B READY packages
+
+A READY package is a fixed, strict schema for one source asset and its derived library asset. It declares only relative source/library identities and the length and SHA-256 digest of the source media, normalized MP4, technical `.nzytetv.json` manifest, and any present source/library programming sidecars. It contains no arbitrary file list, absolute root, command, or environment value.
+
+Prepare one package on the Windows normalization workstation only after normalization and metadata work are complete:
+
+```powershell
+nzytetv.exe media package prepare `
+  --media-root "E:\" `
+  --source-relative "Music Videos\Artist - Record.mov"
+```
+
+The command derives the library path through the normal library-path policy, validates the existing technical relationship, validates optional programming sidecars, hashes only those members sequentially, and atomically publishes `<package-id>.ready.json` under `<media-root>\inbox` (or the explicitly supplied `--inbox-root`). It does not invoke FFmpeg, normalize, repair, or modify source/library media. A pre-existing final READY filename is not overwritten.
+
+When transferring a package, preserve its relative paths and copy the source member, normalized MP4, technical manifest, and declared programming sidecars first. Copy/publish the final `*.ready.json` file into the trusted inbox last. Temporary files, partial files, unrelated files, and media without a final READY marker are ignored. There is no stable-size or age heuristic.
+
+Technical manifests retain the existing source fingerprint rules, including source-relative identity, size, last-modified UTC, schema, and broadcast profile. A transfer mechanism that changes required timestamps can therefore cause conservative package rejection; this must be verified during later Pi acceptance rather than weakened in code.
+
+## B2-B refresh and inventory
+
+The local administrative refresh command is:
+
+```text
+nzytetv media metadata refresh --media-root <media-root> --metadata-root <external-metadata-root> [--inbox-root <path>]
+```
+
+Refresh requires an already-bootstrapped external store. It takes one non-queuing cross-process writer lock, pins the current immutable generation, reads only final READY manifests from the configured inbox, verifies each declared member sequentially, and constructs a complete candidate generation in staging. Publication is staging-to-final promotion followed by expected-revision publication of `current.json`. Readers do not take the writer lock.
+
+The immutable `inventory.json` carries accepted package IDs/digests, relative source/library identities, member evidence, metadata evidence, asset IDs, resolved content groups, and a fixed readiness classification. The inventory contains no absolute storage root. A package is accepted only for source and library identities that are new to the accepted inventory:
+
+- the same package ID and manifest digest is `alreadyProcessed`;
+- the same package ID with a different digest is rejected;
+- a new package ID targeting an accepted media identity is rejected; and
+- a run with no newly acceptable packages does not create a generation or increment the metadata revision.
+
+Refresh never writes, replaces, repairs, moves, or deletes source files, library MP4s, technical manifests, READY evidence, or adjacent programming sidecars. It writes only lock/staging/generation/inventory/operation records below the explicitly configured external metadata root. It does not call FFmpeg/FFprobe, rolling planning, station control, or systemd.
+
+Known songs must resolve conservatively to the existing song catalog. Ambiguous and unknown songs remain unprocessed so a later refresh can accept them after separate trusted catalog maintenance. B2-B does not create catalog entries, edit programming policy, or change Spotlight. Deterministic non-song metadata may be created directly in the candidate external generation.
+
+Operation records contain fixed status/issue codes and safe relative identities, not raw exceptions or absolute paths. `current.json` plus immutable generations remain authoritative. A crash before pointer publication leaves the prior generation current; a promoted but unpublished generation is an inert orphan; a crash after pointer publication leaves the new generation authoritative, and the next serialized invocation can reconcile its running operation record. Refresh never retries itself automatically.
+
+## Explicit adjacent-sidecar bootstrap
+
+Bootstrap is a separate administrative operation; runtime external mode still fails closed when `current.json` is missing or malformed.
+
+Preview first:
+
+```text
+nzytetv media metadata bootstrap --media-root <media-root> --metadata-root <external-metadata-root>
+```
+
+Publish only after reviewing a clean preview:
+
+```text
+nzytetv media metadata bootstrap --media-root <media-root> --metadata-root <external-metadata-root> --publish
+```
+
+Bootstrap requires no existing `current.json`, takes the same refresh-writer lock, scans and strictly validates paired adjacent source/library metadata, validates media and technical-manifest relationships and catalog resolution, preserves valid JSON bytes in their corresponding external trees, and creates generation/revision 1. Malformed metadata, missing pairs, duplicate asset IDs, unresolved catalog relationships, or other blocking inconsistencies prevent publication. Re-running bootstrap after `current.json` exists is refused.
+
+Bootstrap never changes adjacent sidecars or media. Those adjacent sidecars must remain available during production migration because v0.7 active/committed blocks and durable intents with null metadata-generation identity explicitly retain adjacent authority.
+
 ## Deferred work
 
 B2-A does not implement:
 
-- Windows READY-package creation;
-- package validation or bounded package hashing;
-- external metadata-generation orchestration;
-- media-library refresh operations;
 - dashboard API or UI controls;
+- operations-helper refresh protocol;
 - production filesystem permissions or service changes;
-- migration of current adjacent sidecars; or
+- executed production migration/activation; or
 - cleanup of old generations.
 
 Source media, normalized MP4s, and technical `.nzytetv.json` manifests remain on the media drive. No B2-A component writes, deletes, normalizes, or transcodes those files.

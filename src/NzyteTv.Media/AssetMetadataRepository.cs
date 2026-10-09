@@ -195,13 +195,15 @@ public sealed record AssetMetadataGenerationManifest
 public sealed record AssetMetadataGenerationRecord(
     AssetMetadataTree Tree,
     string RelativeMediaPath,
-    AssetMetadata Metadata);
+    AssetMetadata Metadata,
+    byte[]? JsonBytes = null);
 
 public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataRepository
 {
     public const string CurrentFileName = "current.json";
     public const string GenerationsDirectoryName = "generations";
     public const string GenerationManifestFileName = "generation.json";
+    public const string GenerationInventoryFileName = "inventory.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -298,11 +300,47 @@ public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataReposit
         string generationId,
         long revision,
         IReadOnlyCollection<AssetMetadataGenerationRecord> records,
+        CancellationToken cancellationToken) =>
+        await CreateGenerationCoreAsync(
+            generationId,
+            revision,
+            records,
+            inventory: null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task CreateGenerationAsync(
+        string generationId,
+        long revision,
+        IReadOnlyCollection<AssetMetadataGenerationRecord> records,
+        AssetMetadataGenerationInventory inventory,
+        CancellationToken cancellationToken) =>
+        await CreateGenerationCoreAsync(
+            generationId,
+            revision,
+            records,
+            inventory,
+            cancellationToken).ConfigureAwait(false);
+
+    private async Task CreateGenerationCoreAsync(
+        string generationId,
+        long revision,
+        IReadOnlyCollection<AssetMetadataGenerationRecord> records,
+        AssetMetadataGenerationInventory? inventory,
         CancellationToken cancellationToken)
     {
         generationId = ValidateGenerationId(generationId);
         ValidateRevision(revision);
         ArgumentNullException.ThrowIfNull(records);
+        if (inventory is not null
+            && (inventory.Revision != revision
+                || !string.Equals(inventory.GenerationId, generationId, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("The metadata inventory identity does not match its generation.");
+        }
+
+        string? inventoryJson = inventory is null
+            ? null
+            : AssetMetadataGenerationInventorySerializer.Serialize(inventory);
         Directory.CreateDirectory(_root);
         MetadataPathSafety.EnsureNoReparsePoint(_root, _root);
         string generationsRoot = Path.Combine(_root, GenerationsDirectoryName);
@@ -338,11 +376,11 @@ public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataReposit
                 string mediaPath = MetadataPathSafety.ResolveRelativeMediaPath(treeRoot, relative);
                 string metadataPath = AssetMetadataStore.GetMetadataPath(mediaPath);
                 Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
-                await File.WriteAllTextAsync(
-                    metadataPath,
-                    AssetMetadataStore.Serialize(record.Metadata),
-                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                    cancellationToken).ConfigureAwait(false);
+                byte[] metadataContent = record.JsonBytes is null
+                    ? Encoding.UTF8.GetBytes(AssetMetadataStore.Serialize(record.Metadata))
+                    : ValidatePreservedMetadata(record);
+                await File.WriteAllBytesAsync(metadataPath, metadataContent, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             var manifest = new AssetMetadataGenerationManifest
@@ -355,6 +393,15 @@ public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataReposit
                 Serialize(manifest),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 cancellationToken).ConfigureAwait(false);
+            if (inventoryJson is not null)
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(stagingRoot, GenerationInventoryFileName),
+                    inventoryJson,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             Directory.Move(stagingRoot, finalRoot);
         }
         finally
@@ -364,6 +411,85 @@ public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataReposit
                 Directory.Delete(stagingRoot, recursive: true);
             }
         }
+    }
+
+    public AssetMetadataGenerationInventory ReadInventory(AssetMetadataSnapshotIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        if (identity.Mode != AssetMetadataStorageMode.ExternalGeneration
+            || identity.Revision is not long revision
+            || string.IsNullOrWhiteSpace(identity.GenerationId))
+        {
+            throw new InvalidDataException("An external generation identity is required to read inventory.");
+        }
+
+        string generationId = ValidateGenerationId(identity.GenerationId);
+        string generationRoot = GetGenerationRoot(generationId);
+        ValidateGeneration(generationId, revision, generationRoot);
+        string inventoryPath = Path.Combine(generationRoot, GenerationInventoryFileName);
+        if (!File.Exists(inventoryPath))
+        {
+            throw new FileNotFoundException("The metadata generation inventory is missing.", inventoryPath);
+        }
+
+        MetadataPathSafety.EnsureNoReparsePoint(generationRoot, inventoryPath);
+        AssetMetadataGenerationInventory inventory = AssetMetadataGenerationInventorySerializer.Deserialize(
+            File.ReadAllBytes(inventoryPath));
+        if (inventory.Revision != revision
+            || !string.Equals(inventory.GenerationId, generationId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("The metadata generation inventory identity is inconsistent.");
+        }
+
+        ValidateInventoryRecords(generationRoot, inventory);
+
+        return inventory;
+    }
+
+    public Task<AssetMetadataGenerationPointer> BootstrapCurrentAsync(
+        string generationId,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(generationId, "000000000001", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Metadata bootstrap requires generation 000000000001.");
+        }
+
+        _ = ReadInventory(new AssetMetadataSnapshotIdentity(
+            AssetMetadataStorageMode.ExternalGeneration,
+            Revision: 1,
+            generationId));
+        return PublishCurrentAsync(generationId, expectedRevision: 0, cancellationToken);
+    }
+
+    public string AllocateNextGenerationId()
+    {
+        string generationsRoot = Path.Combine(_root, GenerationsDirectoryName);
+        if (!Directory.Exists(generationsRoot)) return "000000000001";
+
+        MetadataPathSafety.EnsureNoReparsePoint(_root, generationsRoot);
+        long maximum = 0;
+        foreach (string path in Directory.EnumerateDirectories(
+            generationsRoot,
+            "*",
+            SearchOption.TopDirectoryOnly))
+        {
+            string name = Path.GetFileName(path);
+            if (name.Length == 12
+                && name.All(char.IsAsciiDigit)
+                && long.TryParse(name, out long value))
+            {
+                maximum = Math.Max(maximum, value);
+            }
+        }
+
+        long next = checked(maximum + 1);
+        if (next > 999_999_999_999)
+        {
+            throw new InvalidOperationException("The metadata generation ID space is exhausted.");
+        }
+
+        return next.ToString("D12", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<AssetMetadataGenerationPointer> PublishCurrentAsync(
@@ -544,6 +670,71 @@ public sealed class ExternalAssetMetadataGenerationStore : IAssetMetadataReposit
 
     private static string Serialize<T>(T value) =>
         JsonSerializer.Serialize(value, JsonOptions) + Environment.NewLine;
+
+    private static byte[] ValidatePreservedMetadata(AssetMetadataGenerationRecord record)
+    {
+        byte[] content = record.JsonBytes!;
+        AssetMetadata parsed = AssetMetadataStore.Deserialize(content, "preserved generation record");
+        string expected = AssetMetadataStore.Serialize(record.Metadata);
+        string actual = AssetMetadataStore.Serialize(parsed);
+        if (!string.Equals(expected, actual, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("A preserved metadata record does not match its parsed value.");
+        }
+
+        return content;
+    }
+
+    private static void ValidateInventoryRecords(
+        string generationRoot,
+        AssetMetadataGenerationInventory inventory)
+    {
+        foreach (AssetMetadataInventoryAsset asset in inventory.Assets!)
+        {
+            AssetMetadataDocument source = ReadInventoryMetadata(
+                generationRoot,
+                AssetMetadataTree.Source,
+                asset.SourceRelativePath!);
+            AssetMetadataDocument library = ReadInventoryMetadata(
+                generationRoot,
+                AssetMetadataTree.Library,
+                asset.LibraryRelativePath!);
+            bool expectedEnabled = asset.Classification ==
+                AssetMetadataInventoryClassification.PlaylistEligible;
+            if (!string.Equals(MediaPackageHash.Sha256(source.JsonBytes), asset.SourceMetadataSha256, StringComparison.Ordinal)
+                || !string.Equals(MediaPackageHash.Sha256(library.JsonBytes), asset.LibraryMetadataSha256, StringComparison.Ordinal)
+                || !string.Equals(source.Metadata.AssetId, asset.AssetId, StringComparison.Ordinal)
+                || !string.Equals(library.Metadata.AssetId, asset.AssetId, StringComparison.Ordinal)
+                || !string.Equals(source.Metadata.ContentGroupId, asset.ContentGroupId, StringComparison.Ordinal)
+                || !string.Equals(library.Metadata.ContentGroupId, asset.ContentGroupId, StringComparison.Ordinal)
+                || library.Metadata.Enabled != expectedEnabled)
+            {
+                throw new InvalidDataException(
+                    "The metadata generation inventory does not match its immutable metadata records.");
+            }
+        }
+    }
+
+    private static AssetMetadataDocument ReadInventoryMetadata(
+        string generationRoot,
+        AssetMetadataTree tree,
+        string relativeMediaPath)
+    {
+        string treeRoot = Path.Combine(generationRoot, GetTreeDirectoryName(tree));
+        string mediaPath = MetadataPathSafety.ResolveRelativeMediaPath(treeRoot, relativeMediaPath);
+        string metadataPath = AssetMetadataStore.GetMetadataPath(mediaPath);
+        MetadataPathSafety.EnsureNoReparsePoint(treeRoot, metadataPath);
+        if (!File.Exists(metadataPath))
+        {
+            throw new FileNotFoundException(
+                "A metadata generation inventory record is missing its metadata document.");
+        }
+
+        byte[] content = File.ReadAllBytes(metadataPath);
+        return new AssetMetadataDocument(
+            AssetMetadataStore.Deserialize(content, "metadata generation inventory record"),
+            content);
+    }
 
     private static T DeserializeStrict<T>(string json, string description) where T : class
     {

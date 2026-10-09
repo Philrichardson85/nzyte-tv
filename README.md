@@ -98,6 +98,9 @@ FFmpeg and FFprobe are required by media inspection, normalization, and verifica
 ```text
 nzytetv inspect <input>
 nzytetv media init <media-root>
+nzytetv media package prepare --media-root <media-root> --source-relative <relative-path> [--inbox-root <path>]
+nzytetv media metadata bootstrap --media-root <media-root> --metadata-root <external-metadata-root> [--publish]
+nzytetv media metadata refresh --media-root <media-root> --metadata-root <external-metadata-root> [--inbox-root <path>]
 nzytetv normalize <input> [--overwrite] [--vertical-layout blurred-background]
 nzytetv normalize-library <source-root> <destination-root> [--overwrite] [--vertical-layout blurred-background]
 nzytetv verify <input>
@@ -128,6 +131,8 @@ nzytetv metadata edit <source-media-path> --type <type> [--subtype <subtype>]
 ```
 
 Use `--help` on the root command or any subcommand. Exit code `0` means success; invalid arguments, media failures, and failed verification return non-zero codes.
+
+The 3B3-B2-B media package/bootstrap/refresh commands are local operator tooling for the external-metadata foundation. READY preparation validates and hashes one already-normalized package; refresh never normalizes or modifies media and affects only future planning snapshots. Dashboard controls, operations-helper integration, and production activation are not implemented in this slice. See [media-library-update.md](docs/media-library-update.md).
 
 `programming rolling init` defaults to the production six-hour target (exactly 21,600 seconds). The init-only `--test-block-duration` option accepts a whole-unit duration resolving to 60–1,800 whole seconds, such as `3m`, `4m`, `5m`, or `240s`. It is only for a separate non-production lineage used to accelerate rolling handoff tests; status labels such a lineage `TEST LINEAGE — NON-PRODUCTION DURATION`. See [Accelerated rolling integration testing](docs/accelerated-rolling-testing.md) before using it.
 

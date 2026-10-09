@@ -64,6 +64,13 @@ public static class CliApplication
                 return await RunMediaInitAsync(command.Input!, cancellationToken).ConfigureAwait(false);
             }
 
+            if (command.Kind is CommandKind.MediaPackagePrepare
+                or CommandKind.MediaMetadataBootstrap
+                or CommandKind.MediaMetadataRefresh)
+            {
+                return await RunMediaMetadataCommandAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+
             if (command.Kind is CommandKind.MetadataInitialize
                 or CommandKind.MetadataReview
                 or CommandKind.MetadataSync
@@ -380,6 +387,76 @@ public static class CliApplication
         Console.WriteLine("Status:");
         Console.WriteLine("    READY");
         return 0;
+    }
+
+    private static async Task<int> RunMediaMetadataCommandAsync(
+        ParsedCommand command,
+        CancellationToken cancellationToken)
+    {
+        switch (command.Kind)
+        {
+            case CommandKind.MediaPackagePrepare:
+                {
+                    ReadyPackagePreparationResult result = await new MediaPackagePreparer().PrepareAsync(
+                        new MediaPackageStorageOptions(command.MediaRoot!, command.InboxRoot),
+                        command.SourceRelativePath!,
+                        cancellationToken).ConfigureAwait(false);
+                    Console.WriteLine("NZYTE TV READY Package");
+                    Console.WriteLine();
+                    Console.WriteLine($"Package ID:       {result.PackageId}");
+                    Console.WriteLine($"READY file:       {result.ReadyFileName}");
+                    Console.WriteLine($"Source member:    {result.Manifest.SourceRelativePath}");
+                    Console.WriteLine($"Library member:   {result.Manifest.LibraryRelativePath}");
+                    Console.WriteLine("Encoding invoked: NO");
+                    Console.WriteLine("Media modified:   NO");
+                    return 0;
+                }
+            case CommandKind.MediaMetadataBootstrap:
+                {
+                    var service = new MediaMetadataBootstrapService(new MediaMetadataBootstrapOptions(
+                        command.MediaRoot!,
+                        command.ExternalMetadataRoot!));
+                    MediaMetadataBootstrapResult result = command.Publish
+                        ? await service.PublishAsync(cancellationToken).ConfigureAwait(false)
+                        : await service.PreviewAsync(cancellationToken).ConfigureAwait(false);
+                    Console.WriteLine("NZYTE TV External Metadata Bootstrap");
+                    Console.WriteLine();
+                    Console.WriteLine($"Status:          {result.Status}");
+                    Console.WriteLine($"Source records:  {result.SourceRecords}");
+                    Console.WriteLine($"Library records: {result.LibraryRecords}");
+                    Console.WriteLine($"Assets:          {result.Assets}");
+                    Console.WriteLine($"Issues:          {result.Issues.Count}");
+                    Console.WriteLine($"Published:       {(result.Status == MediaMetadataBootstrapStatus.Published ? "YES" : "NO")}");
+                    Console.WriteLine("Adjacent files:  UNCHANGED");
+                    return result.Status == MediaMetadataBootstrapStatus.Blocked ? 1 : 0;
+                }
+            case CommandKind.MediaMetadataRefresh:
+                {
+                    var service = new MediaLibraryRefreshService(new MediaLibraryRefreshOptions(
+                        command.MediaRoot!,
+                        command.ExternalMetadataRoot!,
+                        command.InboxRoot));
+                    MediaLibraryRefreshResult result = await service.RefreshAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    Console.WriteLine("NZYTE TV Media Metadata Refresh");
+                    Console.WriteLine();
+                    Console.WriteLine($"Operation ID:              {result.OperationId}");
+                    Console.WriteLine($"Status:                    {result.Status}");
+                    Console.WriteLine($"Metadata revision:         {result.MetadataRevisionBefore} -> {result.MetadataRevisionAfter}");
+                    Console.WriteLine($"Packages observed:         {result.PackagesObserved}");
+                    Console.WriteLine($"Packages accepted:         {result.PackagesAccepted}");
+                    Console.WriteLine($"Already processed:         {result.PackagesAlreadyProcessed}");
+                    Console.WriteLine($"Packages rejected:         {result.PackagesRejected}");
+                    Console.WriteLine($"Assets newly eligible:     {result.AssetsNewlyEligible}");
+                    Console.WriteLine($"Warnings:                  {result.WarningCount}");
+                    Console.WriteLine($"Errors:                    {result.ErrorCount}");
+                    Console.WriteLine("Media modified:            NO");
+                    Console.WriteLine("Committed blocks changed:  NO");
+                    return result.Status == MediaLibraryRefreshStatus.Failed ? 1 : 0;
+                }
+            default:
+                return 2;
+        }
     }
 
     private static void PrintMediaRootPaths(string heading, IReadOnlyList<string> paths)
@@ -1159,6 +1236,8 @@ public static class CliApplication
             Console.WriteLine("  nzytetv programming <init|validate|status|campaign|asset|rolling> ...");
             Console.WriteLine("  nzytetv metadata <initialize|review|sync|rebind|edit> ...");
             Console.WriteLine("  nzytetv media init <media-root>");
+            Console.WriteLine("  nzytetv media package prepare --media-root <path> --source-relative <path> [--inbox-root <path>]");
+            Console.WriteLine("  nzytetv media metadata <bootstrap|refresh> ...");
             Console.WriteLine();
             Console.WriteLine("Run 'nzytetv <command> --help' for command-specific help.");
             return;
@@ -1343,13 +1422,31 @@ public static class CliApplication
                 Console.WriteLine();
                 Console.WriteLine("Usage:");
                 Console.WriteLine("  nzytetv media init <media-root>");
+                Console.WriteLine("  nzytetv media package prepare --media-root <path> --source-relative <path> [--inbox-root <path>]");
+                Console.WriteLine("  nzytetv media metadata bootstrap --media-root <path> --metadata-root <path> [--publish]");
+                Console.WriteLine("  nzytetv media metadata refresh --media-root <path> --metadata-root <path> [--inbox-root <path>]");
                 Console.WriteLine();
-                Console.WriteLine("Initialize missing portable source, library, catalog, playlist, and work paths without touching existing content.");
+                Console.WriteLine("Initialize roots or prepare bounded external metadata updates without encoding or changing media.");
                 break;
             case CommandKind.MediaInit:
                 Console.WriteLine("Usage: nzytetv media init <media-root>");
                 Console.WriteLine("Create missing NZYTE TV media-root directories, descriptor, and an empty catalog.");
                 Console.WriteLine("Existing files and directories are preserved; no media tools or normalization are run.");
+                break;
+            case CommandKind.MediaPackagePrepare:
+                Console.WriteLine("Usage: nzytetv media package prepare --media-root <path> --source-relative <path> [--inbox-root <path>]");
+                Console.WriteLine("Validate and hash one already-normalized package, then atomically publish its READY manifest.");
+                Console.WriteLine("No FFmpeg, normalization, repair, or media write is performed.");
+                break;
+            case CommandKind.MediaMetadataBootstrap:
+                Console.WriteLine("Usage: nzytetv media metadata bootstrap --media-root <path> --metadata-root <path> [--publish]");
+                Console.WriteLine("Preview adjacent-sidecar migration by default; --publish creates generation 1 only when the report is clean.");
+                Console.WriteLine("Adjacent metadata and all media remain untouched.");
+                break;
+            case CommandKind.MediaMetadataRefresh:
+                Console.WriteLine("Usage: nzytetv media metadata refresh --media-root <path> --metadata-root <path> [--inbox-root <path>]");
+                Console.WriteLine("Validate final READY packages and publish one immutable external metadata generation when changes are accepted.");
+                Console.WriteLine("Active and committed programming is unchanged; no station or FFmpeg control is performed.");
                 break;
             case CommandKind.MetadataHelp:
                 Console.WriteLine("NZYTE TV programming metadata and content catalog");

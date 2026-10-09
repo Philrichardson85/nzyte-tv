@@ -454,6 +454,61 @@ public sealed class CommandLineParserTests
     }
 
     [Fact]
+    public void Parse_MediaPackagePrepare_RequiresTrustedMediaRootAndRelativeSource()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "media", "package", "prepare",
+            "--media-root", "C:\\media",
+            "--source-relative", "Music Videos/Record.mov",
+            "--inbox-root", "C:\\ready",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MediaPackagePrepare, result.Command!.Kind);
+        Assert.Equal("C:\\media", result.Command.MediaRoot);
+        Assert.Equal("Music Videos/Record.mov", result.Command.SourceRelativePath);
+        Assert.Equal("C:\\ready", result.Command.InboxRoot);
+    }
+
+    [Fact]
+    public void Parse_MediaMetadataBootstrap_RequiresExplicitRootsAndPublishIsOptional()
+    {
+        CommandParseResult result = CommandLineParser.Parse([
+            "media", "metadata", "bootstrap",
+            "--media-root", "C:\\media",
+            "--metadata-root", "C:\\metadata",
+            "--publish",
+        ]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CommandKind.MediaMetadataBootstrap, result.Command!.Kind);
+        Assert.True(result.Command.Publish);
+        Assert.Equal("C:\\metadata", result.Command.ExternalMetadataRoot);
+    }
+
+    [Fact]
+    public void Parse_MediaMetadataRefresh_HasNoPublishOrArbitraryPathOption()
+    {
+        Assert.True(CommandLineParser.Parse([
+            "media", "metadata", "refresh",
+            "--media-root", "C:\\media",
+            "--metadata-root", "C:\\metadata",
+        ]).IsSuccess);
+        Assert.False(CommandLineParser.Parse([
+            "media", "metadata", "refresh",
+            "--media-root", "C:\\media",
+            "--metadata-root", "C:\\metadata",
+            "--publish",
+        ]).IsSuccess);
+        Assert.False(CommandLineParser.Parse([
+            "media", "metadata", "refresh",
+            "--media-root", "C:\\media",
+            "--metadata-root", "C:\\metadata",
+            "--path", "C:\\elsewhere",
+        ]).IsSuccess);
+    }
+
+    [Fact]
     public void Parse_MetadataCatalogOptionWithoutValue_IsRejected()
     {
         CommandParseResult result = CommandLineParser.Parse([

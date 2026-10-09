@@ -568,6 +568,16 @@ Bash:
 
 The two `programming` commands explicitly activate optional Checkpoint 3A policy; omit them to retain legacy scheduler behavior. Initialization never overwrites an existing policy. These metadata and programming commands do not invoke FFmpeg or re-encode media. When normalization and metadata review are complete, use the operating system's safe-eject function before unplugging the drive. Mount the same drive on the Raspberry Pi and use its normalized `library/`; an operating-system or mount-path change alone does not require normalization again.
 
+For the development-stage 3B3-B2 READY protocol, prepare a manifest for each completed item after normalization, metadata review, and synchronization:
+
+```powershell
+C:\Tools\NzyteTv\candidate\nzytetv.exe media package prepare `
+  --media-root "D:\" `
+  --source-relative "Music Videos\Artist - Record.mov"
+```
+
+This hashes only that package's source, normalized MP4, technical manifest, and declared programming sidecars. It does not invoke FFmpeg or modify media. During a later transfer, publish the resulting final `*.ready.json` marker last. The refresh/dashboard deployment is not part of B2-B; see [Media-library update architecture](media-library-update.md) before exercising the bootstrap or refresh commands.
+
 See [Media library](media-library.md) for the full workstation-to-Pi workflow, [Content catalog](content-catalog.md) for catalog and review details, and [V1 programming policy](programming.md) for editorial controls and scheduling behavior.
 
 ## Troubleshooting

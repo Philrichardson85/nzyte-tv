@@ -218,6 +218,16 @@ Folder names, spaces, and capitalization are intentional. Preserve them exactly.
 
 ## Adding media during station operation
 
+Checkpoint 3B3-B2-B includes a local READY-package and external-metadata refresh foundation, but it is not deployed or dashboard-integrated yet. Normalize and complete metadata on Windows, then prepare one fixed package manifest with:
+
+```powershell
+nzytetv.exe media package prepare `
+  --media-root "<drive>:\" `
+  --source-relative "Music Videos\Artist - Record.mov"
+```
+
+Transfer the source member, normalized MP4, technical manifest, and any declared programming sidecars while preserving their relative paths; transfer the final `<package-id>.ready.json` marker into the trusted inbox last. The later explicit `media metadata refresh` command verifies only READY-declared members and writes only an external metadata generation. It does not normalize, invoke FFmpeg, replace media, edit the song catalog, or change active/committed blocks. Unknown or ambiguous songs require separate catalog maintenance and remain unprocessed. See [Media-library update architecture](media-library-update.md) for the precise development-stage protocol and bootstrap rules.
+
 > **Preparing new content does not always require stopping the station. Physically removing or disrupting the USB that FFmpeg is reading does.**
 
 The running broadcaster uses the normalized files named by the playlist queue supplied at startup. It does not watch the source, library, or playlist directories. Work on another computer or drive can continue without affecting that queue, but new assets will not appear in it automatically.
