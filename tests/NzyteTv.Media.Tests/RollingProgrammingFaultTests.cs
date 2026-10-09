@@ -63,6 +63,43 @@ public sealed class RollingProgrammingFaultTests
     }
 
     [Fact]
+    public async Task LegacyDurableIntent_RetryAfterExternalActivationKeepsAdjacentAuthority()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        var fault = new ThrowOnceFault(RollingPlannerCheckpoint.AfterIntent, 1);
+        RollingProgrammingPlanner adjacentPlanner = fixture.CreatePlanner(fault);
+        await fixture.InitializeAsync(adjacentPlanner);
+
+        await Assert.ThrowsAsync<InjectedRollingFailure>(() => adjacentPlanner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 1));
+        RollingProgrammingPaths paths = RollingProgrammingPaths.FromMediaRoot(fixture.Root);
+        RollingPlanningInputSnapshot frozen = RollingProgrammingJson.Deserialize<RollingPlanningInputSnapshot>(
+            File.ReadAllText(Path.Combine(paths.StagingDirectory, "000000000001", "input.json")),
+            "legacy durable-intent input");
+        Assert.Null(frozen.AssetMetadataGenerationId);
+        Assert.Null(frozen.AssetMetadataRevision);
+
+        var repository = new ExternalAssetMetadataGenerationStore(
+            Path.Combine(fixture.Root, "external-metadata"));
+        await repository.CreateGenerationAsync("000000000001", 1, [], CancellationToken.None);
+        await repository.PublishCurrentAsync("000000000001", 0, CancellationToken.None);
+        await repository.CreateGenerationAsync("000000000002", 2, [], CancellationToken.None);
+        await repository.PublishCurrentAsync("000000000002", 1, CancellationToken.None);
+        RollingProgrammingPlanner externalPlanner = fixture.CreatePlanner(metadataRepository: repository);
+
+        RollingMaintainResult recovered = await externalPlanner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 1);
+
+        Assert.Single(recovered.Manifest.Blocks!);
+        Assert.Null(fixture.ReadInput(recovered.Manifest.Blocks!.Single()).AssetMetadataGenerationId);
+        Assert.Equal("000000000002", repository.ReadCurrent().GenerationId);
+    }
+
+    [Fact]
     public async Task CrashAfterIntent_TestLineageRetainsFrozenDurationSeedAndSnapshot()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);

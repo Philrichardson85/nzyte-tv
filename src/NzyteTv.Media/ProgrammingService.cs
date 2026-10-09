@@ -31,9 +31,11 @@ public interface IProgrammingInventoryLoader
 }
 
 public sealed class ProgrammingInventoryLoader(
-    IAssetMetadataStore? metadataStore = null) : IProgrammingInventoryLoader
+    IAssetMetadataStore? metadataStore = null,
+    IAssetMetadataRepository? metadataRepository = null) : IProgrammingInventoryLoader
 {
-    private readonly IAssetMetadataStore _metadataStore = metadataStore ?? new AssetMetadataStore();
+    private readonly IAssetMetadataRepository _metadataRepository = metadataRepository
+        ?? new AdjacentAssetMetadataRepository(metadataStore);
 
     public ProgrammingInventory Load(string libraryRoot, SongCatalog catalog)
     {
@@ -46,19 +48,28 @@ public sealed class ProgrammingInventoryLoader(
             throw new DirectoryNotFoundException($"Normalized library root not found: {root}");
         }
 
+        IAssetMetadataSnapshot metadataSnapshot = _metadataRepository.Pin(
+            AssetMetadataTree.Library,
+            root);
         var assets = new List<ProgrammingAssetInventoryEntry>();
         var diagnostics = new List<string>();
-        foreach (string mediaPath in PlaylistLibraryLoader.DiscoverCandidateMediaPaths(root))
+        foreach (string mediaPath in PlaylistLibraryLoader.DiscoverCandidateMediaPaths(
+            root,
+            metadataSnapshot.DiscoverRelativeMediaPaths(),
+            includeAdjacentMetadataCandidates:
+                metadataSnapshot.Identity.Mode == AssetMetadataStorageMode.Adjacent))
         {
-            string metadataPath = AssetMetadataStore.GetMetadataPath(mediaPath);
-            if (!File.Exists(metadataPath))
+            string relativePath = Path.GetRelativePath(root, mediaPath)
+                .Replace(Path.DirectorySeparatorChar, '/')
+                .Replace(Path.AltDirectorySeparatorChar, '/');
+            if (!metadataSnapshot.Exists(relativePath))
             {
                 continue;
             }
 
             try
             {
-                AssetMetadata metadata = _metadataStore.Read(mediaPath);
+                AssetMetadata metadata = metadataSnapshot.Read(relativePath).Metadata;
                 AssetEligibilityResult eligibility = AssetEligibilityEvaluator.Evaluate(
                     metadata,
                     catalog,

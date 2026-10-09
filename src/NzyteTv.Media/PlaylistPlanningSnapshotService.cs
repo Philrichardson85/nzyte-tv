@@ -35,7 +35,8 @@ public sealed class PlaylistPlanningSnapshotService(
     IPlaylistLibraryLoader libraryLoader,
     PlaylistGenerator generator,
     PlaylistPolicy? basePolicy = null,
-    IProgrammingConfigurationStore? programmingStore = null) : IPlaylistPlanningSnapshotService
+    IProgrammingConfigurationStore? programmingStore = null,
+    IAssetMetadataRepository? metadataRepository = null) : IPlaylistPlanningSnapshotService
 {
     private static readonly JsonSerializerOptions CatalogReadOptions = new()
     {
@@ -45,6 +46,8 @@ public sealed class PlaylistPlanningSnapshotService(
     private readonly PlaylistPolicy _basePolicy = basePolicy ?? new PlaylistPolicy();
     private readonly IProgrammingConfigurationStore _programmingStore =
         programmingStore ?? new ProgrammingConfigurationStore();
+    private readonly IAssetMetadataRepository _metadataRepository =
+        metadataRepository ?? new AdjacentAssetMetadataRepository();
 
     public async Task<RollingPlanningInputSnapshot> CaptureAsync(
         PlaylistPlanningSnapshotRequest request,
@@ -64,9 +67,13 @@ public sealed class PlaylistPlanningSnapshotService(
             catalogPath,
             () => catalogStore.Load(catalogPath));
         SongCatalog catalog = catalogCapture.Value;
+        IAssetMetadataSnapshot metadataSnapshot = _metadataRepository.Pin(
+            AssetMetadataTree.Library,
+            request.LibraryRoot);
         PlaylistLibrarySnapshot library = await libraryLoader.LoadAsync(
             request.LibraryRoot,
             catalog,
+            metadataSnapshot,
             cancellationToken).ConfigureAwait(false);
 
         string programmingPath = ProgrammingConfigurationStore.GetPathForCatalog(catalogPath);
@@ -87,7 +94,7 @@ public sealed class PlaylistPlanningSnapshotService(
             .OrderBy(asset => asset.RelativePath, StringComparer.Ordinal)
             .ToArray();
         RollingAssetReadinessSnapshot[] readiness = request.CaptureReadiness
-            ? CaptureAssetReadiness(request.LibraryRoot, eligible)
+            ? CaptureAssetReadiness(request.LibraryRoot, eligible, metadataSnapshot)
             : [];
 
         string historyJson = RollingProgrammingJson.SerializeCanonical(request.HistoryBefore);
@@ -111,6 +118,8 @@ public sealed class PlaylistPlanningSnapshotService(
                 ?? RollingProgrammingPolicy.LegacyProgrammingSnapshotMarker,
             ProgrammingConfiguration = programming,
             InventorySnapshotHash = CalculateInventorySnapshotHash(eligible, excluded, readiness),
+            AssetMetadataGenerationId = metadataSnapshot.Identity.GenerationId,
+            AssetMetadataRevision = metadataSnapshot.Identity.Revision,
             HistoryBefore = request.HistoryBefore,
             HistoryBeforeHash = request.HistoryBeforeHash ?? RollingProgrammingJson.Sha256(historyJson),
             EligibleAssets = eligible,
@@ -148,17 +157,27 @@ public sealed class PlaylistPlanningSnapshotService(
         PlaylistDocument playlist,
         string libraryRoot,
         CancellationToken cancellationToken) =>
-        VerifyCapturedReadiness(snapshot, playlist, libraryRoot, cancellationToken);
+        VerifyCapturedReadiness(
+            snapshot,
+            playlist,
+            libraryRoot,
+            cancellationToken,
+            _metadataRepository);
 
     public static Task VerifyCapturedReadiness(
         RollingPlanningInputSnapshot snapshot,
         PlaylistDocument playlist,
         string libraryRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IAssetMetadataRepository? metadataRepository = null)
     {
         ValidateSnapshot(snapshot, requireReadiness: true);
         ArgumentNullException.ThrowIfNull(playlist);
         string root = Path.GetFullPath(libraryRoot);
+        AssetMetadataSnapshotIdentity metadataIdentity = GetMetadataIdentity(snapshot);
+        IAssetMetadataSnapshot metadataSnapshot = (metadataRepository
+                ?? new AdjacentAssetMetadataRepository())
+            .Pin(AssetMetadataTree.Library, root, metadataIdentity);
         var captured = snapshot.AssetReadiness!.ToDictionary(
             value => (value.AssetId, NormalizeRelativePath(value.RelativePath)),
             value => value,
@@ -177,17 +196,21 @@ public sealed class PlaylistPlanningSnapshotService(
 
             string mediaPath = ResolveContainedPath(root, relativePath);
             var file = new FileInfo(mediaPath);
+            bool metadataExists = metadataSnapshot.Exists(relativePath);
+            byte[]? metadataContent = metadataExists
+                ? metadataSnapshot.Read(relativePath).JsonBytes
+                : null;
             if (!file.Exists
                 || file.Length != expected.MediaLength
                 || file.LastWriteTimeUtc != expected.MediaLastWriteUtc.UtcDateTime
                 || !File.Exists(SourceManifestStore.GetManifestPath(mediaPath))
-                || !File.Exists(AssetMetadataStore.GetMetadataPath(mediaPath))
+                || metadataContent is null
                 || !string.Equals(
                     RollingProgrammingJson.Sha256File(SourceManifestStore.GetManifestPath(mediaPath)),
                     expected.TechnicalManifestSha256,
                     StringComparison.Ordinal)
                 || !string.Equals(
-                    RollingProgrammingJson.Sha256File(AssetMetadataStore.GetMetadataPath(mediaPath)),
+                    RollingProgrammingJson.Sha256(metadataContent),
                     expected.ProgrammingMetadataSha256,
                     StringComparison.Ordinal))
             {
@@ -220,6 +243,10 @@ public sealed class PlaylistPlanningSnapshotService(
             || snapshot.EligibleAssets is null
             || snapshot.ExcludedAssets is null
             || snapshot.AssetReadiness is null
+            || (snapshot.AssetMetadataGenerationId is null) != (snapshot.AssetMetadataRevision is null)
+            || snapshot.AssetMetadataRevision is <= 0
+            || (snapshot.AssetMetadataGenerationId is not null
+                && !IsValidGenerationId(snapshot.AssetMetadataGenerationId))
             || (requireReadiness && snapshot.AssetReadiness.Count != snapshot.EligibleAssets.Count))
         {
             throw new InvalidDataException("Rolling planning input snapshot is missing or invalid.");
@@ -364,29 +391,26 @@ public sealed class PlaylistPlanningSnapshotService(
 
     private static RollingAssetReadinessSnapshot[] CaptureAssetReadiness(
         string libraryRoot,
-        IReadOnlyList<PlaylistAsset> assets)
+        IReadOnlyList<PlaylistAsset> assets,
+        IAssetMetadataSnapshot metadataSnapshot)
     {
         string root = Path.GetFullPath(libraryRoot);
         var results = new List<RollingAssetReadinessSnapshot>(assets.Count);
-        var metadataStore = new AssetMetadataStore();
         foreach (PlaylistAsset asset in assets)
         {
             string relativePath = NormalizeRelativePath(asset.RelativePath);
             string mediaPath = ResolveContainedPath(root, relativePath);
             var media = new FileInfo(mediaPath);
             string manifestPath = SourceManifestStore.GetManifestPath(mediaPath);
-            string metadataPath = AssetMetadataStore.GetMetadataPath(mediaPath);
-            if (!media.Exists || !File.Exists(manifestPath) || !File.Exists(metadataPath))
+            if (!media.Exists || !File.Exists(manifestPath) || !metadataSnapshot.Exists(relativePath))
             {
                 throw new InvalidDataException(
                     $"Eligible asset '{asset.AssetId}' is missing media or required readiness sidecars.");
             }
 
-            byte[] metadataBefore = File.ReadAllBytes(metadataPath);
-            AssetMetadata metadata = metadataStore.Read(mediaPath);
-            byte[] metadataAfter = File.ReadAllBytes(metadataPath);
-            if (!metadataBefore.AsSpan().SequenceEqual(metadataAfter)
-                || !string.Equals(metadata.AssetId, asset.AssetId, StringComparison.Ordinal)
+            AssetMetadataDocument document = metadataSnapshot.Read(relativePath);
+            AssetMetadata metadata = document.Metadata;
+            if (!string.Equals(metadata.AssetId, asset.AssetId, StringComparison.Ordinal)
                 || !string.Equals(metadata.ContentGroupId, asset.ContentGroupId, StringComparison.Ordinal)
                 || !string.Equals(metadata.Title, asset.Title, StringComparison.Ordinal)
                 || !string.Equals(metadata.Artist, asset.Artist, StringComparison.Ordinal)
@@ -404,7 +428,7 @@ public sealed class PlaylistPlanningSnapshotService(
                 media.Length,
                 media.LastWriteTimeUtc,
                 RollingProgrammingJson.Sha256File(manifestPath),
-                RollingProgrammingJson.Sha256(metadataBefore)));
+                RollingProgrammingJson.Sha256(document.JsonBytes)));
         }
 
         return results
@@ -486,9 +510,22 @@ public sealed class PlaylistPlanningSnapshotService(
 
     private static string NormalizeRelativePath(string value) => value.Replace('\\', '/');
 
+    private static AssetMetadataSnapshotIdentity GetMetadataIdentity(RollingPlanningInputSnapshot snapshot) =>
+        snapshot.AssetMetadataGenerationId is null
+            ? new AssetMetadataSnapshotIdentity(AssetMetadataStorageMode.Adjacent)
+            : new AssetMetadataSnapshotIdentity(
+                AssetMetadataStorageMode.ExternalGeneration,
+                snapshot.AssetMetadataRevision,
+                snapshot.AssetMetadataGenerationId);
+
     private static bool IsSha256(string? value) =>
         value is { Length: 64 }
         && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool IsValidGenerationId(string value) =>
+        value.Length == 12
+        && value.Any(character => character != '0')
+        && value.All(character => character is >= '0' and <= '9');
 
     private static StringComparison GetPathComparison() => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase

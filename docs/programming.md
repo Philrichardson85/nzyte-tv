@@ -280,6 +280,8 @@ Existing generated playlist JSON remains valid. The broadcaster, station queue i
 
 Checkpoint 3B1 reuses this accepted policy and the same `PlaylistGenerator` through a frozen planning-snapshot service. `programming rolling maintain` can prepare immutable six-hour blocks under `<media-root>/playlists/rolling`; each block captures the exact policy revision (or explicit legacy marker), catalog, eligible inventory, durations, readiness, and planned-history input that produced it. Checkpoint 3B2-B delegates automatic future-buffer maintenance to that same planner. A later policy or editorial change affects only the next block that has not been generated. It never rewrites a committed block.
 
+Checkpoint 3B3-B2-A adds an optional external programming-metadata reader without changing the default. Adjacent `.nzytetv.meta.json` sidecars remain authoritative unless external-generation mode is explicitly selected. In external mode, one immutable metadata generation is pinned for the complete planning snapshot; its generation ID and revision are frozen into the input snapshot, and readiness hashes use the metadata content rather than its absolute storage path. Existing snapshots without those optional fields continue to mean adjacent metadata. See [media-library-update.md](media-library-update.md) for the B2-A boundary and deferred work.
+
 The rolling manifest and content-addressed history snapshots are transaction artifacts for planned programming. They are not station runtime state or an air log. See [rolling-programming.md](rolling-programming.md) for commands, identity, atomicity, reconciliation, and the Pi acceptance plan.
 
 ## Current scope boundary

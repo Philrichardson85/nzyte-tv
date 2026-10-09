@@ -310,7 +310,7 @@ The [workstation setup guide](docs/workstation-setup.md) provides copy/paste Pow
 
 - `NzyteTv.Cli` owns argument handling and console presentation.
 - `NzyteTv.Core` owns domain models, output safety, rational-number handling, broadcast validation, catalog identity, matching, category, metadata-validation, eligibility, programming policy, deterministic lane patterns, scheduling, cooldowns, relaxation, playlist/history models, rolling block identity/seed rules, rolling execution-state models, and the relative rolling-buffer calculation. It has no FFmpeg dependency.
-- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, read-only playlist planning snapshots, duration inspection, programming-policy persistence/services, the rolling manifest/intent/transaction store, committed-block resolution, rolling coordination around the existing supervisor, and asynchronous replenishment through the accepted planner.
+- `NzyteTv.Media` owns tool discovery, asynchronous process execution, typed FFprobe JSON parsing, normalization and verification orchestration, broadcast-plan filesystem validation, concat generation, stream-copy execution, adjacent and explicitly selected external-generation metadata readers, read-only playlist planning snapshots, duration inspection, programming-policy persistence/services, the rolling manifest/intent/transaction store, committed-block resolution, rolling coordination around the existing supervisor, and asynchronous replenishment through the accepted planner.
 
 Tests cover command parsing, recursive library discovery, extension filtering, relative path preservation, resumability, failure continuation, output paths and overwrite protection, rational frame rates, FFprobe JSON, FFmpeg arguments, normalization publication behavior, broadcast rules, cancellation, keyframe intervals, catalog validation, matching ambiguity, metadata workflows, playlist eligibility, programming-policy storage/validation, editorial overrides, campaign weighting, song-family selection, internal patterns, repetition, cadence, history, rolling identity/seeds, frozen-input retry, manifest atomicity, orphan reconciliation, locking, immutable buffers, CP2 resume, rolling claims, completion sealing, block handoff, mutual exclusion, moving buffer targets, planner contention/retries, advisory persistence, six-block sustained replenishment, and injected crash reconciliation. The integration test creates a tiny clip at runtime when FFmpeg and FFprobe are available and skips otherwise. No test media is committed.
 
@@ -320,6 +320,7 @@ Tests cover command parsing, recursive library discovery, extension filtering, r
 - [Raspberry Pi setup and deployment](docs/raspberry-pi-setup.md)
 - [Broadcast standard](docs/broadcast-standard.md)
 - [Media library and normalization workflow](docs/media-library.md)
+- [Media-library update architecture](docs/media-library-update.md)
 - [Content catalog and asset metadata](docs/content-catalog.md)
 - [Playlist and programming engine](docs/playlists.md)
 - [V1 programming policy and operator controls](docs/programming.md)

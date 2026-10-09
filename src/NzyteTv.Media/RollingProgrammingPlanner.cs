@@ -465,7 +465,7 @@ public sealed class RollingProgrammingPlanner : IRollingProgrammingPlanner
             historyAfterHash);
 
         ProgrammingPaths currentPaths = ProgrammingPaths.FromMediaRoot(paths.MediaRoot);
-        await PlaylistPlanningSnapshotService.VerifyCapturedReadiness(
+        await _snapshotService!.VerifySelectedReadinessAsync(
             snapshot,
             generation.Playlist,
             currentPaths.LibraryRoot,

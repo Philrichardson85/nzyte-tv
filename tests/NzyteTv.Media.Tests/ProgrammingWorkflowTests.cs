@@ -598,6 +598,13 @@ public sealed class ProgrammingWorkflowTests
                 {
                     KnownAssetIds = assets.Select(asset => asset.AssetId).ToHashSet(StringComparer.Ordinal),
                 });
+
+        public Task<PlaylistLibrarySnapshot> LoadAsync(
+            string libraryRoot,
+            SongCatalog catalog,
+            IAssetMetadataSnapshot metadataSnapshot,
+            CancellationToken cancellationToken) =>
+            LoadAsync(libraryRoot, catalog, cancellationToken);
     }
 
     private sealed class RecordingPlaylistStore : IPlaylistStore

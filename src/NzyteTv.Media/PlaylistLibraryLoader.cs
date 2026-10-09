@@ -16,11 +16,18 @@ public interface IPlaylistLibraryLoader
         string libraryRoot,
         SongCatalog catalog,
         CancellationToken cancellationToken);
+
+    Task<PlaylistLibrarySnapshot> LoadAsync(
+        string libraryRoot,
+        SongCatalog catalog,
+        IAssetMetadataSnapshot metadataSnapshot,
+        CancellationToken cancellationToken);
 }
 
 public sealed class PlaylistLibraryLoader(
     IMediaAnalyzer mediaAnalyzer,
-    IAssetMetadataStore? metadataStore = null) : IPlaylistLibraryLoader
+    IAssetMetadataStore? metadataStore = null,
+    IAssetMetadataRepository? metadataRepository = null) : IPlaylistLibraryLoader
 {
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -29,22 +36,41 @@ public sealed class PlaylistLibraryLoader(
         ".mkv",
     };
 
-    private readonly IAssetMetadataStore _metadataStore = metadataStore ?? new AssetMetadataStore();
+    private readonly IAssetMetadataRepository _metadataRepository = metadataRepository
+        ?? new AdjacentAssetMetadataRepository(metadataStore);
 
     public async Task<PlaylistLibrarySnapshot> LoadAsync(
         string libraryRoot,
         SongCatalog catalog,
         CancellationToken cancellationToken)
     {
+        IAssetMetadataSnapshot metadataSnapshot = _metadataRepository.Pin(
+            AssetMetadataTree.Library,
+            libraryRoot);
+        return await LoadAsync(libraryRoot, catalog, metadataSnapshot, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<PlaylistLibrarySnapshot> LoadAsync(
+        string libraryRoot,
+        SongCatalog catalog,
+        IAssetMetadataSnapshot metadataSnapshot,
+        CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         SongCatalogValidator.Validate(catalog);
+        ArgumentNullException.ThrowIfNull(metadataSnapshot);
         string root = Path.GetFullPath(libraryRoot);
         if (!Directory.Exists(root))
         {
             throw new DirectoryNotFoundException($"Normalized library root not found: {root}");
         }
 
-        string[] candidates = DiscoverCandidateMediaPaths(root);
+        string[] candidates = DiscoverCandidateMediaPaths(
+            root,
+            metadataSnapshot.DiscoverRelativeMediaPaths(),
+            includeAdjacentMetadataCandidates:
+                metadataSnapshot.Identity.Mode == AssetMetadataStorageMode.Adjacent);
         var eligible = new List<PlaylistAsset>();
         var excluded = new List<PlaylistExclusion>();
         var knownAssetIds = new HashSet<string>(StringComparer.Ordinal);
@@ -53,14 +79,14 @@ public sealed class PlaylistLibraryLoader(
             cancellationToken.ThrowIfCancellationRequested();
             string relativePath = ToRelativePath(root, mediaPath);
             bool mediaExists = File.Exists(mediaPath);
-            bool metadataExists = File.Exists(AssetMetadataStore.GetMetadataPath(mediaPath));
+            bool metadataExists = metadataSnapshot.Exists(relativePath);
             bool technicalManifestExists = File.Exists(SourceManifestStore.GetManifestPath(mediaPath));
             AssetMetadata? metadata = null;
             if (metadataExists)
             {
                 try
                 {
-                    metadata = _metadataStore.Read(mediaPath);
+                    metadata = metadataSnapshot.Read(relativePath).Metadata;
                 }
                 catch (Exception exception) when (exception is
                     InvalidDataException or AssetMetadataValidationException or IOException or UnauthorizedAccessException)
@@ -148,7 +174,10 @@ public sealed class PlaylistLibraryLoader(
         };
     }
 
-    internal static string[] DiscoverCandidateMediaPaths(string root)
+    internal static string[] DiscoverCandidateMediaPaths(
+        string root,
+        IReadOnlyList<string>? metadataRelativeMediaPaths = null,
+        bool includeAdjacentMetadataCandidates = true)
     {
         var candidates = new HashSet<string>(GetPathComparer());
         var pending = new Stack<string>();
@@ -170,7 +199,8 @@ public sealed class PlaylistLibraryLoader(
                 {
                     mediaPath = path;
                 }
-                else if (fileName.EndsWith(AssetMetadataStore.MetadataSuffix, StringComparison.OrdinalIgnoreCase))
+                else if (includeAdjacentMetadataCandidates
+                    && fileName.EndsWith(AssetMetadataStore.MetadataSuffix, StringComparison.OrdinalIgnoreCase))
                 {
                     mediaPath = path[..^AssetMetadataStore.MetadataSuffix.Length];
                 }
@@ -192,6 +222,18 @@ public sealed class PlaylistLibraryLoader(
                     StringComparison.OrdinalIgnoreCase)))
             {
                 pending.Push(child);
+            }
+        }
+
+        if (metadataRelativeMediaPaths is not null)
+        {
+            foreach (string relativePath in metadataRelativeMediaPaths)
+            {
+                string mediaPath = MetadataPathSafety.ResolveRelativeMediaPath(root, relativePath);
+                if (SupportedExtensions.Contains(Path.GetExtension(mediaPath)))
+                {
+                    candidates.Add(mediaPath);
+                }
             }
         }
 

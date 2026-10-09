@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NzyteTv.Core;
 
 public static class RollingProgrammingPolicy
@@ -141,6 +143,13 @@ public sealed class RollingPlanningInputSnapshot
     public ProgrammingConfiguration? ProgrammingConfiguration { get; init; }
 
     public string? InventorySnapshotHash { get; init; }
+
+    // Both null is the backward-compatible identity for adjacent-sidecar authority.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AssetMetadataGenerationId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? AssetMetadataRevision { get; init; }
 
     public PlaylistHistoryDocument? HistoryBefore { get; init; }
 

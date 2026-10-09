@@ -30,15 +30,18 @@ public sealed class RollingCommittedBlockResolver : IRollingCommittedBlockResolv
     private readonly IRollingPlanStore _store;
     private readonly IPlaylistHistoryStore _historyStore;
     private readonly IBroadcastPlanner _broadcastPlanner;
+    private readonly IAssetMetadataRepository _metadataRepository;
 
     public RollingCommittedBlockResolver(
         IRollingPlanStore? store = null,
         IPlaylistHistoryStore? historyStore = null,
-        IBroadcastPlanner? broadcastPlanner = null)
+        IBroadcastPlanner? broadcastPlanner = null,
+        IAssetMetadataRepository? metadataRepository = null)
     {
         _store = store ?? new RollingPlanStore();
         _historyStore = historyStore ?? new PlaylistHistoryStore();
         _broadcastPlanner = broadcastPlanner ?? new BroadcastPlanner();
+        _metadataRepository = metadataRepository ?? new AdjacentAssetMetadataRepository();
     }
 
     public ResolvedRollingCommittedBlock ResolveManifestBlock(
@@ -170,7 +173,8 @@ public sealed class RollingCommittedBlockResolver : IRollingCommittedBlockResolv
             input,
             playlist,
             normalizedLibraryRoot,
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None,
+            _metadataRepository).GetAwaiter().GetResult();
         BroadcastPlan plan = _broadcastPlanner.CreatePlan([playlistPath], normalizedLibraryRoot);
         if (!plan.IsReady)
         {

@@ -4,6 +4,11 @@ using NzyteTv.Core;
 
 namespace NzyteTv.Media;
 
+/// <summary>
+/// Mutable adjacent-sidecar storage used by workstation metadata commands.
+/// External generations are intentionally exposed through the read-only
+/// <see cref="IAssetMetadataRepository"/> boundary instead.
+/// </summary>
 public interface IAssetMetadataStore
 {
     AssetMetadata Read(string mediaPath);
@@ -36,16 +41,7 @@ public sealed class AssetMetadataStore : IAssetMetadataStore
             throw new FileNotFoundException($"Programming metadata not found: {metadataPath}", metadataPath);
         }
 
-        try
-        {
-            AssetMetadata? metadata = JsonSerializer.Deserialize<AssetMetadata>(File.ReadAllText(metadataPath), ReadOptions);
-            AssetMetadataValidator.ValidateStructure(metadata);
-            return metadata!;
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException($"Malformed asset metadata JSON in '{metadataPath}': {exception.Message}", exception);
-        }
+        return Deserialize(File.ReadAllBytes(metadataPath), metadataPath);
     }
 
     public async Task<bool> WriteAsync(
@@ -59,7 +55,7 @@ public sealed class AssetMetadataStore : IAssetMetadataStore
             ?? throw new InvalidOperationException("The metadata path has no parent directory.");
         Directory.CreateDirectory(directory);
 
-        string json = JsonSerializer.Serialize(metadata, WriteOptions) + Environment.NewLine;
+        string json = Serialize(metadata);
         if (File.Exists(metadataPath)
             && string.Equals(await File.ReadAllTextAsync(metadataPath, cancellationToken).ConfigureAwait(false), json, StringComparison.Ordinal))
         {
@@ -118,4 +114,24 @@ public sealed class AssetMetadataStore : IAssetMetadataStore
     }
 
     public static string GetMetadataPath(string mediaPath) => Path.GetFullPath(mediaPath) + MetadataSuffix;
+
+    internal static AssetMetadata Deserialize(ReadOnlySpan<byte> content, string description)
+    {
+        try
+        {
+            AssetMetadata? metadata = JsonSerializer.Deserialize<AssetMetadata>(content, ReadOptions);
+            AssetMetadataValidator.ValidateStructure(metadata);
+            return metadata!;
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException($"Malformed asset metadata JSON in '{description}': {exception.Message}", exception);
+        }
+    }
+
+    internal static string Serialize(AssetMetadata metadata)
+    {
+        AssetMetadataValidator.ValidateStructure(metadata);
+        return JsonSerializer.Serialize(metadata, WriteOptions) + Environment.NewLine;
+    }
 }

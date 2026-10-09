@@ -494,22 +494,30 @@ internal sealed class RollingLibraryFixture : IDisposable
         return fixture;
     }
 
-    public RollingProgrammingPlanner CreatePlanner(IRollingPlannerFaultInjector? faultInjector = null)
+    public RollingProgrammingPlanner CreatePlanner(
+        IRollingPlannerFaultInjector? faultInjector = null,
+        IAssetMetadataRepository? metadataRepository = null)
     {
-        IPlaylistPlanningSnapshotService snapshotService = CreateSnapshotService();
+        IPlaylistPlanningSnapshotService snapshotService = CreateSnapshotService(metadataRepository);
         return new RollingProgrammingPlanner(
             snapshotService: snapshotService,
             faultInjector: faultInjector,
+            committedBlockResolver: new RollingCommittedBlockResolver(
+                metadataRepository: metadataRepository),
             timeProvider: Time,
             idFactory: NextId,
             baseSeedFactory: () => 919191);
     }
 
-    public IPlaylistPlanningSnapshotService CreateSnapshotService() =>
+    public IPlaylistPlanningSnapshotService CreateSnapshotService(
+        IAssetMetadataRepository? metadataRepository = null) =>
         new PlaylistPlanningSnapshotService(
             new SongCatalogStore(),
-            new PlaylistLibraryLoader(new StubAnalyzer(_durations)),
-            new PlaylistGenerator());
+            new PlaylistLibraryLoader(
+                new StubAnalyzer(_durations),
+                metadataRepository: metadataRepository),
+            new PlaylistGenerator(),
+            metadataRepository: metadataRepository);
 
     public Task<RollingInitializationResult> InitializeAsync(
         RollingProgrammingPlanner planner,

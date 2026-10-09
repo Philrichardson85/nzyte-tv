@@ -53,6 +53,37 @@ public sealed class RollingCommittedBlockResolverTests
     }
 
     [Fact]
+    public async Task Resolve_LegacyCommittedBlockAfterExternalActivationKeepsAdjacentAuthority()
+    {
+        using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
+        RollingProgrammingPlanner planner = fixture.CreatePlanner();
+        await fixture.InitializeAsync(planner);
+        RollingMaintainResult maintained = await planner.MaintainAsync(
+            fixture.Root,
+            CancellationToken.None,
+            committedBlockTarget: 1);
+        Assert.Null(fixture.ReadInput(maintained.Manifest.Blocks!.Single()).AssetMetadataGenerationId);
+
+        var repository = new ExternalAssetMetadataGenerationStore(
+            Path.Combine(fixture.Root, "external-metadata"));
+        await repository.CreateGenerationAsync("000000000001", 1, [], CancellationToken.None);
+        await repository.PublishCurrentAsync("000000000001", 0, CancellationToken.None);
+        await repository.CreateGenerationAsync("000000000002", 2, [], CancellationToken.None);
+        await repository.PublishCurrentAsync("000000000002", 1, CancellationToken.None);
+        var resolver = new RollingCommittedBlockResolver(metadataRepository: repository);
+
+        ResolvedRollingCommittedBlock resolved = resolver.ResolveManifestBlock(
+            maintained.Paths,
+            maintained.Manifest,
+            1,
+            fixture.LibraryRoot);
+
+        Assert.True(resolved.BroadcastPlan.IsReady);
+        Assert.Null(resolved.InputSnapshot.AssetMetadataGenerationId);
+        Assert.Equal("000000000002", repository.ReadCurrent().GenerationId);
+    }
+
+    [Fact]
     public async Task Resolve_MissingMediaMountIsClassifiedAsRetryableUnavailability()
     {
         using RollingLibraryFixture fixture = await RollingLibraryFixture.CreateAsync(programming: true);
