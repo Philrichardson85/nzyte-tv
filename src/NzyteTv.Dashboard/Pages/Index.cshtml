@@ -118,6 +118,47 @@
         </article>
     </section>
 
+    <section class="operations-section" aria-labelledby="media-operations-heading">
+        <p class="eyebrow">Media operations</p>
+        <article class="panel media-operations-panel">
+            <div class="panel-heading">
+                <h2 id="media-operations-heading">Update Media Library</h2>
+                <span class="pill" id="media-availability">Loading</span>
+            </div>
+            <p class="control-note media-explanation">
+                Processes completed READY media packages. This does not normalize media or change active or already committed programming.
+            </p>
+            <dl class="media-summary">
+                <div><dt>Metadata revision</dt><dd id="media-revision">Unavailable</dd></div>
+                <div><dt>Metadata generation</dt><dd id="media-generation">Unavailable</dd></div>
+                <div><dt>Refresh state</dt><dd id="media-refresh-status">Loading</dd></div>
+            </dl>
+            <div class="button-row media-button-row">
+                <button id="media-refresh" type="button" disabled>Update Media Library</button>
+            </div>
+            <p class="operation-message" id="media-message" aria-live="polite">
+                Connecting to the local operations helper.
+            </p>
+            <div class="media-results" id="media-results" hidden>
+                <h3>Latest result</h3>
+                <dl>
+                    <div><dt>Packages observed</dt><dd id="media-packages-observed">0</dd></div>
+                    <div><dt>Accepted / already processed / rejected</dt><dd id="media-package-outcomes">0 / 0 / 0</dd></div>
+                    <div><dt>New source / library assets</dt><dd id="media-new-assets">0 / 0</dd></div>
+                    <div><dt>Metadata created / preserved</dt><dd id="media-metadata-counts">0 / 0</dd></div>
+                    <div><dt>Newly eligible</dt><dd id="media-newly-eligible">0</dd></div>
+                    <div><dt>Unresolved / incomplete / skipped</dt><dd id="media-attention-counts">0 / 0 / 0</dd></div>
+                    <div><dt>Warnings / errors</dt><dd id="media-warning-error-counts">0 / 0</dd></div>
+                    <div><dt>Revision</dt><dd id="media-revision-change">Unavailable</dd></div>
+                </dl>
+                <ul id="media-issues" class="media-issues"></ul>
+            </div>
+            <p class="control-note">
+                Refresh does not restart the broadcaster. Newly eligible content is available only to future ungenerated programming; normal eligibility, Spotlight, and cooldown rules still apply.
+            </p>
+        </article>
+    </section>
+
     <aside class="information-note">
         <strong>Local status only.</strong>
         Broadcast status reflects the local NZYTE TV broadcaster. Public YouTube playback is not independently verified.

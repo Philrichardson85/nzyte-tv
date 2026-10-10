@@ -72,7 +72,9 @@ app.Use(async (context, next) =>
     bool spotlightMutation = HttpMethods.IsPost(context.Request.Method)
         && (context.Request.Path.Equals("/api/v1/programming/spotlight")
             || context.Request.Path.Equals("/api/v1/programming/spotlight/disable"));
-    if (!HttpMethods.IsGet(context.Request.Method) && !spotlightMutation)
+    bool mediaMutation = HttpMethods.IsPost(context.Request.Method)
+        && context.Request.Path.Equals("/api/v1/media-library/refresh");
+    if (!HttpMethods.IsGet(context.Request.Method) && !spotlightMutation && !mediaMutation)
     {
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         context.Response.Headers.Allow = "GET";
@@ -137,20 +139,63 @@ app.MapPost("/api/v1/programming/spotlight/disable", async (
         return await client.DisableSpotlightAsync(request, cancellationToken).ConfigureAwait(false);
     }).ConfigureAwait(false));
 
+app.MapGet("/api/v1/media-library", async (
+    HttpContext context,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return await ExecuteHelperAsync(
+        () => client.GetMediaLibraryAsync(cancellationToken)).ConfigureAwait(false);
+});
+
+app.MapPost("/api/v1/media-library/refresh", async (
+    HttpContext context,
+    IAntiforgery antiforgery,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) => await ExecuteMutationAsync(
+    context,
+    antiforgery,
+    async () =>
+    {
+        MediaLibraryRefreshRequest request = await StrictJsonRequestReader
+            .ReadAsync<MediaLibraryRefreshRequest>(
+                context.Request,
+                cancellationToken,
+                OperationsProtocol.MaximumMediaRefreshRequestBytes)
+            .ConfigureAwait(false);
+        return await client.StartMediaLibraryRefreshAsync(request, cancellationToken).ConfigureAwait(false);
+    },
+    accepted => Results.Accepted(
+        $"/api/v1/media-library/operations/{accepted.OperationId}", accepted)).ConfigureAwait(false));
+
+app.MapGet("/api/v1/media-library/operations/{operationId}", async (
+    HttpContext context,
+    string operationId,
+    IOperationsHelperClient client,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return await ExecuteHelperAsync(
+        () => client.GetMediaLibraryOperationAsync(operationId, cancellationToken)).ConfigureAwait(false);
+});
+
 app.MapRazorPages();
 
 app.Run();
 
-static async Task<IResult> ExecuteMutationAsync(
+static async Task<IResult> ExecuteMutationAsync<T>(
     HttpContext context,
     IAntiforgery antiforgery,
-    Func<Task<SpotlightStateResponse>> action)
+    Func<Task<T>> action,
+    Func<T, IResult>? success = null)
 {
     context.Response.Headers.CacheControl = "no-store";
     try
     {
         await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
-        return Results.Ok(await action().ConfigureAwait(false));
+        T response = await action().ConfigureAwait(false);
+        return success?.Invoke(response) ?? Results.Ok(response);
     }
     catch (AntiforgeryValidationException)
     {
@@ -174,15 +219,15 @@ static async Task<IResult> ExecuteMutationAsync(
     }
 }
 
-static async Task<IResult> ExecuteHelperAsync(Func<Task<SpotlightStateResponse>> action)
+static async Task<IResult> ExecuteHelperAsync<T>(Func<Task<T>> action)
 {
     try
     {
         return Results.Ok(await action().ConfigureAwait(false));
     }
-    catch (OperationsHelperException)
+    catch (OperationsHelperException exception)
     {
-        return Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.HelperUnavailable);
+        return MapHelperError(exception);
     }
 }
 
@@ -192,6 +237,18 @@ static IResult MapHelperError(OperationsHelperException exception) => exception.
         Error(StatusCodes.Status409Conflict, OperationsErrorCodes.StaleRevision),
     OperationsErrorCodes.ValidationFailed =>
         Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.ValidationFailed),
+    OperationsErrorCodes.MalformedRequest =>
+        Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.MalformedRequest),
+    OperationsErrorCodes.InvalidOperationId =>
+        Error(StatusCodes.Status400BadRequest, OperationsErrorCodes.InvalidOperationId),
+    OperationsErrorCodes.OperationNotFound =>
+        Error(StatusCodes.Status404NotFound, OperationsErrorCodes.OperationNotFound),
+    OperationsErrorCodes.RefreshBusy =>
+        Error(StatusCodes.Status409Conflict, OperationsErrorCodes.RefreshBusy),
+    OperationsErrorCodes.FeatureDisabled =>
+        Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.FeatureDisabled),
+    OperationsErrorCodes.FeatureUnavailable =>
+        Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.FeatureUnavailable),
     _ => Error(StatusCodes.Status503ServiceUnavailable, OperationsErrorCodes.HelperUnavailable),
 };
 

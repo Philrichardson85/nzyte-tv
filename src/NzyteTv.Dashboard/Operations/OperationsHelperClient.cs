@@ -14,6 +14,7 @@ public sealed class OperationsHelperClient : IOperationsHelperClient, IDisposabl
         PropertyNameCaseInsensitive = false,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     private readonly HttpClient _httpClient;
@@ -48,21 +49,40 @@ public sealed class OperationsHelperClient : IOperationsHelperClient, IDisposabl
     }
 
     public Task<SpotlightStateResponse> GetSpotlightAsync(CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Get, "/api/v1/spotlight", content: null, cancellationToken);
+        SendAsync<SpotlightStateResponse>(HttpMethod.Get, "/api/v1/spotlight", content: null, cancellationToken);
 
     public Task<SpotlightStateResponse> SetSpotlightAsync(
         SetSpotlightRequest request,
-        CancellationToken cancellationToken) => SendAsync(
+        CancellationToken cancellationToken) => SendAsync<SpotlightStateResponse>(
             HttpMethod.Post, "/api/v1/spotlight", JsonContent.Create(request, options: JsonOptions), cancellationToken);
 
     public Task<SpotlightStateResponse> DisableSpotlightAsync(
         DisableSpotlightRequest request,
-        CancellationToken cancellationToken) => SendAsync(
+        CancellationToken cancellationToken) => SendAsync<SpotlightStateResponse>(
             HttpMethod.Post, "/api/v1/spotlight/disable", JsonContent.Create(request, options: JsonOptions), cancellationToken);
+
+    public Task<MediaLibrarySummaryResponse> GetMediaLibraryAsync(CancellationToken cancellationToken) =>
+        SendAsync<MediaLibrarySummaryResponse>(HttpMethod.Get, "/api/v1/media-library", null, cancellationToken);
+
+    public Task<MediaLibraryRefreshAcceptedResponse> StartMediaLibraryRefreshAsync(
+        MediaLibraryRefreshRequest request,
+        CancellationToken cancellationToken) => SendAsync<MediaLibraryRefreshAcceptedResponse>(
+            HttpMethod.Post,
+            "/api/v1/media-library/refresh",
+            JsonContent.Create(request, options: JsonOptions),
+            cancellationToken);
+
+    public Task<MediaLibraryOperationResponse> GetMediaLibraryOperationAsync(
+        string operationId,
+        CancellationToken cancellationToken) => SendAsync<MediaLibraryOperationResponse>(
+            HttpMethod.Get,
+            $"/api/v1/media-library/operations/{Uri.EscapeDataString(operationId)}",
+            null,
+            cancellationToken);
 
     public void Dispose() => _httpClient.Dispose();
 
-    private async Task<SpotlightStateResponse> SendAsync(
+    private async Task<T> SendAsync<T>(
         HttpMethod method,
         string path,
         HttpContent? content,
@@ -76,7 +96,7 @@ public sealed class OperationsHelperClient : IOperationsHelperClient, IDisposabl
                 .ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<SpotlightStateResponse>(JsonOptions, cancellationToken)
+                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken)
                     .ConfigureAwait(false) ?? throw new OperationsHelperException(OperationsErrorCodes.HelperUnavailable);
             }
 

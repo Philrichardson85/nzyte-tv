@@ -7,6 +7,7 @@ public static class OperationsProtocol
     public const int SchemaVersion = 1;
     public const double DefaultSpotlightMultiplier = 2.0;
     public const int MaximumRequestBytes = 4096;
+    public const int MaximumMediaRefreshRequestBytes = 1024;
 }
 
 public static class OperationsErrorCodes
@@ -18,6 +19,11 @@ public static class OperationsErrorCodes
     public const string UnsupportedContentType = "unsupportedContentType";
     public const string HelperUnavailable = "helperUnavailable";
     public const string InternalError = "internalError";
+    public const string FeatureDisabled = "featureDisabled";
+    public const string FeatureUnavailable = "featureUnavailable";
+    public const string RefreshBusy = "refreshBusy";
+    public const string OperationNotFound = "operationNotFound";
+    public const string InvalidOperationId = "invalidOperationId";
 }
 
 public sealed record SpotlightCatalogOption(

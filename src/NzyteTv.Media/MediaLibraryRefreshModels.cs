@@ -255,13 +255,19 @@ public sealed class MediaRefreshOperationStore : IMediaRefreshOperationStore
     private MediaLibraryRefreshResult Read(string path)
     {
         MetadataPathSafety.EnsureNoReparsePoint(GetOperationsDirectory(create: false), path);
-        var file = new FileInfo(path);
-        if (!file.Exists || file.Length is <= 0 or > MaximumOperationBytes)
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length is <= 0 or > MaximumOperationBytes)
         {
             throw new InvalidDataException("A media refresh operation record has an invalid size.");
         }
 
-        return MediaLibraryRefreshResultSerializer.Deserialize(File.ReadAllBytes(path));
+        byte[] content = new byte[stream.Length];
+        stream.ReadExactly(content);
+        return MediaLibraryRefreshResultSerializer.Deserialize(content);
     }
 
     private string GetOperationsDirectory(bool create)

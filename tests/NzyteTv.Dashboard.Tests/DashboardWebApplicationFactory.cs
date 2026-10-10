@@ -46,6 +46,12 @@ internal sealed class FakeOperationsHelperClient : IOperationsHelperClient
         OperationsProtocol.SchemaVersion, 5, true, "purple-rain", "Purple Rain", "Prince", 2.0,
         [new SpotlightCatalogOption("purple-rain", "Purple Rain", "Prince"),
          new SpotlightCatalogOption("free-fallin", "Free Fallin'", "Tom Petty")]);
+    public MediaLibrarySummaryResponse MediaSummary { get; set; } = new(
+        OperationsProtocol.SchemaVersion, MediaLibraryFeatureState.Ready, 7, "000000000007", null, null);
+    public MediaLibraryOperationResponse MediaOperation { get; set; } = new(
+        OperationsProtocol.SchemaVersion, Guid.Empty.ToString("N"), MediaLibraryOperationState.NoChanges,
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 7, 7, "000000000007", "000000000007",
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
 
     public Task<SpotlightStateResponse> GetSpotlightAsync(CancellationToken cancellationToken) => Result();
 
@@ -75,6 +81,32 @@ internal sealed class FakeOperationsHelperClient : IOperationsHelperClient
         };
         return Task.FromResult(State);
     }
+
+    public Task<MediaLibrarySummaryResponse> GetMediaLibraryAsync(CancellationToken cancellationToken) =>
+        Exception is null
+            ? Task.FromResult(MediaSummary)
+            : Task.FromException<MediaLibrarySummaryResponse>(Exception);
+
+    public Task<MediaLibraryRefreshAcceptedResponse> StartMediaLibraryRefreshAsync(
+        MediaLibraryRefreshRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Exception is not null) return Task.FromException<MediaLibraryRefreshAcceptedResponse>(Exception);
+        if (request.SchemaVersion != OperationsProtocol.SchemaVersion
+            || request.ExpectedMetadataRevision <= 0)
+        {
+            return Task.FromException<MediaLibraryRefreshAcceptedResponse>(
+                new OperationsHelperException(OperationsErrorCodes.ValidationFailed, 400));
+        }
+        return Task.FromResult(new MediaLibraryRefreshAcceptedResponse(
+            OperationsProtocol.SchemaVersion, MediaOperation.OperationId));
+    }
+
+    public Task<MediaLibraryOperationResponse> GetMediaLibraryOperationAsync(
+        string operationId,
+        CancellationToken cancellationToken) => Exception is null
+            ? Task.FromResult(MediaOperation with { OperationId = operationId })
+            : Task.FromException<MediaLibraryOperationResponse>(Exception);
 
     private Task<SpotlightStateResponse> Result() => Exception is null
         ? Task.FromResult(State)

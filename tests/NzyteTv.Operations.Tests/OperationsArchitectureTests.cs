@@ -34,6 +34,44 @@ public sealed class OperationsArchitectureTests
     }
 
     [Fact]
+    public void MediaIntegrationHasNoBootstrapStationProcessOrNormalizationSurface()
+    {
+        string root = FindRepositoryRoot();
+        string source = string.Join("\n", Directory.EnumerateFiles(
+                Path.Combine(root, "src", "NzyteTv.Operations"), "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(File.ReadAllText));
+        foreach (string forbidden in new[]
+        {
+            "MediaMetadataBootstrapService",
+            "MediaNormalizer",
+            "BroadcastFfmpeg",
+            "StationSupervisor",
+            "RollingStationCoordinator",
+            "ProcessStartInfo",
+            "systemctl",
+            "File.Delete",
+        })
+        {
+            Assert.DoesNotContain(forbidden, source, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.DoesNotContain("MapPost(\"/api/v1/media-library/bootstrap", source, StringComparison.Ordinal);
+        Assert.Contains("ListenUnixSocket", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MediaFeatureDefaultsDisabledWithoutTrustedPaths()
+    {
+        var options = OperationsOptions.Load(new ConfigurationBuilder().Build());
+        Assert.False(options.MediaLibrary.Enabled);
+        Assert.Null(options.MediaLibrary.MediaRoot);
+        Assert.Null(options.MediaLibrary.MetadataRoot);
+        Assert.Null(options.MediaLibrary.InboxRoot);
+    }
+
+    [Fact]
     public void HelperProjectDoesNotReferenceCliOrDashboard()
     {
         string root = FindRepositoryRoot();

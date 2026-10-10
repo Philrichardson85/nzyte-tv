@@ -1083,6 +1083,8 @@ pgrep -x -c ffmpeg
 
 ## 19. Current operational limitations
 
+Checkpoint 3B3-B2-C includes a default-disabled application surface for asynchronous READY-package refresh through the local Operations helper and dashboard. It is not enabled or deployed in production by this checkpoint. Production bootstrap remains a separate trusted CLI/admin migration for B2-D; it is never a dashboard action. When later enabled, refresh does not normalize media, restart broadcasting, or rewrite active/committed blocks.
+
 The accepted Checkpoint 2 station supervisor, unchanged by Checkpoints 3A, 3B1, 3B2-A, and 3B2-B:
 
 - uses the supplied playlist queue fixed at broadcaster startup and does not dynamically discover new playlist JSON files;

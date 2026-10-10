@@ -22,6 +22,10 @@ public sealed class DashboardRenderingTests
         Assert.Contains("Programming", html, StringComparison.Ordinal);
         Assert.Contains("PROGRAMMING CONTROLS", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Spotlight Record", html, StringComparison.Ordinal);
+        Assert.Contains("Media Operations", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Update Media Library", html, StringComparison.Ordinal);
+        Assert.Contains("does not normalize media", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("future ungenerated programming", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Newly generated programming only", html, StringComparison.Ordinal);
         Assert.Contains(
             "Public YouTube playback is not independently verified.",
@@ -64,6 +68,11 @@ public sealed class DashboardRenderingTests
         Assert.Contains("option.textContent", script, StringComparison.Ordinal);
         Assert.Contains("X-NZYTE-TV-CSRF", script, StringComparison.Ordinal);
         Assert.Contains("window.setTimeout(poll", script, StringComparison.Ordinal);
+        Assert.Contains("window.confirm", script, StringComparison.Ordinal);
+        Assert.Contains("beginMediaPolling", script, StringComparison.Ordinal);
+        Assert.Contains("window.setTimeout(pollOperation, 1500)", script, StringComparison.Ordinal);
+        Assert.Contains("encodeURIComponent(operationId)", script, StringComparison.Ordinal);
+        Assert.Contains("issues.replaceChildren()", script, StringComparison.Ordinal);
         Assert.DoesNotContain("WebSocket", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("EventSource", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -123,7 +132,7 @@ public sealed class DashboardRenderingTests
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion;
 
-        Assert.StartsWith("0.2.0-3b3-b1+", version, StringComparison.Ordinal);
+        Assert.StartsWith("0.3.0-3b3-b2c+", version, StringComparison.Ordinal);
     }
 
     internal static string FindRepositoryRoot()

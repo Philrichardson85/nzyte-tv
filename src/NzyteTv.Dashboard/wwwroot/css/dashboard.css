@@ -237,6 +237,49 @@ dd {
     font: inherit;
 }
 
+.media-button-row button {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--accent);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+
+.media-button-row button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.media-summary {
+    margin-top: 1rem;
+}
+
+.media-explanation {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+}
+
+.media-results {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(157, 176, 191, 0.13);
+}
+
+.media-results h3 {
+    margin: 0 0 0.8rem;
+    font-size: 0.95rem;
+}
+
+.media-issues {
+    margin: 1rem 0 0;
+    padding-left: 1.25rem;
+    color: var(--muted);
+}
+
 .spotlight-controls select,
 .spotlight-controls input {
     width: 100%;

@@ -80,9 +80,10 @@ public sealed class MediaMetadataBootstrapService
         bool publish,
         CancellationToken cancellationToken)
     {
-        await using IAsyncDisposable held = await _refreshLock.TryAcquireAsync(
+        await using IMediaMetadataRefreshLease held = await _refreshLock.TryAcquireAsync(
             _options.ExternalMetadataRoot,
             cancellationToken).ConfigureAwait(false);
+        held.Consume(_options.ExternalMetadataRoot);
         string currentPath = Path.Combine(
             _options.ExternalMetadataRoot,
             ExternalAssetMetadataGenerationStore.CurrentFileName);

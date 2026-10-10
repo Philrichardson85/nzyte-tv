@@ -132,6 +132,30 @@ public sealed class DashboardArchitectureTests
     }
 
     [Fact]
+    public void DashboardDoesNotComposeMediaRefreshStorageOrBootstrap()
+    {
+        string root = DashboardRenderingTests.FindRepositoryRoot();
+        string source = string.Join("\n", Directory.EnumerateFiles(
+                Path.Combine(root, "src", "NzyteTv.Dashboard"), "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(File.ReadAllText));
+        foreach (string forbidden in new[]
+        {
+            "MediaLibraryRefreshService",
+            "ExternalAssetMetadataGenerationStore",
+            "MediaMetadataBootstrapService",
+            "File.WriteAll",
+            "FileStream(",
+        })
+        {
+            Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+        }
+        Assert.Contains("IOperationsHelperClient", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardServiceTemplate_ContainsNoSecretsOrBroadcasterControls()
     {
         string root = DashboardRenderingTests.FindRepositoryRoot();

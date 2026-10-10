@@ -35,7 +35,7 @@ public sealed class B2AArchitectureTests
     }
 
     [Fact]
-    public void OperationsHelperDidNotGainExternalMetadataOrMediaWriteComposition()
+    public void OperationsHelperMediaCompositionRetainsProcessAndFfmpegIsolation()
     {
         string root = FindRepositoryRoot();
         string source = string.Join(
@@ -49,13 +49,12 @@ public sealed class B2AArchitectureTests
                     StringComparison.OrdinalIgnoreCase))
                 .Select(File.ReadAllText));
 
-        Assert.DoesNotContain("ExternalAssetMetadataGenerationStore", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("CreateGenerationAsync", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("PublishCurrentAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("MediaNormalizer", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ProcessStartInfo", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Process.Start", source, StringComparison.Ordinal);
         Assert.DoesNotContain("systemctl", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ffmpeg", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bootstrap", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

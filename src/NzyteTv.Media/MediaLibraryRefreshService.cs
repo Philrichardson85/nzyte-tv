@@ -28,6 +28,11 @@ public sealed record MediaLibraryRefreshOptions(
         {
             throw new DirectoryNotFoundException("The external metadata root is unavailable.");
         }
+        if (PathsOverlap(package.MediaRoot, external))
+        {
+            throw new InvalidOperationException(
+                "The external metadata root must not overlap the read-only media root.");
+        }
 
         MetadataPathSafety.EnsureNoReparsePoint(external, external);
         return this with
@@ -36,6 +41,19 @@ public sealed record MediaLibraryRefreshOptions(
             InboxRoot = package.InboxRoot,
             ExternalMetadataRoot = external,
         };
+    }
+
+    private static bool PathsOverlap(string first, string second) =>
+        IsSameOrChild(first, second) || IsSameOrChild(second, first);
+
+    private static bool IsSameOrChild(string parent, string candidate)
+    {
+        string relative = Path.GetRelativePath(parent, candidate);
+        return string.Equals(relative, ".", StringComparison.Ordinal)
+            || (!Path.IsPathFullyQualified(relative)
+                && !string.Equals(relative, "..", StringComparison.Ordinal)
+                && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal));
     }
 }
 
@@ -79,9 +97,19 @@ public sealed class MediaLibraryRefreshService : IMediaLibraryRefreshService
 
     public async Task<MediaLibraryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
     {
-        await using IAsyncDisposable held = await _refreshLock.TryAcquireAsync(
+        IMediaMetadataRefreshLease lease = await _refreshLock.TryAcquireAsync(
             _options.ExternalMetadataRoot,
             cancellationToken).ConfigureAwait(false);
+        return await RefreshWithLeaseAsync(lease, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<MediaLibraryRefreshResult> RefreshWithLeaseAsync(
+        IMediaMetadataRefreshLease lease,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        lease.Consume(_options.ExternalMetadataRoot);
+        await using IAsyncDisposable held = lease;
         AssetMetadataGenerationPointer current = _generationStore.ReadCurrent();
         _ = await _operationStore.ReconcileRunningAsync(current, cancellationToken).ConfigureAwait(false);
         var state = new RefreshState(

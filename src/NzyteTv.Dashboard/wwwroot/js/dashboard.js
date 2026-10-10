@@ -11,6 +11,10 @@
     let lastObservedAt = Date.now();
     let spotlightRevision = null;
     let spotlightBusy = false;
+    let mediaRevision = null;
+    let mediaOperationId = null;
+    let mediaPollTimer = null;
+    let mediaSummaryTimer = null;
 
     function setLiteralText(id, value, suffix = "") {
         const element = document.getElementById(id);
@@ -233,6 +237,191 @@
         }
     }
 
+    function setMediaButton(enabled) {
+        const button = document.getElementById("media-refresh");
+        if (button) button.disabled = !enabled;
+    }
+
+    function renderMediaUnavailable(message = "Media update is unavailable. Broadcast status is unaffected.") {
+        mediaRevision = null;
+        setStatusText("media-availability", "unavailable");
+        setLiteralText("media-revision", null);
+        setLiteralText("media-generation", null);
+        setStatusText("media-refresh-status", "unavailable");
+        setLiteralText("media-message", message);
+        setMediaButton(false);
+    }
+
+    function renderMediaSummary(summary) {
+        const state = summary.featureState;
+        mediaRevision = summary.metadataRevision;
+        setStatusText("media-availability", state);
+        setLiteralText("media-revision", summary.metadataRevision);
+        setLiteralText("media-generation", summary.generationId);
+        setStatusText("media-refresh-status", state === "busy" ? "running" : state);
+        if (state === "disabled") {
+            setLiteralText("media-message", "Media update is not enabled on this installation.");
+            setMediaButton(false);
+        } else if (state === "unavailable") {
+            renderMediaUnavailable();
+        } else if (state === "busy") {
+            setLiteralText("media-message", "Media-library refresh is in progress.");
+            setMediaButton(false);
+            if (summary.activeOperationId) beginMediaPolling(summary.activeOperationId);
+        } else {
+            setLiteralText("media-message", "Completed READY packages can be checked for future programming.");
+            setMediaButton(Number.isInteger(summary.metadataRevision) && summary.metadataRevision > 0);
+        }
+        if (summary.lastOperation && !mediaOperationId) renderMediaOperation(summary.lastOperation);
+    }
+
+    async function refreshMediaSummary(scheduleNext = true) {
+        if (mediaSummaryTimer !== null) {
+            window.clearTimeout(mediaSummaryTimer);
+            mediaSummaryTimer = null;
+        }
+        try {
+            const response = await fetch("/api/v1/media-library", {
+                cache: "no-store",
+                headers: { "Accept": "application/json" }
+            });
+            if (!response.ok) throw new Error("media summary request failed");
+            renderMediaSummary(await response.json());
+        } catch {
+            renderMediaUnavailable();
+        } finally {
+            if (scheduleNext && mediaOperationId === null) {
+                mediaSummaryTimer = window.setTimeout(refreshMediaSummary, interval);
+            }
+        }
+    }
+
+    const mediaIssueMessages = {
+        ambiguousCatalogMatch: "A song has more than one catalog match.",
+        catalogMatchRequired: "A song requires catalog maintenance before it can become eligible.",
+        incompletePackage: "A READY package is incomplete.",
+        packageIdConflict: "A package identifier conflicts with previously accepted content.",
+        existingMediaConflict: "A package targets media already accepted by another package.",
+        refreshFailed: "The refresh could not be completed safely.",
+        catalogChanged: "The song catalog changed during refresh; no mixed snapshot was published."
+    };
+
+    function renderMediaOperation(operation) {
+        const results = document.getElementById("media-results");
+        if (results) results.hidden = false;
+        setStatusText("media-refresh-status", operation.status);
+        setLiteralText("media-packages-observed", operation.packagesObserved);
+        setLiteralText("media-package-outcomes",
+            `${operation.packagesAccepted} / ${operation.packagesAlreadyProcessed} / ${operation.packagesRejected}`);
+        setLiteralText("media-new-assets", `${operation.newSourceAssets} / ${operation.newLibraryAssets}`);
+        setLiteralText("media-metadata-counts",
+            `${operation.metadataRecordsCreated} / ${operation.metadataRecordsPreserved}`);
+        setLiteralText("media-newly-eligible", operation.assetsNewlyEligible);
+        setLiteralText("media-attention-counts",
+            `${operation.unresolvedAssets} / ${operation.incompletePackages} / ${operation.skippedPackages}`);
+        setLiteralText("media-warning-error-counts", `${operation.warningCount} / ${operation.errorCount}`);
+        setLiteralText("media-revision-change",
+            `${operation.metadataRevisionBefore} → ${operation.metadataRevisionAfter}`);
+
+        const issues = document.getElementById("media-issues");
+        if (issues) {
+            issues.replaceChildren();
+            const grouped = new Map();
+            for (const issue of operation.issues || []) {
+                grouped.set(issue.code, (grouped.get(issue.code) || 0) + 1);
+            }
+            for (const [code, count] of grouped) {
+                const item = document.createElement("li");
+                item.textContent = `${mediaIssueMessages[code] || "A package needs operator attention."} (${count})`;
+                issues.appendChild(item);
+            }
+        }
+
+        if (operation.status === "noChanges") {
+            setLiteralText("media-message", "No new eligible READY packages were published.");
+        } else if (operation.status === "succeededWithWarnings") {
+            setLiteralText("media-message", "Refresh completed with items that need attention.");
+        } else if (operation.status === "succeeded") {
+            setLiteralText("media-message", "Refresh completed. New metadata is available to future planning.");
+        } else if (operation.status === "failed") {
+            setLiteralText("media-message", "Refresh failed safely. The prior metadata generation remains authoritative.");
+        } else if (operation.status === "interrupted") {
+            setLiteralText("media-message", "Refresh was interrupted. It was not restarted automatically.");
+        }
+    }
+
+    function isTerminalMediaStatus(status) {
+        return ["succeeded", "succeededWithWarnings", "noChanges", "failed", "interrupted"].includes(status);
+    }
+
+    function beginMediaPolling(operationId) {
+        if (!operationId || mediaOperationId === operationId) return;
+        mediaOperationId = operationId;
+        if (mediaSummaryTimer !== null) window.clearTimeout(mediaSummaryTimer);
+        if (mediaPollTimer !== null) window.clearTimeout(mediaPollTimer);
+        setMediaButton(false);
+        const pollOperation = async () => {
+            try {
+                const response = await fetch(`/api/v1/media-library/operations/${encodeURIComponent(operationId)}`, {
+                    cache: "no-store",
+                    headers: { "Accept": "application/json" }
+                });
+                if (!response.ok) throw new Error("media operation request failed");
+                const operation = await response.json();
+                renderMediaOperation(operation);
+                if (isTerminalMediaStatus(operation.status)) {
+                    mediaOperationId = null;
+                    await refreshMediaSummary();
+                    return;
+                }
+                mediaPollTimer = window.setTimeout(pollOperation, 1500);
+            } catch {
+                mediaOperationId = null;
+                renderMediaUnavailable("Media update status is unavailable. The operation was not restarted.");
+                mediaSummaryTimer = window.setTimeout(refreshMediaSummary, interval);
+            }
+        };
+        mediaPollTimer = window.setTimeout(pollOperation, 1000);
+    }
+
+    async function startMediaRefresh() {
+        if (!Number.isInteger(mediaRevision) || mediaOperationId !== null) return;
+        if (!window.confirm(
+            "Update Media Library will validate completed READY packages and publish eligible metadata for future programming. It will not normalize media or rewrite active/committed blocks.")) {
+            return;
+        }
+        setMediaButton(false);
+        setLiteralText("media-message", "Starting media-library refresh…");
+        try {
+            const response = await fetch("/api/v1/media-library/refresh", {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-NZYTE-TV-CSRF": antiforgeryToken
+                },
+                body: JSON.stringify({
+                    schemaVersion: 1,
+                    expectedMetadataRevision: mediaRevision
+                })
+            });
+            if (response.status === 409) {
+                await refreshMediaSummary();
+                setLiteralText("media-message",
+                    "Media metadata changed or another refresh started. Review the refreshed state before trying again.");
+                return;
+            }
+            if (!response.ok) throw new Error("media refresh request failed");
+            const accepted = await response.json();
+            setLiteralText("media-message", "Media-library refresh is in progress.");
+            beginMediaPolling(accepted.operationId);
+        } catch {
+            await refreshMediaSummary();
+            setLiteralText("media-message", "Media update could not be started. Review the current state and try again.");
+        }
+    }
+
     const setSpotlightButton = document.getElementById("spotlight-set");
     if (setSpotlightButton) {
         setSpotlightButton.addEventListener("click", () => {
@@ -253,8 +442,12 @@
             { expectedRevision: spotlightRevision }));
     }
 
+    const mediaRefreshButton = document.getElementById("media-refresh");
+    if (mediaRefreshButton) mediaRefreshButton.addEventListener("click", startMediaRefresh);
+
     updateAge();
     window.setInterval(updateAge, 1000);
     window.setTimeout(poll, interval);
     refreshSpotlight();
+    refreshMediaSummary();
 })();

@@ -1,4 +1,4 @@
-# Operations dashboard (Checkpoint 3B3-A / 3B3-B1)
+# Operations dashboard (Checkpoint 3B3-A / 3B3-B1 / 3B3-B2-C)
 
 Checkpoint 3B3-A adds a separate ASP.NET Core status dashboard. Checkpoint 3B3-B1 retains that isolated status path and adds only the Spotlight Record programming control through a second, narrowly privileged local operations helper. Neither process runs inside, starts, stops, signals, or restarts the broadcaster. Neither invokes FFmpeg, the CLI, a shell, or systemd. Restarting or stopping either process does not stop the broadcaster.
 
@@ -28,8 +28,11 @@ The version in the header is the **dashboard assembly version**. It is not the r
 - `GET /api/v1/programming/spotlight` reads the current Spotlight state and validated catalog choices through the operations helper.
 - `POST /api/v1/programming/spotlight` enables or updates Spotlight with an expected configuration revision.
 - `POST /api/v1/programming/spotlight/disable` disables Spotlight with an expected configuration revision.
+- `GET /api/v1/media-library` reads the sanitized media-refresh feature/generation summary through the operations helper.
+- `POST /api/v1/media-library/refresh` requests an asynchronous refresh using the metadata revision currently shown to the operator.
+- `GET /api/v1/media-library/operations/{operationId}` polls a sanitized durable refresh result.
 
-The two allowlisted POST endpoints require ASP.NET Core antiforgery validation, strict JSON, and small request bodies. There are no PUT, PATCH, DELETE, media-refresh, start, stop, restart, reconnect, planner-generation, playlist, upload, shell, or systemd controls.
+The three allowlisted POST endpoints require ASP.NET Core antiforgery validation, strict JSON, and small request bodies. There are no PUT, PATCH, DELETE, bootstrap/migration, start, stop, restart, reconnect, planner-generation, playlist, upload, shell, or systemd controls.
 
 The browser polls the status endpoint every five seconds. The server maintains one short-lived in-memory snapshot, so browser polling does not independently read every state file. A refresh failure produces a safe unavailable snapshot and does not terminate the web process.
 
@@ -66,6 +69,17 @@ ASP.NET Core configuration can override these non-secret settings with environme
 | `Dashboard__OperationsSocketPath` | `/run/nzyte-tv-operations/operations.sock` |
 
 All state paths must be absolute and distinct. They are process configuration only; the browser cannot supply paths. Windows development defaults to a `dashboard-state` directory beside the executable unless tests or local configuration provide temporary absolute paths.
+
+The Operations helper also recognizes the following B2-C settings, all of which are deployment inputs rather than browser inputs:
+
+| Environment variable | B2-C default |
+|---|---|
+| `Operations__MediaLibrary__Enabled` | `false` |
+| `Operations__MediaLibrary__MediaRoot` | unset |
+| `Operations__MediaLibrary__MetadataRoot` | unset |
+| `Operations__MediaLibrary__InboxRoot` | unset (the B2-B media-root convention is used only after the feature is enabled with otherwise valid trusted roots) |
+
+No production values are supplied by B2-C. With the section absent, the existing B1 helper and Spotlight routes start normally and media refresh reports disabled. An enabled but invalid configuration fails only the media feature closed.
 
 ## Publish
 
@@ -125,7 +139,11 @@ Each browser mutation supplies the revision it most recently read. A cross-proce
 
 Spotlight changes affect newly generated programming only. The active block and already committed future blocks are unchanged.
 
-The dashboard talks to the helper only through `/run/nzyte-tv-operations/operations.sock`. The helper has no TCP listener and exposes only Get Spotlight, Set Spotlight, and Disable Spotlight. If it is unavailable, the programming-control panel is marked unavailable while the existing status dashboard and broadcaster continue normally.
+The dashboard talks to the helper only through `/run/nzyte-tv-operations/operations.sock`. The helper has no TCP listener. In addition to the existing Spotlight operations, B2-C exposes only media summary, refresh, and operation-status calls. Media refresh is disabled unless explicitly configured in the helper; code presence or filesystem discovery never activates it. The browser cannot provide media, inbox, metadata, or catalog paths. If the helper or media storage is unavailable, the affected controls are marked unavailable while the existing status dashboard and broadcaster continue normally.
+
+The Media Operations panel confirms operator intent before requesting a refresh, then polls the accepted operation without holding an HTTP request open. Refresh validates completed READY packages and writes only external metadata generations. It does not normalize media, restart the broadcaster, or rewrite the active or already committed future blocks. New eligible metadata is visible only to a newly captured future planning snapshot, subject to normal catalog, programming, Spotlight, and cooldown rules. Bootstrap is intentionally CLI/admin-only and is not exposed by the dashboard.
+
+No production B2-C activation or service/storage permission change is included in this checkpoint. Those tasks, including the trusted roots and external-mode cutover, belong to B2-D.
 
 ## Security boundary
 

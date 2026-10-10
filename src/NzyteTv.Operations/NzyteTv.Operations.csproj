@@ -10,8 +10,8 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>nzytetv-operations</AssemblyName>
-    <VersionPrefix>0.1.0</VersionPrefix>
-    <VersionSuffix>3b3-b1</VersionSuffix>
+    <VersionPrefix>0.3.0</VersionPrefix>
+    <VersionSuffix>3b3-b2c</VersionSuffix>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="NzyteTv.Operations.Tests" />

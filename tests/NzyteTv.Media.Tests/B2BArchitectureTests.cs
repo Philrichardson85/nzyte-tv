@@ -40,7 +40,7 @@ public sealed class B2BArchitectureTests
     }
 
     [Fact]
-    public void B2BAddsNoWebOperationsOrDeploymentSurface()
+    public void B2CAddsNoDirectDashboardRefreshCompositionOrDeploymentSurface()
     {
         string root = FindRepositoryRoot();
         string dashboard = string.Join('\n', Directory.EnumerateFiles(
@@ -57,9 +57,9 @@ public sealed class B2BArchitectureTests
             .Select(File.ReadAllText));
 
         Assert.DoesNotContain("MediaLibraryRefreshService", dashboard, StringComparison.Ordinal);
-        Assert.DoesNotContain("MediaLibraryRefreshService", operations, StringComparison.Ordinal);
-        Assert.DoesNotContain("media-library/refresh", dashboard, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("media-library/refresh", operations, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MediaLibraryRefreshService", operations, StringComparison.Ordinal);
+        Assert.DoesNotContain("MediaMetadataBootstrapService", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("MediaMetadataBootstrapService", operations, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(root, "deploy", "checkpoint-3b3-b2")));
     }
 

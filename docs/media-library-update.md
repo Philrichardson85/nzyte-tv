@@ -1,6 +1,6 @@
 # Media-library update architecture
 
-Checkpoint 3B3-B2 is being delivered in isolated slices. B2-A established the programming-metadata storage and planning-read foundation. B2-B adds local READY-package preparation, bounded package verification, external-generation refresh, and adjacent-sidecar bootstrap tooling. It still does not add an Update Media Library dashboard button, operations-helper endpoint, production service configuration, or Raspberry Pi deployment/migration.
+Checkpoint 3B3-B2 is being delivered in isolated slices. B2-A established the programming-metadata storage and planning-read foundation. B2-B added local READY-package preparation, bounded package verification, external-generation refresh, and adjacent-sidecar bootstrap tooling. B2-C adds a default-disabled Operations-helper application surface and dashboard UI for invoking only the existing refresh operation. Production configuration, filesystem permissions, external-mode activation, bootstrap, and Raspberry Pi deployment/migration remain deferred to B2-D.
 
 ## B2-A storage modes
 
@@ -109,13 +109,29 @@ Bootstrap requires no existing `current.json`, takes the same refresh-writer loc
 
 Bootstrap never changes adjacent sidecars or media. Those adjacent sidecars must remain available during production migration because v0.7 active/committed blocks and durable intents with null metadata-generation identity explicitly retain adjacent authority.
 
+## B2-C application surface
+
+B2-C adds three allowlisted Operations-helper routes over the existing Unix-domain socket:
+
+- `GET /api/v1/media-library` returns a cheap, sanitized feature/generation summary;
+- `POST /api/v1/media-library/refresh` reserves the existing cross-process refresh lock and accepts an asynchronous refresh only when the caller's expected metadata revision is current; and
+- `GET /api/v1/media-library/operations/{operationId}` returns a sanitized durable operation result.
+
+The feature is explicitly disabled by default. Enabling it later requires trusted Operations configuration for the media root, inbox root, and external metadata root. The external writable root must not overlap the read-only media root. Browser requests cannot provide or override those paths. Missing or invalid enabled configuration fails the media feature closed while Spotlight and the read-only station dashboard remain available.
+
+The helper returns `202 Accepted` only after it owns the B2-B refresh-writer lease, so a concurrent trusted CLI refresh cannot be accepted falsely. One host-owned background worker runs the operation independently of the browser request. There is no queue, automatic retry, or startup refresh. Durable B2-B operation records allow polling and interruption reconciliation without making in-memory state authoritative.
+
+The dashboard POST is protected by ASP.NET Core antiforgery validation, strict JSON, a 1 KiB body limit, and an expected metadata revision. The UI requires confirmation, polls one operation at a time, and renders only allowlisted counts and fixed-code explanations through safe text assignment. It does not receive media paths, raw exceptions, or storage configuration.
+
+Bootstrap remains deliberately absent from both Operations and dashboard routes. It is a trusted one-time CLI/admin action for B2-D. Refresh does not normalize, invoke FFmpeg, write the media drive, restart the broadcaster, rewrite active/committed blocks, or promise selection into an immediate block. Publication affects the first newly captured planning snapshot; frozen durable intents retain their original metadata authority.
+
 ## Deferred work
 
-B2-A does not implement:
+B2-C does not implement:
 
-- dashboard API or UI controls;
-- operations-helper refresh protocol;
 - production filesystem permissions or service changes;
+- production feature configuration or external-mode activation;
+- web-accessible bootstrap or migration;
 - executed production migration/activation; or
 - cleanup of old generations.
 
