@@ -20,6 +20,80 @@ public sealed class RollingStationStateTests
         Assert.Equal(Path.GetFullPath(fixture.StationConfigPath), configuration.StationConfigPath);
         Assert.Equal(PlannerId, configuration.PlannerId);
         Assert.Equal(Path.GetFullPath(fixture.RollingStatePath), configuration.RollingStatePath);
+        Assert.Null(configuration.AssetMetadataStorage);
+        Assert.IsType<AdjacentAssetMetadataRepository>(
+            RollingStationMetadataRepositoryFactory.Create(configuration));
+    }
+
+    [Fact]
+    public void Configuration_ValidatesExplicitAssetMetadataStorageModes()
+    {
+        using var fixture = new ConfigurationFixture();
+        var loader = new RollingStationConfigurationLoader();
+        string externalRoot = Path.Combine(fixture.Root, "external-metadata");
+
+        RollingStationConfiguration adjacent = loader.Load(fixture.WriteRaw(JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            stationConfigPath = fixture.StationConfigPath,
+            plannerId = PlannerId,
+            rollingStatePath = fixture.RollingStatePath,
+            assetMetadataStorage = new { mode = "adjacent" },
+        })));
+        Assert.Equal(
+            RollingAssetMetadataStorageMode.Adjacent,
+            adjacent.AssetMetadataStorage!.Mode);
+        Assert.Null(adjacent.AssetMetadataStorage.ExternalRoot);
+        Assert.IsType<AdjacentAssetMetadataRepository>(
+            RollingStationMetadataRepositoryFactory.Create(adjacent));
+
+        RollingStationConfiguration external = loader.Load(fixture.WriteRaw(JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            stationConfigPath = fixture.StationConfigPath,
+            plannerId = PlannerId,
+            rollingStatePath = fixture.RollingStatePath,
+            assetMetadataStorage = new
+            {
+                mode = "externalGeneration",
+                externalRoot,
+            },
+        })));
+        Assert.Equal(
+            RollingAssetMetadataStorageMode.ExternalGeneration,
+            external.AssetMetadataStorage!.Mode);
+        Assert.Equal(Path.GetFullPath(externalRoot), external.AssetMetadataStorage.ExternalRoot);
+        Assert.IsType<ExternalAssetMetadataGenerationStore>(
+            RollingStationMetadataRepositoryFactory.Create(external));
+    }
+
+    [Fact]
+    public void Configuration_RejectsInvalidAssetMetadataStorageCombinations()
+    {
+        using var fixture = new ConfigurationFixture();
+        var loader = new RollingStationConfigurationLoader();
+
+        AssertInvalid(new { mode = "adjacent", externalRoot = Path.Combine(fixture.Root, "metadata") });
+        AssertInvalid(new { mode = "externalGeneration" });
+        AssertInvalid(new { mode = "externalGeneration", externalRoot = "relative/metadata" });
+        AssertInvalid(new { mode = "unknown" });
+        AssertInvalid(new { mode = 1 });
+        AssertInvalid(new { mode = "adjacent", unexpected = true });
+
+        string foreignPlatformPath = OperatingSystem.IsWindows()
+            ? "/var/lib/nzyte-tv-media-metadata"
+            : @"C:\nzyte-tv-media-metadata";
+        AssertInvalid(new { mode = "externalGeneration", externalRoot = foreignPlatformPath });
+
+        void AssertInvalid(object assetMetadataStorage) => Assert.Throws<InvalidDataException>(() =>
+            loader.Load(fixture.WriteRaw(JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                stationConfigPath = fixture.StationConfigPath,
+                plannerId = PlannerId,
+                rollingStatePath = fixture.RollingStatePath,
+                assetMetadataStorage,
+            }))));
     }
 
     [Fact]

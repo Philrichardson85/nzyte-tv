@@ -17,6 +17,22 @@ public sealed record RollingStationConfiguration
 
     [JsonRequired]
     public string RollingStatePath { get; init; } = string.Empty;
+
+    public RollingAssetMetadataStorageConfiguration? AssetMetadataStorage { get; init; }
+}
+
+public enum RollingAssetMetadataStorageMode
+{
+    Adjacent,
+    ExternalGeneration,
+}
+
+public sealed record RollingAssetMetadataStorageConfiguration
+{
+    [JsonRequired]
+    public RollingAssetMetadataStorageMode Mode { get; init; }
+
+    public string? ExternalRoot { get; init; }
 }
 
 public enum RollingStationPhase

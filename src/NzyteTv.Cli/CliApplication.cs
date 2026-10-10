@@ -784,9 +784,32 @@ public static class CliApplication
         ParsedCommand command,
         CancellationToken cancellationToken)
     {
+        var rollingConfigurationLoader = new RollingStationConfigurationLoader();
+        RollingStationConfiguration rollingConfiguration =
+            rollingConfigurationLoader.Load(command.ConfigPath!);
+        IRollingStationConfigurationLoader runtimeConfigurationLoader =
+            new FixedRollingStationConfigurationLoader(rollingConfiguration);
+        var stationConfigurationLoader = new StationConfigurationLoader();
+        StationConfiguration stationConfiguration = stationConfigurationLoader.Load(
+            rollingConfiguration.StationConfigPath);
+        IAssetMetadataRepository metadataRepository =
+            RollingStationMetadataRepositoryFactory.Create(rollingConfiguration);
+        _ = metadataRepository.Pin(
+            AssetMetadataTree.Library,
+            stationConfiguration.LibraryRoot);
+        var planStore = new RollingPlanStore();
+        var committedBlockResolver = new RollingCommittedBlockResolver(
+            planStore,
+            broadcastPlanner: new BroadcastPlanner(),
+            metadataRepository: metadataRepository);
         string? configuredDestination = Environment.GetEnvironmentVariable(
             BroadcastDestination.DefaultEnvironmentVariable);
-        var inspection = new RollingStationInspectionService();
+        var inspection = new RollingStationInspectionService(
+            rollingConfigurationLoader: runtimeConfigurationLoader,
+            stationConfigurationLoader: stationConfigurationLoader,
+            planStore: planStore,
+            blockResolver: committedBlockResolver,
+            metadataRepository: metadataRepository);
         if (command.Kind == CommandKind.StationRollingValidate)
         {
             RollingStationValidationResult validation = inspection.Validate(
@@ -856,14 +879,23 @@ public static class CliApplication
             ownership);
         var coordinator = new RollingStationCoordinator(
             executor,
+            rollingConfigurationLoader: runtimeConfigurationLoader,
+            stationConfigurationLoader: stationConfigurationLoader,
             rollingStateStore: signalingStateStore,
+            planStore: planStore,
+            blockResolver: committedBlockResolver,
             lockProvider: signalingLockProvider);
         Action<string> replenishmentDiagnostic = message => Console.Error.WriteLine(
             $"Rolling replenishment: {StationSecretRedactor.RedactRtmpUrls(message)}");
         var replenisher = new RollingProgrammingReplenisher(
-            new RollingBlockMaintainer(),
+            new RollingBlockMaintainer(
+                store: planStore,
+                metadataRepository: metadataRepository),
             replenishmentTrigger,
+            rollingConfigurationLoader: runtimeConfigurationLoader,
+            stationConfigurationLoader: stationConfigurationLoader,
             rollingStateStore: signalingStateStore,
+            planStore: planStore,
             diagnostic: replenishmentDiagnostic);
         var host = new RollingStationRuntimeHost(
             coordinator,
@@ -1593,6 +1625,12 @@ public static class CliApplication
     private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
     {
         public void Report(T value) => handler(value);
+    }
+
+    private sealed class FixedRollingStationConfigurationLoader(
+        RollingStationConfiguration configuration) : IRollingStationConfigurationLoader
+    {
+        public RollingStationConfiguration Load(string path) => configuration;
     }
 
     private sealed class ConsoleMetadataReviewPrompt : IMetadataReviewPrompt

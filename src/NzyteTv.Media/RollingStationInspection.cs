@@ -51,6 +51,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
     private readonly IStationCompletionEvidenceService _completionEvidence;
     private readonly IProcessExistence _processExistence;
     private readonly IRollingReplenishmentStateStore _replenishmentStateStore;
+    private readonly IAssetMetadataRepository _metadataRepository;
     private readonly Func<string> _locateFfmpeg;
     private readonly TimeProvider _timeProvider;
 
@@ -64,6 +65,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
         IStationCompletionEvidenceService? completionEvidence = null,
         IProcessExistence? processExistence = null,
         IRollingReplenishmentStateStore? replenishmentStateStore = null,
+        IAssetMetadataRepository? metadataRepository = null,
         Func<string>? locateFfmpeg = null,
         TimeProvider? timeProvider = null)
     {
@@ -80,6 +82,7 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
         _processExistence = processExistence ?? new ProcessExistence();
         _replenishmentStateStore = replenishmentStateStore
             ?? new RollingReplenishmentStateStore();
+        _metadataRepository = metadataRepository ?? new AdjacentAssetMetadataRepository();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _completionEvidence = completionEvidence ?? new StationCompletionEvidenceService(
             _stationStateStore,
@@ -106,6 +109,9 @@ public sealed class RollingStationInspectionService : IRollingStationInspectionS
         {
             configuration = _rollingConfigurationLoader.Load(configurationPath);
             stationConfiguration = _stationConfigurationLoader.Load(configuration.StationConfigPath);
+            _ = _metadataRepository.Pin(
+                AssetMetadataTree.Library,
+                stationConfiguration.LibraryRoot);
             if (PathsEqual(configuration.RollingStatePath, stationConfiguration.StatePath))
             {
                 throw new InvalidDataException(

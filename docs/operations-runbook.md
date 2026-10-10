@@ -1248,6 +1248,7 @@ The following have been validated at specific points in production acceptance. T
 - [Rolling station coordinator](rolling-station.md): immutable claims, CP2 reconciliation, completion sealing, block handoff, automatic future-buffer replenishment, and the 3B2-C acceptance boundary.
 - [Checkpoint 3B2-F production cutover](production-cutover-3b2f.md): staged ARM64 release, production diagnostics/recovery, exclusive handoff, verification, and rollback.
 - [Checkpoint 3B3-B1 deployment plan](deployment-3b3-b1.md): candidate ext4 catalog migration, bind mount, service identities, permissions, acceptance, and rollback.
+- [Checkpoint 3B3-B2-D candidate activation plan](deployment-3b3-b2d.md): unexecuted external-metadata bootstrap, explicit rolling activation, service sandbox, acceptance, and rollback design.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

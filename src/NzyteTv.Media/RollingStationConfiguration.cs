@@ -15,6 +15,12 @@ public sealed class RollingStationConfigurationLoader : IRollingStationConfigura
     {
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters =
+        {
+            new JsonStringEnumConverter<RollingAssetMetadataStorageMode>(
+                JsonNamingPolicy.CamelCase,
+                allowIntegerValues: false),
+        },
     };
 
     public RollingStationConfiguration Load(string path)
@@ -62,6 +68,8 @@ public sealed class RollingStationConfigurationLoader : IRollingStationConfigura
         string rollingStatePath = RequireAbsolutePath(
             configuration.RollingStatePath,
             "rollingStatePath");
+        RollingAssetMetadataStorageConfiguration? assetMetadataStorage =
+            ValidateAssetMetadataStorage(configuration.AssetMetadataStorage);
         if (!File.Exists(stationConfigPath))
         {
             throw new FileNotFoundException(
@@ -88,7 +96,39 @@ public sealed class RollingStationConfigurationLoader : IRollingStationConfigura
             StationConfigPath = stationConfigPath,
             PlannerId = configuration.PlannerId.ToLowerInvariant(),
             RollingStatePath = rollingStatePath,
+            AssetMetadataStorage = assetMetadataStorage,
         };
+    }
+
+    private static RollingAssetMetadataStorageConfiguration? ValidateAssetMetadataStorage(
+        RollingAssetMetadataStorageConfiguration? configuration)
+    {
+        if (configuration is null)
+        {
+            return null;
+        }
+
+        if (!Enum.IsDefined(configuration.Mode))
+        {
+            throw new InvalidDataException(
+                "Rolling station assetMetadataStorage mode is invalid.");
+        }
+
+        if (configuration.Mode == RollingAssetMetadataStorageMode.Adjacent)
+        {
+            if (configuration.ExternalRoot is not null)
+            {
+                throw new InvalidDataException(
+                    "Rolling station assetMetadataStorage externalRoot is not valid in adjacent mode.");
+            }
+
+            return configuration;
+        }
+
+        string externalRoot = RequireAbsolutePath(
+            configuration.ExternalRoot,
+            "assetMetadataStorage.externalRoot");
+        return configuration with { ExternalRoot = externalRoot };
     }
 
     private static string RequireAbsolutePath(string? path, string propertyName)
@@ -116,5 +156,24 @@ public sealed class RollingStationConfigurationLoader : IRollingStationConfigura
                 $"Rolling station configuration property '{propertyName}' is not a valid path.",
                 exception);
         }
+    }
+}
+
+public static class RollingStationMetadataRepositoryFactory
+{
+    public static IAssetMetadataRepository Create(RollingStationConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        RollingAssetMetadataStorageConfiguration? metadata = configuration.AssetMetadataStorage;
+        AssetMetadataStorageOptions options = metadata?.Mode switch
+        {
+            null or RollingAssetMetadataStorageMode.Adjacent =>
+                AssetMetadataStorageOptions.Adjacent,
+            RollingAssetMetadataStorageMode.ExternalGeneration =>
+                AssetMetadataStorageOptions.External(metadata.ExternalRoot!),
+            _ => throw new InvalidDataException(
+                "Rolling station assetMetadataStorage mode is invalid."),
+        };
+        return AssetMetadataRepository.Create(options);
     }
 }

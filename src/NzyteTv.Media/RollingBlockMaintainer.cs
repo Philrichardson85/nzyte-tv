@@ -40,15 +40,27 @@ public sealed class RollingBlockMaintainer : IRollingBlockMaintainer
         IMediaToolLocator? mediaToolLocator = null,
         Func<IRollingProgrammingPlanner>? reconciliationPlannerFactory = null,
         Func<IPlaylistPlanningSnapshotService, IRollingProgrammingPlanner>? generationPlannerFactory = null,
-        Func<string, IPlaylistPlanningSnapshotService>? snapshotServiceFactory = null)
+        Func<string, IPlaylistPlanningSnapshotService>? snapshotServiceFactory = null,
+        IAssetMetadataRepository? metadataRepository = null)
     {
         _store = store ?? new RollingPlanStore();
         _mediaToolLocator = mediaToolLocator ?? new MediaToolLocator();
+        IAssetMetadataRepository repository = metadataRepository
+            ?? new AdjacentAssetMetadataRepository();
+        var committedBlockResolver = new RollingCommittedBlockResolver(
+            _store,
+            metadataRepository: repository);
         _reconciliationPlannerFactory = reconciliationPlannerFactory
-            ?? (() => new RollingProgrammingPlanner(store: _store));
+            ?? (() => new RollingProgrammingPlanner(
+                store: _store,
+                committedBlockResolver: committedBlockResolver));
         _generationPlannerFactory = generationPlannerFactory
-            ?? (snapshot => new RollingProgrammingPlanner(store: _store, snapshotService: snapshot));
-        _snapshotServiceFactory = snapshotServiceFactory ?? CreateSnapshotService;
+            ?? (snapshot => new RollingProgrammingPlanner(
+                store: _store,
+                snapshotService: snapshot,
+                committedBlockResolver: committedBlockResolver));
+        _snapshotServiceFactory = snapshotServiceFactory
+            ?? (ffprobe => CreateSnapshotService(ffprobe, repository));
     }
 
     public async Task<RollingMaintainResult> EnsureCommittedThroughAsync(
@@ -163,9 +175,14 @@ public sealed class RollingBlockMaintainer : IRollingBlockMaintainer
             ?? "Future rolling programming generation is blocked.",
         exception);
 
-    private static IPlaylistPlanningSnapshotService CreateSnapshotService(string ffprobe) =>
+    private static IPlaylistPlanningSnapshotService CreateSnapshotService(
+        string ffprobe,
+        IAssetMetadataRepository metadataRepository) =>
         new PlaylistPlanningSnapshotService(
             new SongCatalogStore(),
-            new PlaylistLibraryLoader(new MediaAnalyzer(ffprobe, new ProcessRunner())),
-            new PlaylistGenerator());
+            new PlaylistLibraryLoader(
+                new MediaAnalyzer(ffprobe, new ProcessRunner()),
+                metadataRepository: metadataRepository),
+            new PlaylistGenerator(),
+            metadataRepository: metadataRepository);
 }

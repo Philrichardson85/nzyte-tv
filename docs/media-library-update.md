@@ -127,10 +127,16 @@ Bootstrap remains deliberately absent from both Operations and dashboard routes.
 
 ## Deferred work
 
-B2-C does not implement:
+B2-D adds candidate activation plumbing without activating production. Rolling configuration may now explicitly select `assetMetadataStorage.mode=externalGeneration` with an absolute `externalRoot`. If the section is omitted, adjacent metadata remains the compatibility default. External mode validates `current.json` and the selected immutable generation and never falls back to adjacent authority for a newly captured snapshot.
 
-- production filesystem permissions or service changes;
-- production feature configuration or external-mode activation;
+Bootstrap must be completed and verified before external mode is enabled. Adjacent sidecars must remain after activation: pre-cutover frozen blocks and durable intents with null generation identity continue to use adjacent authority permanently. New external-mode snapshots record the generation and revision they pin. Publishing a later generation affects only a later newly captured planning snapshot; it neither changes committed blocks nor requires a broadcaster restart.
+
+See [the B2-D candidate activation plan](deployment-3b3-b2d.md) for the unexecuted storage, service-identity, cutover, and rollback design.
+
+B2-D still does not implement:
+
+- executed production filesystem/service changes;
+- completed production external-mode activation;
 - web-accessible bootstrap or migration;
 - executed production migration/activation; or
 - cleanup of old generations.

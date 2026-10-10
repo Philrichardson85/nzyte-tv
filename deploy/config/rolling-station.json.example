@@ -2,5 +2,9 @@
   "schemaVersion": 1,
   "stationConfigPath": "/etc/nzyte-tv/station.json",
   "plannerId": "00000000000000000000000000000000",
-  "rollingStatePath": "/var/lib/nzyte-tv/rolling-state.json"
+  "rollingStatePath": "/var/lib/nzyte-tv/rolling-state.json",
+  "assetMetadataStorage": {
+    "mode": "externalGeneration",
+    "externalRoot": "/var/lib/nzyte-tv-media-metadata"
+  }
 }
