@@ -53,7 +53,8 @@ internal sealed class MediaPackageTestFixture : IDisposable
     public async Task<(string SourcePath, string LibraryPath)> AddMembersAsync(
         string sourceRelative = "Music Videos/Test Song.mov",
         AssetMetadata? sourceMetadata = null,
-        AssetMetadata? libraryMetadata = null)
+        AssetMetadata? libraryMetadata = null,
+        NormalizationOptions? normalizationOptions = null)
     {
         string sourcePath = Path.Combine(SourceRoot, sourceRelative.Replace('/', Path.DirectorySeparatorChar));
         string libraryPath = LibraryPathPolicy.GetDestinationPath(SourceRoot, LibraryRoot, sourcePath);
@@ -64,7 +65,7 @@ internal sealed class MediaPackageTestFixture : IDisposable
         var manifestStore = new SourceManifestStore();
         await manifestStore.WriteAsync(
             libraryPath,
-            manifestStore.CreateFingerprint(SourceRoot, sourcePath),
+            manifestStore.CreateFingerprint(SourceRoot, sourcePath, normalizationOptions),
             CancellationToken.None);
         var metadataStore = new AssetMetadataStore();
         if (sourceMetadata is not null)

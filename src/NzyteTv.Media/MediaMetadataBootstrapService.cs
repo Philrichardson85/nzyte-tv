@@ -221,7 +221,12 @@ public sealed class MediaMetadataBootstrapService
                     technicalPath,
                     1024 * 1024,
                     cancellationToken).ConfigureAwait(false);
-                SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(media.SourceRoot, sourcePath);
+                VerticalLayoutMode verticalLayout =
+                    _sourceManifestStore.ReadVerticalLayout(libraryPath);
+                SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(
+                    media.SourceRoot,
+                    sourcePath,
+                    new NormalizationOptions { VerticalLayout = verticalLayout });
                 if (!_sourceManifestStore.Evaluate(libraryPath, expected).IsMatch)
                 {
                     throw new InvalidDataException("The adjacent technical manifest is inconsistent.");

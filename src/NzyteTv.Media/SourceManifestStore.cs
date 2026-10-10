@@ -32,6 +32,8 @@ public interface ISourceManifestStore
         string sourcePath,
         NormalizationOptions? options = null);
 
+    VerticalLayoutMode ReadVerticalLayout(string destinationPath);
+
     ManifestMatchResult Evaluate(string destinationPath, SourceFingerprint expected);
 
     Task WriteAsync(string destinationPath, SourceFingerprint fingerprint, CancellationToken cancellationToken);
@@ -145,6 +147,38 @@ public sealed class SourceManifestStore : ISourceManifestStore
                 ManifestMatchStatus.Corrupt,
                 $"Source manifest could not be read: {exception.Message}");
         }
+    }
+
+    public VerticalLayoutMode ReadVerticalLayout(string destinationPath)
+    {
+        string manifestPath = GetManifestPath(destinationPath);
+        if (!File.Exists(manifestPath))
+        {
+            throw new FileNotFoundException("Source manifest is missing.", manifestPath);
+        }
+
+        SourceFingerprint manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<SourceFingerprint>(
+                File.ReadAllText(manifestPath),
+                SerializerOptions) ?? throw new InvalidDataException(
+                    "Source manifest is empty or invalid.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Source manifest is malformed.", exception);
+        }
+
+        return manifest.VerticalLayout switch
+        {
+            null or "" => VerticalLayoutMode.None,
+            string value when string.IsNullOrWhiteSpace(value) => VerticalLayoutMode.None,
+            "none" => VerticalLayoutMode.None,
+            "blurred-background" => VerticalLayoutMode.BlurredBackground,
+            _ => throw new InvalidDataException(
+                "Source manifest contains an unsupported vertical layout."),
+        };
     }
 
     public async Task WriteAsync(

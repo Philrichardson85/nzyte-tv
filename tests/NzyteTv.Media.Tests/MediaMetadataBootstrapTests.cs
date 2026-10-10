@@ -28,6 +28,8 @@ public sealed class MediaMetadataBootstrapTests
         Assert.Equal(MediaMetadataBootstrapStatus.PreviewReady, preview.Status);
         Assert.Equal(1, preview.SourceRecords);
         Assert.Equal(1, preview.LibraryRecords);
+        Assert.Equal(1, preview.Assets);
+        Assert.Empty(preview.Issues);
         Assert.False(File.Exists(Path.Combine(fixture.MetadataRoot, "current.json")));
 
         MediaMetadataBootstrapResult published = await service.PublishAsync(CancellationToken.None);
@@ -72,6 +74,81 @@ public sealed class MediaMetadataBootstrapTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.PublishAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Preview_AcceptsBlurredBackgroundTechnicalManifest()
+    {
+        using var fixture = new MediaPackageTestFixture();
+        AssetMetadata metadata = MediaPackageTestFixture.Metadata();
+        await fixture.AddMembersAsync(
+            sourceMetadata: metadata,
+            libraryMetadata: metadata,
+            normalizationOptions: new NormalizationOptions
+            {
+                VerticalLayout = VerticalLayoutMode.BlurredBackground,
+            });
+
+        MediaMetadataBootstrapResult preview = await Service(fixture)
+            .PreviewAsync(CancellationToken.None);
+
+        Assert.Equal(MediaMetadataBootstrapStatus.PreviewReady, preview.Status);
+        Assert.Equal(1, preview.SourceRecords);
+        Assert.Equal(1, preview.LibraryRecords);
+        Assert.Equal(1, preview.Assets);
+        Assert.Empty(preview.Issues);
+        Assert.False(File.Exists(Path.Combine(fixture.MetadataRoot, "current.json")));
+    }
+
+    [Fact]
+    public async Task Preview_BlocksUnsupportedTechnicalManifestVerticalLayout()
+    {
+        using var fixture = new MediaPackageTestFixture();
+        AssetMetadata metadata = MediaPackageTestFixture.Metadata();
+        (string source, string library) = await fixture.AddMembersAsync(
+            sourceMetadata: metadata,
+            libraryMetadata: metadata);
+        var store = new SourceManifestStore();
+        SourceFingerprint fingerprint = store.CreateFingerprint(fixture.SourceRoot, source);
+        await store.WriteAsync(
+            library,
+            fingerprint with { VerticalLayout = "unsupported-layout" },
+            CancellationToken.None);
+
+        MediaMetadataBootstrapResult preview = await Service(fixture)
+            .PreviewAsync(CancellationToken.None);
+
+        Assert.Equal(MediaMetadataBootstrapStatus.Blocked, preview.Status);
+        Assert.Equal(1, preview.SourceRecords);
+        Assert.Equal(1, preview.LibraryRecords);
+        Assert.Equal(0, preview.Assets);
+        Assert.Single(preview.Issues);
+        Assert.False(File.Exists(Path.Combine(fixture.MetadataRoot, "current.json")));
+    }
+
+    [Fact]
+    public async Task Preview_BlocksStaleSourceFingerprintWithBlurredBackgroundLayout()
+    {
+        using var fixture = new MediaPackageTestFixture();
+        AssetMetadata metadata = MediaPackageTestFixture.Metadata();
+        (string source, _) = await fixture.AddMembersAsync(
+            sourceMetadata: metadata,
+            libraryMetadata: metadata,
+            normalizationOptions: new NormalizationOptions
+            {
+                VerticalLayout = VerticalLayoutMode.BlurredBackground,
+            });
+        await File.AppendAllTextAsync(source, "changed-after-normalization");
+
+        MediaMetadataBootstrapResult preview = await Service(fixture)
+            .PreviewAsync(CancellationToken.None);
+
+        Assert.Equal(MediaMetadataBootstrapStatus.Blocked, preview.Status);
+        Assert.Equal(1, preview.SourceRecords);
+        Assert.Equal(1, preview.LibraryRecords);
+        Assert.Equal(0, preview.Assets);
+        Assert.Single(preview.Issues);
+        Assert.False(File.Exists(Path.Combine(fixture.MetadataRoot, "current.json")));
     }
 
     [Fact]
