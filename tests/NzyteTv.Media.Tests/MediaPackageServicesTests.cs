@@ -1,3 +1,4 @@
+using NzyteTv.Core;
 using NzyteTv.Media;
 
 namespace NzyteTv.Media.Tests;
@@ -22,6 +23,29 @@ public sealed class MediaPackageServicesTests
         Assert.True(ReadyMediaPackageValidator.IsSha256(result.Manifest.Source!.Sha256));
         Assert.True(ReadyMediaPackageValidator.IsSha256(result.Manifest.Library!.Sha256));
         Assert.True(ReadyMediaPackageValidator.IsSha256(result.Manifest.TechnicalManifest!.Sha256));
+    }
+
+    [Fact]
+    public async Task Prepare_AcceptsBlurredBackgroundTechnicalManifest()
+    {
+        using var fixture = new MediaPackageTestFixture();
+        await fixture.AddMembersAsync(
+            normalizationOptions: new NormalizationOptions
+            {
+                VerticalLayout = VerticalLayoutMode.BlurredBackground,
+            });
+
+        ReadyPackagePreparationResult result = await fixture.PrepareAsync();
+
+        Assert.True(File.Exists(Path.Combine(fixture.InboxRoot, result.ReadyFileName)));
+        Assert.Equal(
+            VerticalLayoutMode.BlurredBackground,
+            new SourceManifestStore().ReadVerticalLayout(
+                Path.Combine(
+                    fixture.LibraryRoot,
+                    result.Manifest.LibraryRelativePath!.Replace(
+                        '/',
+                        Path.DirectorySeparatorChar))));
     }
 
     [Theory]
@@ -80,6 +104,26 @@ public sealed class MediaPackageServicesTests
         Assert.NotNull(verified.LibraryMetadata);
         Assert.Equal(5, hasher.Calls);
         Assert.Equal(1, hasher.MaximumConcurrentCalls);
+    }
+
+    [Fact]
+    public async Task Verify_AcceptsBlurredBackgroundTechnicalManifest()
+    {
+        using var fixture = new MediaPackageTestFixture();
+        await fixture.AddMembersAsync(
+            normalizationOptions: new NormalizationOptions
+            {
+                VerticalLayout = VerticalLayoutMode.BlurredBackground,
+            });
+        ReadyPackagePreparationResult prepared = await fixture.PrepareAsync();
+
+        VerifiedReadyMediaPackage verified =
+            await new ReadyMediaPackageVerifier().VerifyAsync(
+                fixture.PackageOptions,
+                prepared.Manifest,
+                CancellationToken.None);
+
+        Assert.Equal(prepared.Manifest.PackageId, verified.Manifest.PackageId);
     }
 
     [Fact]

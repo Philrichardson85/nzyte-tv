@@ -239,7 +239,12 @@ public sealed class MediaPackagePreparer
             libraryMetadataPath,
             libraryMetadataExists,
             cancellationToken).ConfigureAwait(false);
-        SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(validated.SourceRoot, sourcePath);
+        VerticalLayoutMode verticalLayout =
+            _sourceManifestStore.ReadVerticalLayout(libraryPath);
+        SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(
+            validated.SourceRoot,
+            sourcePath,
+            new NormalizationOptions { VerticalLayout = verticalLayout });
         ManifestMatchResult manifestMatch = _sourceManifestStore.Evaluate(libraryPath, expected);
         if (!manifestMatch.IsMatch)
         {
@@ -426,7 +431,22 @@ public sealed class ReadyMediaPackageVerifier
             MaximumSidecarBytes,
             cancellationToken).ConfigureAwait(false);
 
-        SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(validated.SourceRoot, sourcePath);
+        VerticalLayoutMode verticalLayout;
+        try
+        {
+            verticalLayout = _sourceManifestStore.ReadVerticalLayout(libraryPath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new MediaPackageVerificationException(
+                MediaLibraryRefreshIssueCode.InvalidTechnicalManifest);
+        }
+
+        SourceFingerprint expected = _sourceManifestStore.CreateFingerprint(
+            validated.SourceRoot,
+            sourcePath,
+            new NormalizationOptions { VerticalLayout = verticalLayout });
         if (!_sourceManifestStore.Evaluate(libraryPath, expected).IsMatch)
         {
             throw new MediaPackageVerificationException(
