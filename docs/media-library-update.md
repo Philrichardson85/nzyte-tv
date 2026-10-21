@@ -1,6 +1,6 @@
 # Media-library update architecture
 
-Checkpoint 3B3-B2 is being delivered in isolated slices. B2-A established the programming-metadata storage and planning-read foundation. B2-B added local READY-package preparation, bounded package verification, external-generation refresh, and adjacent-sidecar bootstrap tooling. B2-C adds a default-disabled Operations-helper application surface and dashboard UI for invoking only the existing refresh operation. Production configuration, filesystem permissions, external-mode activation, bootstrap, and Raspberry Pi deployment/migration remain deferred to B2-D.
+Checkpoint 3B3-B2 was delivered in isolated slices. B2-A established the programming-metadata storage and planning-read foundation. B2-B added local READY-package preparation, bounded package verification, external-generation refresh, and adjacent-sidecar bootstrap tooling. B2-C added the default-disabled Operations-helper application surface and dashboard UI for invoking the existing refresh operation. B2-D completed the production filesystem/service activation, one-time adjacent-sidecar bootstrap, external-generation cutover, Raspberry Pi migration, controlled refresh, and viewer-facing acceptance.
 
 ## B2-A storage modes
 
@@ -123,22 +123,24 @@ The helper returns `202 Accepted` only after it owns the B2-B refresh-writer lea
 
 The dashboard POST is protected by ASP.NET Core antiforgery validation, strict JSON, a 1 KiB body limit, and an expected metadata revision. The UI requires confirmation, polls one operation at a time, and renders only allowlisted counts and fixed-code explanations through safe text assignment. It does not receive media paths, raw exceptions, or storage configuration.
 
-Bootstrap remains deliberately absent from both Operations and dashboard routes. It is a trusted one-time CLI/admin action for B2-D. Refresh does not normalize, invoke FFmpeg, write the media drive, restart the broadcaster, rewrite active/committed blocks, or promise selection into an immediate block. Publication affects the first newly captured planning snapshot; frozen durable intents retain their original metadata authority.
+Bootstrap remains deliberately absent from both Operations and dashboard routes. It is a trusted one-time CLI/admin action; B2-D used it for the production migration, and it must not be rerun after `current.json` exists. Refresh does not normalize, invoke FFmpeg, write the media drive, restart the broadcaster, rewrite active or committed blocks, or promise selection into an immediate block. Publication affects the first newly captured planning snapshot; frozen durable intents retain their original metadata authority.
 
-## Deferred work
+## Production activation and remaining deferred work
 
-B2-D adds candidate activation plumbing without activating production. Rolling configuration may now explicitly select `assetMetadataStorage.mode=externalGeneration` with an absolute `externalRoot`. If the section is omitted, adjacent metadata remains the compatibility default. External mode validates `current.json` and the selected immutable generation and never falls back to adjacent authority for a newly captured snapshot.
+B2-D production activation is complete. Rolling configuration explicitly selects `assetMetadataStorage.mode=externalGeneration` with `externalRoot=/var/lib/nzyte-tv-media-metadata`. External mode validates `current.json` and the selected immutable generation and never falls back to adjacent authority for a newly captured snapshot.
 
-Bootstrap must be completed and verified before external mode is enabled. Adjacent sidecars must remain after activation: pre-cutover frozen blocks and durable intents with null generation identity continue to use adjacent authority permanently. New external-mode snapshots record the generation and revision they pin. Publishing a later generation affects only a later newly captured planning snapshot; it neither changes committed blocks nor requires a broadcaster restart.
+Production activation completed and verified bootstrap before external mode was enabled. Adjacent sidecars remain after activation: pre-cutover frozen blocks and durable intents with null generation identity continue to use adjacent authority permanently. New external-mode snapshots record the generation and revision they pin. Publishing a later generation affects only a later newly captured planning snapshot; it neither changes committed blocks nor requires a broadcaster restart.
 
-See [the B2-D candidate activation plan](deployment-3b3-b2d.md) for the unexecuted storage, service-identity, cutover, and rollback design.
+The controlled production acceptance package for `I See You` advanced the current metadata pointer from generation `000000000001` / revision `1` to generation `000000000002` / revision `2`. The refresh accepted one package, added one source and one library asset, made one asset newly eligible, and completed with zero warnings and zero errors. Natural replenishment preserved block 33 on generation 1 and generated block 34 on generation 2; public YouTube playback of the new asset was viewer-verified with moving video and audible audio.
 
-B2-D still does not implement:
+See [the B2-D production acceptance record](deployment-3b3-b2d.md) for the executed storage migration, service identities, external-mode cutover, controlled refresh acceptance, public playback evidence, and rollback boundary.
 
-- executed production filesystem/service changes;
-- completed production external-mode activation;
+B2-D intentionally still does not implement:
+
 - web-accessible bootstrap or migration;
-- executed production migration/activation; or
-- cleanup of old generations.
+- automatic deletion or retention cleanup of old metadata generations;
+- automatic deletion of accepted READY evidence;
+- broad Operations-helper write authority over source/library media; or
+- rewriting already committed programming to adopt a newer metadata generation.
 
 Source media, normalized MP4s, and technical `.nzytetv.json` manifests remain on the media drive. No B2-A component writes, deletes, normalizes, or transcodes those files.

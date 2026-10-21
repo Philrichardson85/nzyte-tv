@@ -661,7 +661,7 @@ The exact same asset has a separate approximately two-hour replay preference. A 
 
 - Promo: blocked below 30 minutes, preferred at 30–45 minutes, overdue after 45 minutes. Under Checkpoint 3A, `promo` and `advertisement` share this mini-break timer.
 - Interstitial: blocked below 20 minutes, preferred at 20—30 minutes, overdue after 30 minutes.
-- Bumper: legacy scheduling requires at least four normal programs. Checkpoint 3A defaults to a deterministic 3–5 substantial-piece window and rotates eligible station IDs before repeating when inventory permits.
+- Bumper: production scheduling uses a deterministic 3–5 substantial-piece window and rotates eligible station IDs before repeating when inventory permits.
 
 These assets cannot become generic filler merely because another category is constrained. See [Playlist and programming engine](playlists.md) for full policy details.
 
@@ -1083,7 +1083,7 @@ pgrep -x -c ffmpeg
 
 ## 19. Current operational limitations
 
-Checkpoint 3B3-B2-C includes a default-disabled application surface for asynchronous READY-package refresh through the local Operations helper and dashboard. It is not enabled or deployed in production by this checkpoint. Production bootstrap remains a separate trusted CLI/admin migration for B2-D; it is never a dashboard action. When later enabled, refresh does not normalize media, restart broadcasting, or rewrite active/committed blocks.
+Checkpoint 3B3-B2-C introduced the default-disabled application surface for asynchronous READY-package refresh through the local Operations helper and dashboard. Checkpoint 3B3-B2-D subsequently enabled and production-accepted that surface using trusted external-generation storage. The one-time production bootstrap was completed as a separate trusted CLI/admin migration, is never a dashboard action, and must not be rerun. Routine refresh does not normalize media, restart broadcasting, or rewrite active/committed blocks; public playback is verified separately by the operator.
 
 The accepted Checkpoint 2 station supervisor, unchanged by Checkpoints 3A, 3B1, 3B2-A, and 3B2-B:
 
@@ -1248,7 +1248,7 @@ The following have been validated at specific points in production acceptance. T
 - [Rolling station coordinator](rolling-station.md): immutable claims, CP2 reconciliation, completion sealing, block handoff, automatic future-buffer replenishment, and the 3B2-C acceptance boundary.
 - [Checkpoint 3B2-F production cutover](production-cutover-3b2f.md): staged ARM64 release, production diagnostics/recovery, exclusive handoff, verification, and rollback.
 - [Checkpoint 3B3-B1 deployment plan](deployment-3b3-b1.md): candidate ext4 catalog migration, bind mount, service identities, permissions, acceptance, and rollback.
-- [Checkpoint 3B3-B2-D candidate activation plan](deployment-3b3-b2d.md): unexecuted external-metadata bootstrap, explicit rolling activation, service sandbox, acceptance, and rollback design.
+- [Checkpoint 3B3-B2-D production acceptance](deployment-3b3-b2d.md): accepted external-metadata bootstrap, explicit rolling activation, service sandbox, controlled READY-package refresh, viewer-confirmed playback, and rollback requirements.
 - [Broadcasting](broadcasting.md): focused broadcaster behavior and validation.
 - [Station supervisor](station-service.md): accepted Checkpoint 2 queue identity, durable resume, state/status, secrets, systemd behavior, and Pi acceptance evidence.
 - [Broadcast standard](broadcast-standard.md): required H.264/AAC technical profile.

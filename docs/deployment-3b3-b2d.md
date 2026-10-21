@@ -1,39 +1,57 @@
-# Checkpoint 3B3-B2-D candidate activation plan
+# Checkpoint 3B3-B2-D production acceptance
 
-This is a workstation-prepared candidate design. It has not been installed or accepted on the Raspberry Pi. Do not treat the presence of these files as production activation.
+Checkpoint 3B3-B2-D is production-accepted on the Raspberry Pi. Acceptance completed on 2026-10-13 after external-generation metadata activation, a controlled new-path-only READY-package refresh, natural rolling replenishment, and viewer-confirmed YouTube moving video with audible audio.
 
-## Storage and identities
+This record supersedes the earlier candidate-only activation plan. This documentation update does not require a runtime rebuild or redeployment.
 
-Production media remains read-only to the Operations helper at `/srv/nzyte-tv/media`. External programming metadata uses the separately provisioned ext4 directory `/var/lib/nzyte-tv-media-metadata`, owned for the `nzyte-media-metadata` group. `u24` and `nzyte-ops` are members; `nzyte-dashboard` is not.
+## Accepted production architecture
 
-The B2-D Operations candidate keeps the accepted B1 catalog and Unix-socket permissions, adds `nzyte-media-metadata`, and enables the B2-C feature using trusted service configuration. Its only new persistent writable root is `/var/lib/nzyte-tv-media-metadata`. The omitted inbox setting deliberately resolves to `/srv/nzyte-tv/media/inbox`; that tree remains read-only to the helper.
+- Production source media, normalized library media, technical manifests, and the READY inbox remain on `/srv/nzyte-tv/media`. The Operations helper does not receive broad exFAT write authority.
+- External programming metadata is stored on ext4 at `/var/lib/nzyte-tv-media-metadata`.
+- The one-time adjacent-sidecar bootstrap created immutable generation `000000000001`, revision `1`. Bootstrap is not a dashboard or routine runtime operation and must not be rerun.
+- `u24` and `nzyte-ops` have the required metadata access. `nzyte-dashboard` does not.
+- The broadcaster reads pinned external generations through read-only access to the metadata root.
+- Dashboard Media Operations uses the accepted local Dashboard-to-Operations Unix-socket boundary.
+- The accepted runtime hotfix commit is `71e7991297391e1bbd22b7376ce7546c57f55f39`, which fixes vertical-layout package validation.
 
-The broadcaster candidate drop-in retains the accepted catalog-mount and state-directory requirements, adds group-read access to the metadata root, and declares that root read-only in its service filesystem namespace. The dashboard receives neither group membership nor filesystem access to external metadata.
+## Controlled production acceptance evidence
 
-## Gated activation order
+- The controlled acceptance package represented the `I See You` animated visual and used a new media path.
+- One READY package was observed and accepted.
+- One source asset and one library asset were added.
+- Two metadata records were created and 464 existing records were preserved.
+- One asset became newly eligible.
+- Unresolved, incomplete, skipped, warning, and error counts were all zero.
+- The metadata pointer advanced from generation `000000000001` / revision `1` to generation `000000000002` / revision `2`.
+- Pre-refresh committed block 33 remained frozen on generation `000000000001` / revision `1`.
+- Natural replenishment generated block 34 on generation `000000000002` / revision `2`; no committed block was rewritten.
+- The new `I See You` asset was naturally selected into block 34.
+- Public YouTube playback was operator-verified with moving video and audible audio.
+- The controlled refresh did not restart the broadcaster, invoke FFmpeg normalization, rewrite active or committed programming, or alter Spotlight.
 
-1. Verify the accepted station, rolling buffer, dashboard, Spotlight, storage mounts, and public moving video with audible audio before changing anything.
-2. Stage and inspect candidate binaries and units without replacing the accepted deployment.
-3. Verify `/var/lib/nzyte-tv-media-metadata` is ext4, empty for first bootstrap, set-group-ID, and accessible only to the intended identities.
-4. Run the explicit adjacent-sidecar bootstrap preview, review every result, then publish generation/revision 1 only with separate operator approval.
-5. Verify `current.json`, generation 1, inventory, ownership, modes, and hashes. Do not delete or rewrite any adjacent sidecar.
-6. Add `assetMetadataStorage.mode=externalGeneration` and `assetMetadataStorage.externalRoot=/var/lib/nzyte-tv-media-metadata` to the staged rolling configuration. Validate the staged configuration before it can start a broadcaster.
-7. Install the candidate Operations unit and broadcaster drop-in through the operator-reviewed deployment procedure. Do not alter RTMP configuration or secrets.
-8. Use the normal graceful broadcaster cutover procedure once, because the running process must be started with the new rolling configuration. This one-time activation restart is distinct from later metadata refreshes.
-9. Verify the pre-cutover active and committed blocks, planner lineage, durable intents, rolling buffer, single broadcaster/FFmpeg ownership, dashboard, and public moving video with audible audio.
-10. Verify a newly captured planning snapshot records external generation 1. Do not regenerate or rewrite existing blocks to force this result.
-11. Enable and verify Media Operations only after read-only status and Spotlight remain healthy. A later refresh publication must not require a broadcaster restart.
+## Routine operation after acceptance
+
+For later media additions, transfer all declared package members first and publish the final `*.ready.json` marker last. `Update Media Library` validates completed READY packages and may publish a new immutable external metadata generation. A routine refresh does not require a broadcaster restart.
+
+Existing active blocks, committed blocks, and durable generation intents remain immutable. A newly published metadata generation affects only a later planning snapshot whose inputs have not already been captured.
+
+Public moving video and audible audio remain separate operator acceptance evidence when viewer-facing verification is required.
 
 ## Compatibility and rollback
 
-Adjacent `.nzytetv.meta.json` files remain required rollback and recovery evidence. Frozen snapshots with null metadata generation and revision permanently use adjacent authority, including pre-cutover active blocks, committed blocks, and durable intents. Never remove those sidecars during B2-D.
+Adjacent `.nzytetv.meta.json` files remain required rollback and recovery evidence. Frozen snapshots with null metadata generation and revision permanently use adjacent authority. Do not remove those sidecars merely because external-generation mode is active.
 
-If acceptance fails, determine whether metadata bootstrap, rolling configuration, the Operations candidate, or broadcaster composition caused the failure before changing state. Stop the candidate processes cleanly, restore the accepted rolling configuration and service/drop-in set, and restart through the accepted handoff procedure. Leave the external metadata store and every media/adjacent file intact for diagnosis. Verify local rolling state and public moving video with audible audio after rollback.
+Retain immutable metadata generations, operation records, and accepted READY evidence. Older accepted generations remain necessary for frozen planning snapshots and rollback diagnosis.
 
-## Deferred decisions for Pi acceptance
+The pre-hotfix Operations candidate remains preserved at `/opt/nzyte-tv/releases/operations-3b3-b2d-0f9a35b-candidate`. The accepted hotfix candidate remains at `/opt/nzyte-tv/releases/operations-3b3-b2d-71e7991-candidate`.
 
-- Confirm effective systemd sandbox paths and supplementary groups with the candidate identities.
-- Confirm newly created metadata files inherit `nzyte-media-metadata` and remain readable by `u24`.
-- Confirm the read-only inbox can be enumerated through the media mount without granting exFAT writes.
-- Confirm bootstrap and external generation validation complete within an acceptable maintenance window.
-- Capture the exact staged configuration, binary hashes, unit diffs, and rollback evidence before activation.
+If rollback is required, preserve the external metadata store and media evidence, restore the previously accepted application/configuration boundary through the reviewed handoff procedure, and verify local rolling state plus public moving video and audible audio. Never rewrite already committed blocks as part of rollback.
+
+## Remaining deferred work
+
+- Bootstrap remains intentionally unavailable through the dashboard and Operations HTTP surface.
+- Automatic deletion or retention-policy cleanup of old metadata generations is not implemented.
+- Accepted READY evidence is not automatically deleted after import.
+- The Operations helper does not receive general source/library media write authority.
+
+These are deliberate boundaries, not acceptance failures.

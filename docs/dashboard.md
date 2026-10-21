@@ -143,7 +143,7 @@ The dashboard talks to the helper only through `/run/nzyte-tv-operations/operati
 
 The Media Operations panel confirms operator intent before requesting a refresh, then polls the accepted operation without holding an HTTP request open. Refresh validates completed READY packages and writes only external metadata generations. It does not normalize media, restart the broadcaster, or rewrite the active or already committed future blocks. New eligible metadata is visible only to a newly captured future planning snapshot, subject to normal catalog, programming, Spotlight, and cooldown rules. Bootstrap is intentionally CLI/admin-only and is not exposed by the dashboard.
 
-No production B2-C activation or service/storage permission change is included in this checkpoint. Those tasks, including the trusted roots and external-mode cutover, belong to B2-D.
+Checkpoint 3B3-B2-D subsequently activated and production-accepted the B2-C media-library surface using trusted roots and external-generation metadata storage. The one-time production bootstrap was completed through trusted CLI/admin tooling; it is not exposed through the dashboard and must not be rerun.
 
 ## Security boundary
 
