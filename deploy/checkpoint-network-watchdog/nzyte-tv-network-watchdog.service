@@ -1,0 +1,27 @@
+[Unit]
+Description=NZYTE TV network recovery watchdog
+Wants=NetworkManager.service
+After=NetworkManager.service
+ConditionPathExists=/opt/nzyte-tv/production/recovery/nzyte-tv-network-watchdog.sh
+
+[Service]
+Type=oneshot
+Environment=NW_CONNECTION_NAME=g-route
+Environment=NW_INTERFACE=wlan0
+Environment=NW_STATE_DIR=/var/lib/nzyte-tv/network-watchdog
+ExecStart=/opt/nzyte-tv/production/recovery/nzyte-tv-network-watchdog.sh run
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=nzyte-tv/network-watchdog
+StateDirectoryMode=0700
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

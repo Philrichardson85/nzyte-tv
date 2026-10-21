@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the NZYTE TV network recovery watchdog
+
+[Timer]
+OnBootSec=300s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Persistent=false
+Unit=nzyte-tv-network-watchdog.service
+
+[Install]
+WantedBy=timers.target
